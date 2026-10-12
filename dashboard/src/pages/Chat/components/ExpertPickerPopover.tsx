@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { usePathVisible } from "../../../hooks/usePathVisible";
 import { Eye, EyeOff, GraduationCap, Info } from "lucide-react";
 import SearchablePickerPanel, {
   pickerStyles,
@@ -31,6 +32,7 @@ export default function ExpertPickerPopover({
 }: ExpertPickerPopoverProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const pathVisible = usePathVisible();
   const [showingHidden, setShowingHidden] = useState(false);
   const { filterVisible, pickHidden, hide, unhide, canHide } =
     useHiddenSharedExperts();
@@ -117,6 +119,7 @@ export default function ExpertPickerPopover({
           : t("chat.expertPickerManage")
       }
       footerMuted={remoteManaged}
+      hideFooter={!pathVisible("/experts")}
       onFooterClick={() => {
         if (remoteManaged) {
           message.info(t("chat.remoteExpert.manageToast"));

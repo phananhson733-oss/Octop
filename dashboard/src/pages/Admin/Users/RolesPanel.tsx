@@ -14,8 +14,10 @@ import {
   Input,
   Popconfirm,
   Segmented,
+  Select,
   Space,
   Spin,
+  Switch,
   Tag,
   Tooltip,
   Typography,
@@ -38,7 +40,9 @@ import {
   userRoleLabel,
   type UserRole,
 } from "../../../api/modules/userRoles";
+import type { OctopUser } from "../../../api/modules/auth";
 import { request } from "../../../api/request";
+import { buildNavSections } from "../../../layouts/sidebarNav";
 import { apiErrorMessage } from "../../../utils/apiError";
 import { useCardTableView } from "../../../hooks/useCardTableView";
 import { fetchFilesystemDefaults } from "../../Experts/components/agentBackendForm";
@@ -57,6 +61,32 @@ interface RoleFormValues extends PolicyFormValues {
   name: string;
   description?: string;
   permissions?: string[];
+  limit_visible_nav?: boolean;
+  /** Pages shown besides chat, which is always visible. */
+  visible_nav?: string[];
+}
+
+const HOME_NAV_KEY = "chat";
+
+/** Every sidebar page except chat, as the admin catalog lists them. */
+const VISIBLE_NAV_CHOICES = buildNavSections({ role: "admin" } as OctopUser, {
+  mobileEnabled: true,
+})
+  .flatMap((section) => section.items)
+  .filter((item) => item.key !== HOME_NAV_KEY);
+
+function rolePolicies(
+  values: RoleFormValues,
+  options: { workspaceRootAllowed: boolean },
+): { name: string; value: string }[] {
+  const policies = rolePoliciesFromForm(values, options);
+  if (values.limit_visible_nav) {
+    policies.push({
+      name: "visible_nav",
+      value: [HOME_NAV_KEY, ...(values.visible_nav ?? [])].join(","),
+    });
+  }
+  return policies;
 }
 
 export default function RolesPanel() {
@@ -145,6 +175,8 @@ export default function RolesPanel() {
           limit_workspace_root: false,
           limit_token_quota: false,
           limit_max_agents: false,
+          limit_visible_nav: false,
+          visible_nav: [],
         }
       : {
           name: editor.user_role_name,
@@ -161,6 +193,10 @@ export default function RolesPanel() {
           token_quota: editor.token_quota ?? undefined,
           limit_max_agents: editor.max_agents != null,
           max_agents: editor.max_agents ?? undefined,
+          limit_visible_nav: editor.visible_nav != null,
+          visible_nav: (editor.visible_nav ?? []).filter(
+            (key) => key !== HOME_NAV_KEY,
+          ),
         };
   const formKey =
     editor === "new" ? "new" : editor ? editor.user_role_id : "closed";
@@ -195,7 +231,7 @@ export default function RolesPanel() {
           user_role_name: values.name.trim(),
           description: values.description?.trim() || null,
           permissions: values.permissions ?? [],
-          policies: rolePoliciesFromForm(values, { workspaceRootAllowed }),
+          policies: rolePolicies(values, { workspaceRootAllowed }),
         });
         message.success(t("adminUsers.roleUpdateSuccess"));
       } else {
@@ -203,7 +239,7 @@ export default function RolesPanel() {
           user_role_name: values.name.trim(),
           description: values.description?.trim() || null,
           permissions: values.permissions ?? [],
-          policies: rolePoliciesFromForm(values, { workspaceRootAllowed }),
+          policies: rolePolicies(values, { workspaceRootAllowed }),
         });
         if (pendingAvatar) {
           await userRolesApi.uploadAvatar(created.user_role_id, pendingAvatar);
@@ -660,6 +696,46 @@ export default function RolesPanel() {
                 fsTreeRoots={fsTreeRoots}
                 workspaceRootAllowed={workspaceRootAllowed}
               />
+              <div
+                className={`${styles.createSection} ${styles.policySection}`}
+              >
+                <Form.Item
+                  label={t("adminUsers.roleVisibleNav")}
+                  extra={t("adminUsers.roleVisibleNavHint")}
+                >
+                  <Form.Item
+                    name="limit_visible_nav"
+                    valuePropName="checked"
+                    noStyle
+                  >
+                    <Switch />
+                  </Form.Item>
+                </Form.Item>
+                <Form.Item
+                  noStyle
+                  shouldUpdate={(prev, cur) =>
+                    prev.limit_visible_nav !== cur.limit_visible_nav
+                  }
+                >
+                  {({ getFieldValue }) =>
+                    getFieldValue("limit_visible_nav") ? (
+                      <Form.Item name="visible_nav">
+                        <Select
+                          mode="multiple"
+                          allowClear
+                          placeholder={t(
+                            "adminUsers.roleVisibleNavPlaceholder",
+                          )}
+                          options={VISIBLE_NAV_CHOICES.map((item) => ({
+                            value: item.key,
+                            label: t(item.labelKey),
+                          }))}
+                        />
+                      </Form.Item>
+                    ) : null
+                  }
+                </Form.Item>
+              </div>
             </>
           )}
         </Form>

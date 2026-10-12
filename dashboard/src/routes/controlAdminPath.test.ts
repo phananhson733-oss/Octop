@@ -6,7 +6,12 @@ import {
   pathPermissionKeys,
   PERM,
 } from "../utils/permissions";
-import { isWorkbenchPath, resolveSelectedKey, routeConfigs } from "./index";
+import {
+  isWorkbenchPath,
+  resolveSelectedKey,
+  routeConfigs,
+  routeNavKey,
+} from "./index";
 
 describe("pathPermissionKeys", () => {
   it("matches workbench and legacy aliases", () => {
@@ -125,5 +130,27 @@ describe("unknown dashboard paths", () => {
 
   it("are caught by the not-found route", () => {
     expect(routeConfigs.some((rc) => rc.path === "*")).toBe(true);
+  });
+});
+
+describe("routeNavKey", () => {
+  it("resolves param and splat routes to their sidebar key", () => {
+    expect(routeNavKey("/chat/:agentId/:threadId")).toBe("chat");
+    expect(routeNavKey("/personalization/*")).toBe("personalization");
+    expect(routeNavKey("/")).toBe("");
+  });
+
+  // A role's nav limit blocks routes by sidebar key, so a page without one
+  // would stay reachable by URL.
+  it("gives every lazy page a sidebar key", () => {
+    const lazyType = Symbol.for("react.lazy");
+    const unkeyed = routeConfigs
+      .filter((rc) => {
+        const type = (rc.element as { type?: { $$typeof?: symbol } } | null)
+          ?.type;
+        return type?.$$typeof === lazyType && !routeNavKey(rc.path);
+      })
+      .map((rc) => rc.path);
+    expect(unkeyed).toEqual(["/pwa-debug", "*"]);
   });
 });

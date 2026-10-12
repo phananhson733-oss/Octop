@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { usePathVisible } from "../../../hooks/usePathVisible";
 import {
   Send,
   Square,
@@ -209,6 +210,7 @@ export default function ChatInputActionsRow({
 }: ChatInputActionsRowProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const canOpenModels = usePathVisible()("/admin/models");
   const remoteManaged = Boolean(agentId?.startsWith("bridge:"));
   const skillDisplayName = useSkillDisplayName();
   const actionsRowRef = useRef<HTMLDivElement | null>(null);
@@ -541,32 +543,36 @@ export default function ChatInputActionsRow({
               );
             })}
           </div>
-          <div className={styles.modelMenuDivider} />
-          <button
-            type="button"
-            className={`${styles.modelMenuFooter} ${
-              remoteManaged ? styles.modelMenuFooterMuted : ""
-            }`}
-            onClick={() => {
-              if (remoteManaged) {
-                message.info(t("chat.remoteExpert.manageToast"));
-                return;
-              }
-              closePlusMenu();
-              navigate("/admin/models");
-            }}
-          >
-            {remoteManaged ? (
-              <Info size={15} aria-hidden />
-            ) : (
-              <Cpu size={15} aria-hidden />
-            )}
-            <span>
-              {remoteManaged
-                ? t("chat.remoteExpert.manageOnPeer")
-                : t("chat.modelPickerManage")}
-            </span>
-          </button>
+          {canOpenModels ? (
+            <>
+              <div className={styles.modelMenuDivider} />
+              <button
+                type="button"
+                className={`${styles.modelMenuFooter} ${
+                  remoteManaged ? styles.modelMenuFooterMuted : ""
+                }`}
+                onClick={() => {
+                  if (remoteManaged) {
+                    message.info(t("chat.remoteExpert.manageToast"));
+                    return;
+                  }
+                  closePlusMenu();
+                  navigate("/admin/models");
+                }}
+              >
+                {remoteManaged ? (
+                  <Info size={15} aria-hidden />
+                ) : (
+                  <Cpu size={15} aria-hidden />
+                )}
+                <span>
+                  {remoteManaged
+                    ? t("chat.remoteExpert.manageOnPeer")
+                    : t("chat.modelPickerManage")}
+                </span>
+              </button>
+            </>
+          ) : null}
         </div>
       )}
       {reasoningMenu}

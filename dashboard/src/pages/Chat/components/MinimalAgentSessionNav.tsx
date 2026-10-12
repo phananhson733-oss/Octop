@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { usePathVisible } from "../../../hooks/usePathVisible";
 import { Dropdown } from "antd";
 import type { MenuProps } from "antd";
 import {
@@ -275,6 +276,7 @@ export default function MinimalAgentSessionNav({
 }: MinimalAgentSessionNavProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const canOpenExperts = usePathVisible()("/experts");
   const [byAgent, setByAgent] = useState<Record<string, Session[]>>({});
   const [workingIds, setWorkingIds] = useState<ReadonlySet<string>>(new Set());
   const [loading, setLoading] = useState(false);
@@ -500,15 +502,17 @@ export default function MinimalAgentSessionNav({
     return (
       <div className={styles.sessionEmptyAgents}>
         <p className={styles.sessionEmptyAgentsText}>
-          {t("chat.noAgentsHint")}
+          {t(canOpenExperts ? "chat.noAgentsHint" : "chat.askAdminForExpert")}
         </p>
-        <button
-          type="button"
-          className={styles.sessionEmptyAgentsLink}
-          onClick={() => navigate("/experts")}
-        >
-          {t("chat.createExpert")}
-        </button>
+        {canOpenExperts ? (
+          <button
+            type="button"
+            className={styles.sessionEmptyAgentsLink}
+            onClick={() => navigate("/experts")}
+          >
+            {t("chat.createExpert")}
+          </button>
+        ) : null}
       </div>
     );
   }

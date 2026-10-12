@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { usePathVisible } from "../../../hooks/usePathVisible";
 import { Switch } from "antd";
 import { Info, Settings2 } from "lucide-react";
 import SearchablePickerPanel, {
@@ -29,6 +30,7 @@ export default function KnowledgePickerPopover({
 }: KnowledgePickerPopoverProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const pathVisible = usePathVisible();
   const currentUserId = useCurrentUser()?.id ?? null;
 
   const filterFn = useCallback(
@@ -58,6 +60,7 @@ export default function KnowledgePickerPopover({
           : t("chat.manageKnowledgeBases")
       }
       footerMuted={remoteManaged}
+      hideFooter={!pathVisible("/knowledge-bases")}
       onFooterClick={() => {
         if (remoteManaged) {
           message.info(t("chat.remoteExpert.manageToast"));

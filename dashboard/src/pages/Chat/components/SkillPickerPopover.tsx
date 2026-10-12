@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { usePathVisible } from "../../../hooks/usePathVisible";
 import { Check, Import, Info } from "lucide-react";
 import SearchablePickerPanel, {
   pickerStyles,
@@ -51,6 +52,7 @@ export default function SkillPickerPopover({
 }: SkillPickerPopoverProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const pathVisible = usePathVisible();
   const skillDisplayName = useSkillDisplayName();
   const activeSet = useMemo(() => {
     const set = new Set<string>();
@@ -100,6 +102,7 @@ export default function SkillPickerPopover({
           : t("skills.importSkills")
       }
       footerMuted={remoteManaged}
+      hideFooter={!pathVisible("/personalization/skills")}
       onFooterClick={() => {
         if (remoteManaged) {
           message.info(t("chat.remoteExpert.manageToast"));

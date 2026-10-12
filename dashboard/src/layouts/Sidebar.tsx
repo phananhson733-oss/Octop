@@ -529,7 +529,9 @@ export default function Sidebar({
         placement="sidebar"
         compact={isRailCollapsed}
         onBeforeOpenSettings={isMobile && !collapsed ? onToggle : undefined}
-        onCustomizeNav={() => setCustomizerOpen(true)}
+        onCustomizeNav={
+          user?.visible_nav ? undefined : () => setCustomizerOpen(true)
+        }
       />
     </div>
   );

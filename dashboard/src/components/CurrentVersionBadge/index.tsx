@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Tooltip } from "antd";
 import { useUpdateStatus } from "../../hooks/useUpdateStatus";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
-import { userCan } from "../../utils/permissions";
+import { navKeyVisible, userCan } from "../../utils/permissions";
 import styles from "./index.module.less";
 
 interface CurrentVersionBadgeProps {
@@ -21,7 +21,8 @@ export default function CurrentVersionBadge({
   const version = status?.current_version;
   if (!version) return null;
 
-  const canUpdate = userCan(user, "update");
+  const canUpdate =
+    userCan(user, "update") && navKeyVisible(user, "admin-advanced");
   const tooltip = canUpdate
     ? t("header.currentVersionAdmin", { version })
     : t("header.currentVersion", { version });

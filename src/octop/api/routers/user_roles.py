@@ -25,12 +25,15 @@ from octop.infra.users.permissions import ALL_PERMISSION_KEYS, validate_permissi
 from octop.infra.users.resource_policy import (
     POLICY_MAX_AGENTS,
     POLICY_TOKEN_QUOTA,
+    POLICY_VISIBLE_NAV,
     POLICY_WORKSPACE_ROOT_DIR,
     max_agents_of,
     normalize_max_agents,
     normalize_token_quota,
+    normalize_visible_nav,
     normalize_workspace_root_dir,
     token_quota_of,
+    visible_nav_of,
     workspace_root_dir_of,
 )
 
@@ -40,6 +43,7 @@ _KNOWN_POLICIES = {
     POLICY_WORKSPACE_ROOT_DIR,
     POLICY_TOKEN_QUOTA,
     POLICY_MAX_AGENTS,
+    POLICY_VISIBLE_NAV,
 }
 
 
@@ -98,6 +102,7 @@ def _policies_from_fields(
     workspace_root_dir: str | None,
     token_quota: int | None,
     max_agents: int | None,
+    visible_nav: str | None,
 ) -> list[tuple[str, str]]:
     items: list[tuple[str, str]] = []
     root = normalize_workspace_root_dir(workspace_root_dir)
@@ -109,6 +114,9 @@ def _policies_from_fields(
     agents = normalize_max_agents(max_agents)
     if agents is not None:
         items.append((POLICY_MAX_AGENTS, str(agents)))
+    nav = normalize_visible_nav(visible_nav)
+    if nav:
+        items.append((POLICY_VISIBLE_NAV, nav))
     return items
 
 
@@ -125,6 +133,7 @@ def _policies_from_items(items: list[PolicyItem]) -> list[tuple[str, str]]:
         workspace_root_dir=by_name.get(POLICY_WORKSPACE_ROOT_DIR),
         token_quota=token_quota_of(by_name.get(POLICY_TOKEN_QUOTA)),
         max_agents=max_agents_of(by_name.get(POLICY_MAX_AGENTS)),
+        visible_nav=by_name.get(POLICY_VISIBLE_NAV),
     )
 
 
@@ -148,6 +157,7 @@ def public_role(row: UserRoleRow, *, avatar_url: str | None = None) -> dict[str,
         workspace_root_dir = None
         token_quota = None
         max_agents = None
+        visible_nav = None
     else:
         permissions = list(row.permissions)
         system_role = "user"
@@ -155,6 +165,7 @@ def public_role(row: UserRoleRow, *, avatar_url: str | None = None) -> dict[str,
         workspace_root_dir = workspace_root_dir_of(row.policy_value(POLICY_WORKSPACE_ROOT_DIR))
         token_quota = token_quota_of(row.policy_value(POLICY_TOKEN_QUOTA))
         max_agents = max_agents_of(row.policy_value(POLICY_MAX_AGENTS))
+        visible_nav = visible_nav_of(row.policy_value(POLICY_VISIBLE_NAV))
     return {
         "user_role_id": row.user_role_id,
         "user_role_name": row.user_role_name,
@@ -167,6 +178,7 @@ def public_role(row: UserRoleRow, *, avatar_url: str | None = None) -> dict[str,
         "workspace_root_dir": workspace_root_dir,
         "token_quota": token_quota,
         "max_agents": max_agents,
+        "visible_nav": visible_nav,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
         "avatar_icon": row.avatar_icon,

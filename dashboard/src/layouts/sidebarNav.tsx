@@ -21,7 +21,7 @@ import {
   PanelsTopLeft,
 } from "lucide-react";
 import type { OctopUser } from "../api/modules/auth";
-import { navAllowed, userCan } from "../utils/permissions";
+import { navAllowed, navKeyVisible, userCan } from "../utils/permissions";
 
 export const EXPANDED_WIDTH = 220;
 export const COLLAPSED_WIDTH = 56;
@@ -312,5 +312,11 @@ export function buildNavSections(
   if (adminItems.length > 0) {
     sections.push({ id: "admin", groupKey: "nav.admin", items: adminItems });
   }
-  return sections;
+  if (!user?.visible_nav) return sections;
+  return sections
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => navKeyVisible(user, item.key)),
+    }))
+    .filter((section) => section.items.length > 0);
 }

@@ -2,6 +2,7 @@ import { Button, Result, Spin } from "antd";
 import { Settings } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { usePathVisible } from "../../../hooks/usePathVisible";
 import { OctopEmptyMascot } from "../../../components/EmptyState";
 import type { OctopAgent } from "../../../context/AgentContext";
 import {
@@ -23,6 +24,8 @@ export default function AgentNotReadyScreen({
 }: AgentNotReadyScreenProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const pathVisible = usePathVisible();
+  const canOpenExperts = pathVisible("/experts");
 
   if (loading) {
     return (
@@ -42,14 +45,18 @@ export default function AgentNotReadyScreen({
           <h1 className={styles.noAgentsEmptyTitle}>
             {t("chat.noAgentsTitle")}
           </h1>
-          <p className={styles.noAgentsEmptyHint}>{t("chat.noAgentsHint")}</p>
-          <Button
-            type="primary"
-            size="large"
-            onClick={() => navigate("/experts")}
-          >
-            {t("chat.createExpert")}
-          </Button>
+          <p className={styles.noAgentsEmptyHint}>
+            {t(canOpenExperts ? "chat.noAgentsHint" : "chat.askAdminForExpert")}
+          </p>
+          {canOpenExperts ? (
+            <Button
+              type="primary"
+              size="large"
+              onClick={() => navigate("/experts")}
+            >
+              {t("chat.createExpert")}
+            </Button>
+          ) : null}
         </div>
       </div>
     );
@@ -67,6 +74,11 @@ export default function AgentNotReadyScreen({
   const errorText = formatAgentError(agent.last_error, t);
   const isModelError = isAgentModelConfigError(agent.last_error);
   const disconnected = Boolean(agent.bridge && agent.bridge_disconnected);
+  const actionPath = disconnected
+    ? "/bridge"
+    : isModelError
+    ? "/admin/models"
+    : "/experts";
 
   let title = t("chat.agentNotRunning");
   let subTitle = t("chat.agentNotRunningHint");
@@ -111,7 +123,7 @@ export default function AgentNotReadyScreen({
         title={title}
         subTitle={subTitle}
         extra={
-          disconnected ? (
+          !pathVisible(actionPath) ? null : disconnected ? (
             <Button type="primary" onClick={() => navigate("/bridge")}>
               {t(
                 agent.bridge_inbound

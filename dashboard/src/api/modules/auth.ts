@@ -56,6 +56,8 @@ export interface OctopUser {
   locale: string;
   /** Module permission keys; admin responses include the full catalog. */
   permissions?: string[];
+  /** Sidebar nav keys the role is limited to. Null or absent means no limit. */
+  visible_nav?: string[] | null;
   sso_linked?: boolean;
   sso_kind?: string | null;
   /** Linked SSO providers (multi-identity). */

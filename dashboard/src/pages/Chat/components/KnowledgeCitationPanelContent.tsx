@@ -10,6 +10,7 @@ import { App, Tooltip } from "antd";
 import { ArrowDownToLine, ArrowUpToLine, ExternalLink } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { usePathVisible } from "../../../hooks/usePathVisible";
 
 import {
   knowledgeBasesApi,
@@ -71,6 +72,7 @@ export default function KnowledgeCitationPanelContent({
   const { t } = useTranslation();
   const { message } = App.useApp();
   const navigate = useNavigate();
+  const canOpenKnowledgeBases = usePathVisible()("/knowledge-bases");
   const textBodyRef = useRef<HTMLDivElement | null>(null);
 
   const [mode, setMode] = useState<PreviewMode>("text");
@@ -290,21 +292,30 @@ export default function KnowledgeCitationPanelContent({
             </button>
           </Tooltip>
         ) : null}
-        <Tooltip title={t("chat.citationViewInKnowledgeBase")}>
-          <button
-            type="button"
-            className={chatStyles.fileModalIconBtn}
-            onClick={openInKnowledgeBase}
-            aria-label={t("chat.citationViewInKnowledgeBase")}
-          >
-            <ExternalLink size={16} strokeWidth={2} />
-          </button>
-        </Tooltip>
+        {canOpenKnowledgeBases ? (
+          <Tooltip title={t("chat.citationViewInKnowledgeBase")}>
+            <button
+              type="button"
+              className={chatStyles.fileModalIconBtn}
+              onClick={openInKnowledgeBase}
+              aria-label={t("chat.citationViewInKnowledgeBase")}
+            >
+              <ExternalLink size={16} strokeWidth={2} />
+            </button>
+          </Tooltip>
+        ) : null}
       </>
     );
     onActionsChange(actions);
     return () => onActionsChange(null);
-  }, [canDownload, downloadOriginal, onActionsChange, openInKnowledgeBase, t]);
+  }, [
+    canDownload,
+    canOpenKnowledgeBases,
+    downloadOriginal,
+    onActionsChange,
+    openInKnowledgeBase,
+    t,
+  ]);
 
   if (loadFailed) {
     return (

@@ -58,4 +58,18 @@ describe("sidebarNav", () => {
       "admin",
     ]);
   });
+
+  it("keeps only the pages a role's nav limit lists", () => {
+    const limited = {
+      id: 2,
+      username: "dora",
+      role: "01ROLE",
+      permissions: ["channels", "knowledge_bases"],
+      visible_nav: ["chat", "knowledge-bases"],
+    } as OctopUser;
+    const sections = buildNavSections(limited, { mobileEnabled: true });
+    expect(
+      sections.map((section) => section.items.map((item) => item.key)),
+    ).toEqual([["chat"], ["knowledge-bases"]]);
+  });
 });

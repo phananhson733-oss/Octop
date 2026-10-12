@@ -22,6 +22,8 @@ interface SearchablePickerPanelProps<T> {
   footerMuted?: boolean;
   /** Optional row(s) rendered between the list and the primary footer. */
   beforeFooter?: ReactNode;
+  /** Drop the primary footer, e.g. when its target page is hidden. */
+  hideFooter?: boolean;
 }
 
 export default function SearchablePickerPanel<T>({
@@ -38,6 +40,7 @@ export default function SearchablePickerPanel<T>({
   onFooterClick,
   footerMuted = false,
   beforeFooter,
+  hideFooter = false,
 }: SearchablePickerPanelProps<T>) {
   const { query, setQuery, filtered } = useFilteredList(items, filterFn);
   const panelClass =
@@ -82,15 +85,19 @@ export default function SearchablePickerPanel<T>({
 
       {beforeFooter}
 
-      <button
-        type="button"
-        className={`${styles.footer} ${footerMuted ? styles.footerMuted : ""}`}
-        data-picker-footer=""
-        onClick={onFooterClick}
-      >
-        {footerIcon}
-        <span>{footerLabel}</span>
-      </button>
+      {hideFooter ? null : (
+        <button
+          type="button"
+          className={`${styles.footer} ${
+            footerMuted ? styles.footerMuted : ""
+          }`}
+          data-picker-footer=""
+          onClick={onFooterClick}
+        >
+          {footerIcon}
+          <span>{footerLabel}</span>
+        </button>
+      )}
     </div>
   );
 }

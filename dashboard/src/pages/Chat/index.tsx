@@ -19,7 +19,7 @@ import PlanReadyCard from "./components/PlanReadyCard";
 import { useIsMobile } from "../../hooks/useIsMobile";
 import { useHitlEnabled } from "../../hooks/useHitlEnabled";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
-import { navAllowed, userCan } from "../../utils/permissions";
+import { navAllowed, navKeyVisible, userCan } from "../../utils/permissions";
 import { useChat } from "./hooks/useChat";
 import { useSessions, fetchAndSyncSessionArtifacts } from "./hooks/useSessions";
 import * as chatStore from "./hooks/chatStore";
@@ -136,6 +136,7 @@ function ChatPageInner() {
   const isMinimalLayout = layoutMode === "minimal";
   const canTerminal = userCan(user, "terminal");
   const canConfigureModels = navAllowed(user, "models");
+  const canOpenWorkbench = navKeyVisible(user, "workbench");
   const chatHistoryRail = useChatHistoryRail();
   const [browserRecording, setBrowserRecording] = useState(false);
   const [browserRecordingId, setBrowserRecordingId] = useState<string | null>(
@@ -432,7 +433,10 @@ function ChatPageInner() {
         chromeCheckInFlightRef.current = true;
         try {
           const env = await browserApi.checkEnvStatus(resolvedAgentId);
-          if (shouldJumpToChromeInstall(env)) {
+          if (
+            shouldJumpToChromeInstall(env) &&
+            (bridgeConnectionId || canOpenWorkbench)
+          ) {
             // Peer Chromium install is not tunneled — only nudge local install UX.
             if (bridgeConnectionId) {
               showConfirmModal(
@@ -471,6 +475,7 @@ function ChatPageInner() {
     [
       browserSessionId,
       bridgeConnectionId,
+      canOpenWorkbench,
       isMobile,
       navigate,
       resolvedAgentId,

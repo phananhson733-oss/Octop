@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { usePathVisible } from "../../../hooks/usePathVisible";
 import { Switch } from "antd";
 import { Settings2 } from "lucide-react";
 import SearchablePickerPanel, {
@@ -31,6 +32,7 @@ export default function ConnectorPickerPopover({
 }: ConnectorPickerPopoverProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const pathVisible = usePathVisible();
 
   const filterFn = useCallback(
     (connector: ChatConnectorOption, query: string) =>
@@ -49,6 +51,7 @@ export default function ConnectorPickerPopover({
       width="narrow"
       footerIcon={<Settings2 size={15} aria-hidden />}
       footerLabel={t("connectors.manageConnectors")}
+      hideFooter={!pathVisible("/connectors")}
       onFooterClick={() => {
         onNavigateAway?.();
         navigate("/connectors");

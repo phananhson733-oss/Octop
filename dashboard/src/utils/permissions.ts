@@ -3,6 +3,7 @@
 export type PermissionHolder = {
   role: "admin" | "user" | string;
   permissions?: string[] | null;
+  visible_nav?: string[] | null;
 };
 
 /** Any-of module keys, or ``"admin"`` for role-only. */
@@ -105,11 +106,22 @@ export function canAccessKeys(
   return userCanAny(user, keys);
 }
 
+/** False when the role limits the sidebar and leaves ``navKey`` out. */
+export function navKeyVisible(
+  user: PermissionHolder | null | undefined,
+  navKey: string,
+): boolean {
+  const visible = user?.visible_nav;
+  return !visible || visible.includes(navKey);
+}
+
 export function navAllowed(
   user: PermissionHolder | null | undefined,
   navKey: NavPermissionKey,
 ): boolean {
-  return canAccessKeys(user, NAV_PERMISSIONS[navKey]);
+  return (
+    navKeyVisible(user, navKey) && canAccessKeys(user, NAV_PERMISSIONS[navKey])
+  );
 }
 
 export function userCanKey(

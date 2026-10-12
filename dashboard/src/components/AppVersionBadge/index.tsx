@@ -4,7 +4,7 @@ import { Tooltip } from "antd";
 import { ArrowUpCircle } from "lucide-react";
 import { useUpdateStatus } from "../../hooks/useUpdateStatus";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
-import { userCan } from "../../utils/permissions";
+import { navKeyVisible, userCan } from "../../utils/permissions";
 import styles from "./index.module.less";
 
 interface AppVersionBadgeProps {
@@ -17,7 +17,8 @@ export default function AppVersionBadge({ isMobile }: AppVersionBadgeProps) {
   const user = useCurrentUser();
   const { status, hasUpdate } = useUpdateStatus();
 
-  const canUpdate = userCan(user, "update");
+  const canUpdate =
+    userCan(user, "update") && navKeyVisible(user, "admin-advanced");
   if (!status?.current_version || !hasUpdate || !canUpdate) return null;
 
   const tooltip = t("header.versionUpdateAvailable", {

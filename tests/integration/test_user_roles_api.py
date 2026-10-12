@@ -231,6 +231,54 @@ async def test_non_admin_cannot_grant_administrator(env):
     assert denied_patch.status_code == 403, denied_patch.text
 
 
+async def test_role_visible_nav_limits_its_accounts(env):
+    c, _srv, auth = env
+    created = await c.post(
+        "/api/users/roles",
+        headers=auth,
+        json={
+            "user_role_name": "对话成员",
+            "permissions": ["knowledge_bases"],
+            "policies": [{"name": "visible_nav", "value": "knowledge-bases"}],
+        },
+    )
+    assert created.status_code == 201, created.text
+    role_id = created.json()["user_role_id"]
+    # Chat is always kept, since that is where login lands.
+    assert created.json()["visible_nav"] == ["chat", "knowledge-bases"]
+
+    unknown = await c.patch(
+        f"/api/users/roles/{role_id}",
+        headers=auth,
+        json={"policies": [{"name": "visible_nav", "value": "chat,nope"}]},
+    )
+    assert unknown.status_code == 400, unknown.text
+
+    user = await c.post(
+        "/api/users",
+        headers=auth,
+        json={"username": "dora", "password": TEST_PASSWORD, "role": role_id},
+    )
+    assert user.status_code == 201, user.text
+    dora = bearer(await login(c, username="dora", password=TEST_PASSWORD))
+
+    me = await c.get("/api/auth/me", headers=dora)
+    assert me.json()["visible_nav"] == ["chat", "knowledge-bases"]
+    # The Experts page is hidden, so the account starts with the default expert.
+    agents = await c.get("/api/agents", headers=dora)
+    assert len(agents.json()) == 1, agents.text
+
+    admin_me = await c.get("/api/auth/me", headers=auth)
+    assert admin_me.json()["visible_nav"] is None
+
+    # The role is read on each request, so one edit reaches every account in it.
+    opened = await c.patch(f"/api/users/roles/{role_id}", headers=auth, json={"policies": []})
+    assert opened.status_code == 200, opened.text
+    assert opened.json()["visible_nav"] is None
+    me = await c.get("/api/auth/me", headers=dora)
+    assert me.json()["visible_nav"] is None
+
+
 _PNG = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
     b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"

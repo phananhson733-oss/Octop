@@ -18,6 +18,8 @@ export interface UserRole {
   workspace_root_dir: string | null;
   token_quota: number | null;
   max_agents: number | null;
+  /** Sidebar nav keys the role is limited to. Null means no limit. */
+  visible_nav: string[] | null;
   created_at: number;
   updated_at: number;
   avatar_url?: string | null;

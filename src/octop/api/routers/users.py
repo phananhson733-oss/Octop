@@ -17,6 +17,7 @@ from octop.infra.users.resource_policy import (
     normalize_token_quota,
     normalize_workspace_root_dir,
     public_policy_fields,
+    role_visible_nav,
 )
 from octop.infra.utils.locale import resolve_request_locale
 
@@ -315,6 +316,12 @@ async def create_user(
         role_name=role_name,
     )
     await server.user_manager.set_resource_policy(user.username, **policy_kwargs)
+    visible_nav = role_visible_nav(server.services.db, user)
+    if visible_nav is not None and "experts" not in visible_nav:
+        # The Experts page is hidden, so this account cannot create its first expert.
+        from octop.infra.agents.experts.default_agent import try_bootstrap_default_agent
+
+        await try_bootstrap_default_agent(server, user_id=user.id, locale=user.locale)
     row = server.user_manager.get_row(user.id)
     assert row is not None
     return _row_to_dict(row, server.services.user_policy_repo.list_for_user(row.id), server)

@@ -43,6 +43,7 @@ import AskQuestionCard from "./AskQuestionCard";
 import HitlApprovalCard from "./HitlApprovalCard";
 import MessageSender, { ExpertMessageAvatar } from "./MessageSender";
 import { useCurrentUser } from "../../../hooks/useCurrentUser";
+import { usePathVisible } from "../../../hooks/usePathVisible";
 import { useAgent } from "../../../context/AgentContext";
 import {
   isTeamAgent,
@@ -549,6 +550,7 @@ function MessageBubble({
   const navigate = useNavigate();
   const serverTimezone = useServerTimezone();
   const user = useCurrentUser();
+  const pathVisible = usePathVisible();
   const { agents, activeAgent } = useAgent();
   const isTeamRoom = isTeamAgent(activeAgent);
   const speakerId =
@@ -672,7 +674,11 @@ function MessageBubble({
   const errorBodyText = isError
     ? formatChatStreamError(textContent, t)
     : textContent;
-  const errorAction = isError ? chatStreamErrorAction(textContent) : null;
+  const streamErrorAction = isError ? chatStreamErrorAction(textContent) : null;
+  const errorAction =
+    streamErrorAction && pathVisible(streamErrorAction.path)
+      ? streamErrorAction
+      : null;
   const attachments = message.attachments || [];
   const imageAttachments = attachments.filter(
     (attachment) =>

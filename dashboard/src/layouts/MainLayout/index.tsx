@@ -12,6 +12,7 @@ import { PwaAutoPrompt } from "../../components/PwaInstallPrompt";
 import {
   routeConfigs,
   resolveSelectedKey,
+  routeNavKey,
   FULLSCREEN_PATHS,
   MOBILE_FULLSCREEN_PATHS,
   SELF_HEADER_PATHS,
@@ -23,7 +24,9 @@ import { useKeyboardOffset } from "../../hooks/useKeyboardOffset";
 import { useChatSidebarOpen } from "../../pages/Chat/hooks/useChatSidebarState";
 import { EXPAND_CHAT_RAIL_EVENT } from "../../pages/Chat/components/ChatSidebarPanel";
 import RequirePermission from "../../components/RequirePermission";
-import { routeNeedsPermission } from "../../utils/permissions";
+import ForbiddenPage from "../../components/ForbiddenPage";
+import { navKeyVisible, routeNeedsPermission } from "../../utils/permissions";
+import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { useLayoutMode } from "../../context/LayoutModeContext";
 import { useDashboardPushToast } from "../../hooks/useDashboardPushToast";
 
@@ -66,7 +69,9 @@ export default function MainLayout() {
     FULLSCREEN_PATHS.has(currentPath) ||
     [...FULLSCREEN_PATHS].some((p) => currentPath.startsWith(p + "/")) ||
     (isMobile && MOBILE_FULLSCREEN_PATHS.has(currentPath));
-  const onWorkbench = isWorkbenchPath(currentPath);
+  const user = useCurrentUser();
+  const onWorkbench =
+    isWorkbenchPath(currentPath) && navKeyVisible(user, "workbench");
 
   const [collapsed, setCollapsed] = useState(() => getSavedCollapsed());
   const [chatSidebarOpen, setChatSidebarOpen] = useChatSidebarOpen();
@@ -160,6 +165,14 @@ export default function MainLayout() {
           let el = rc.useWrapper ? <ChatWithKey /> : rc.element;
           if (!rc.useWrapper && routeNeedsPermission(rc.path)) {
             el = <RequirePermission>{el}</RequirePermission>;
+          }
+          // Checked per route, not per URL, so the router's own matching
+          // (case, trailing slash) cannot slip past it. A splat route serves
+          // more than one sidebar key, so the URL's key wins when it has one.
+          const navKey =
+            (rc.path.endsWith("/*") && selectedKey) || routeNavKey(rc.path);
+          if (navKey && !navKeyVisible(user, navKey)) {
+            el = <ForbiddenPage />;
           }
           return <Route key={rc.path} path={rc.path} element={el} />;
         })}

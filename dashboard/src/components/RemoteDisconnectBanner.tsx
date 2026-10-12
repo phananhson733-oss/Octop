@@ -1,6 +1,7 @@
 import { Alert, Button } from "antd";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { usePathVisible } from "../hooks/usePathVisible";
 
 interface RemoteDisconnectBannerProps {
   connectionName?: string | null;
@@ -17,6 +18,7 @@ export default function RemoteDisconnectBanner({
 }: RemoteDisconnectBannerProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const canOpenBridge = usePathVisible()("/bridge");
   const name = (connectionName ?? "").trim();
   const hint = inbound
     ? name
@@ -32,13 +34,15 @@ export default function RemoteDisconnectBanner({
       message={t("chat.remoteExpert.disconnectedTitle")}
       description={hint}
       action={
-        <Button size="small" onClick={() => navigate("/bridge")}>
-          {t(
-            inbound
-              ? "chat.remoteExpert.openBridge"
-              : "chat.remoteExpert.reconnect",
-          )}
-        </Button>
+        canOpenBridge ? (
+          <Button size="small" onClick={() => navigate("/bridge")}>
+            {t(
+              inbound
+                ? "chat.remoteExpert.openBridge"
+                : "chat.remoteExpert.reconnect",
+            )}
+          </Button>
+        ) : null
       }
       style={{ marginBottom: 12, ...style }}
     />

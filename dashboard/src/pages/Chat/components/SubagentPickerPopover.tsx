@@ -1,6 +1,7 @@
 import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { usePathVisible } from "../../../hooks/usePathVisible";
 import { Bot, Info } from "lucide-react";
 import SearchablePickerPanel, {
   pickerStyles,
@@ -26,6 +27,7 @@ export default function SubagentPickerPopover({
 }: SubagentPickerPopoverProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const pathVisible = usePathVisible();
 
   const filterFn = useCallback(
     (subagent: AgentSubagentSummary, query: string) =>
@@ -55,6 +57,7 @@ export default function SubagentPickerPopover({
           : t("chat.subagentPickerManage")
       }
       footerMuted={remoteManaged}
+      hideFooter={!pathVisible("/personalization/subagents")}
       onFooterClick={() => {
         if (remoteManaged) {
           message.info(t("chat.remoteExpert.manageToast"));

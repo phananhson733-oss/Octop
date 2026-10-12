@@ -1,6 +1,7 @@
 import { memo, useCallback, useMemo, useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
+import { usePathVisible } from "../../../hooks/usePathVisible";
 import { Dropdown } from "antd";
 import type { MenuProps } from "antd";
 import {
@@ -532,6 +533,7 @@ export default function SessionList({
 }: SessionListProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  const canOpenExperts = usePathVisible()("/experts");
   const [searchQuery, setSearchQuery] = useState("");
   const [showingHidden, setShowingHidden] = useState(false);
   const { filterVisible, pickHidden, hide, unhide, canHide } =
@@ -587,15 +589,17 @@ export default function SessionList({
       {agents.length === 0 ? (
         <div className={styles.sessionEmptyAgents}>
           <p className={styles.sessionEmptyAgentsText}>
-            {t("chat.noAgentsHint")}
+            {t(canOpenExperts ? "chat.noAgentsHint" : "chat.askAdminForExpert")}
           </p>
-          <button
-            type="button"
-            className={styles.sessionEmptyAgentsLink}
-            onClick={() => navigate("/experts")}
-          >
-            {t("chat.createExpert")}
-          </button>
+          {canOpenExperts ? (
+            <button
+              type="button"
+              className={styles.sessionEmptyAgentsLink}
+              onClick={() => navigate("/experts")}
+            >
+              {t("chat.createExpert")}
+            </button>
+          ) : null}
         </div>
       ) : (
         <div className={styles.sessionItems}>

@@ -7,6 +7,7 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.users.preferences import SIDEBAR_NAV_KEYS
 from octop.infra.utils.host_dirs import (
     assert_backend_root_dirs_allowed,
     assert_safe_host_path,
@@ -18,6 +19,9 @@ from octop.infra.utils.host_dirs import (
 POLICY_WORKSPACE_ROOT_DIR = "workspace_root_dir"
 POLICY_TOKEN_QUOTA = "token_quota"
 POLICY_MAX_AGENTS = "max_agents"
+# Read from the role template on each request. A per-user copy is not consulted.
+POLICY_VISIBLE_NAV = "visible_nav"
+_HOME_NAV_KEY = "chat"
 
 
 def active_policy_value(row: Any) -> str | None:
@@ -89,6 +93,31 @@ def max_agents_of(raw: Any) -> int | None:
         return None
 
 
+def visible_nav_of(raw: Any) -> list[str] | None:
+    """Sidebar nav keys a role is limited to, or ``None`` when unrestricted."""
+    text = active_policy_value(raw)
+    if text is None:
+        return None
+    keys = [key for key in (part.strip() for part in text.split(",")) if key in SIDEBAR_NAV_KEYS]
+    return keys or None
+
+
+def role_visible_nav(db: Any, user: Any) -> list[str] | None:
+    """Dashboard pages the user's role template limits them to.
+
+    ``None`` means every page the permissions allow. This hides pages in the
+    dashboard only; API access still follows permissions. Admin is never limited.
+    """
+    if user.is_admin:
+        return None
+    from octop.infra.db.repos.user_roles import UserRoleRepo
+
+    role = UserRoleRepo(db).get(str(user.role))
+    if role is None:
+        return None
+    return visible_nav_of(role.policy_value(POLICY_VISIBLE_NAV))
+
+
 def public_policy_fields(rows: Sequence[Any] | Mapping[str, str] | None) -> dict[str, Any]:
     """HTTP-facing subset of known policies (disabled / missing = unlimited)."""
     by_name: dict[str, str] = {}
@@ -155,6 +184,20 @@ def normalize_max_agents(raw: int | None) -> int | None:
     if limit < 0:
         raise OctopError(ErrorCode.FORBIDDEN, "max agents must be >= 0", status=400)
     return limit
+
+
+def normalize_visible_nav(raw: str | None) -> str | None:
+    """Return comma-joined nav keys, or ``None`` when unrestricted.
+
+    ``chat`` is always kept, since that is where login lands.
+    """
+    if raw is None or not raw.strip():
+        return None
+    keys = [part.strip() for part in raw.split(",") if part.strip()]
+    unknown = sorted(set(keys) - SIDEBAR_NAV_KEYS)
+    if unknown:
+        raise OctopError(ErrorCode.FORBIDDEN, f"unknown nav keys: {unknown}", status=400)
+    return ",".join(dict.fromkeys([_HOME_NAV_KEY, *keys]))
 
 
 def assert_backend_within_user_root(backend: Any, allowed_root: str | None) -> None:
