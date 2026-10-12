@@ -21,6 +21,8 @@ POLICY_TOKEN_QUOTA = "token_quota"
 POLICY_MAX_AGENTS = "max_agents"
 # Read from the role template on each request. A per-user copy is not consulted.
 POLICY_VISIBLE_NAV = "visible_nav"
+# Read from the role template when an account's first expert is created.
+POLICY_DEFAULT_KNOWLEDGE_BASES = "default_knowledge_bases"
 _HOME_NAV_KEY = "chat"
 
 
@@ -118,6 +120,27 @@ def role_visible_nav(db: Any, user: Any) -> list[str] | None:
     return visible_nav_of(role.policy_value(POLICY_VISIBLE_NAV))
 
 
+def default_knowledge_bases_of(raw: Any) -> list[str]:
+    """Knowledge-base ids a role puts on its accounts' first expert."""
+    text = active_policy_value(raw)
+    if text is None:
+        return []
+    return list(dict.fromkeys(part.strip() for part in text.split(",") if part.strip()))
+
+
+def role_default_knowledge_bases(db: Any, role_id: str) -> list[str]:
+    """Knowledge bases the role template *role_id* puts on a first expert.
+
+    The ids are as stored; the caller keeps the ones the account can see.
+    """
+    from octop.infra.db.repos.user_roles import UserRoleRepo
+
+    role = UserRoleRepo(db).get(role_id)
+    if role is None or role.is_admin:
+        return []
+    return default_knowledge_bases_of(role.policy_value(POLICY_DEFAULT_KNOWLEDGE_BASES))
+
+
 def public_policy_fields(rows: Sequence[Any] | Mapping[str, str] | None) -> dict[str, Any]:
     """HTTP-facing subset of known policies (disabled / missing = unlimited)."""
     by_name: dict[str, str] = {}
@@ -198,6 +221,10 @@ def normalize_visible_nav(raw: str | None) -> str | None:
     if unknown:
         raise OctopError(ErrorCode.FORBIDDEN, f"unknown nav keys: {unknown}", status=400)
     return ",".join(dict.fromkeys([_HOME_NAV_KEY, *keys]))
+
+
+def normalize_default_knowledge_bases(raw: str | None) -> str | None:
+    return ",".join(default_knowledge_bases_of(raw)) or None
 
 
 def assert_backend_within_user_root(backend: Any, allowed_root: str | None) -> None:

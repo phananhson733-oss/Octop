@@ -41,6 +41,10 @@ import {
   type UserRole,
 } from "../../../api/modules/userRoles";
 import type { OctopUser } from "../../../api/modules/auth";
+import {
+  knowledgeBasesApi,
+  type KnowledgeBase,
+} from "../../../api/modules/knowledgeBases";
 import { request } from "../../../api/request";
 import { buildNavSections } from "../../../layouts/sidebarNav";
 import { apiErrorMessage } from "../../../utils/apiError";
@@ -64,6 +68,7 @@ interface RoleFormValues extends PolicyFormValues {
   limit_visible_nav?: boolean;
   /** Pages shown besides chat, which is always visible. */
   visible_nav?: string[];
+  default_knowledge_bases?: string[];
 }
 
 const HOME_NAV_KEY = "chat";
@@ -86,6 +91,12 @@ function rolePolicies(
       value: [HOME_NAV_KEY, ...(values.visible_nav ?? [])].join(","),
     });
   }
+  if (values.default_knowledge_bases?.length) {
+    policies.push({
+      name: "default_knowledge_bases",
+      value: values.default_knowledge_bases.join(","),
+    });
+  }
   return policies;
 }
 
@@ -96,6 +107,7 @@ export default function RolesPanel() {
   const [permCatalog, setPermCatalog] = useState<PermissionCatalogItem[]>([]);
   const [fsTreeRoots, setFsTreeRoots] = useState<string[]>([HOST_FS_ROOT]);
   const [workspaceRootAllowed, setWorkspaceRootAllowed] = useState(true);
+  const [sharedBases, setSharedBases] = useState<KnowledgeBase[]>([]);
   const [editor, setEditor] = useState<UserRole | "new" | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm<RoleFormValues>();
@@ -127,6 +139,10 @@ export default function RolesPanel() {
     request<PermissionCatalogItem[]>("/users/permissions")
       .then(setPermCatalog)
       .catch(() => setPermCatalog([]));
+    knowledgeBasesApi
+      .list()
+      .then((bases) => setSharedBases(bases.filter((base) => base.shared)))
+      .catch(() => setSharedBases([]));
     fetchFilesystemDefaults()
       .then((defaults) => {
         setFsTreeRoots(
@@ -177,6 +193,7 @@ export default function RolesPanel() {
           limit_max_agents: false,
           limit_visible_nav: false,
           visible_nav: [],
+          default_knowledge_bases: [],
         }
       : {
           name: editor.user_role_name,
@@ -197,6 +214,7 @@ export default function RolesPanel() {
           visible_nav: (editor.visible_nav ?? []).filter(
             (key) => key !== HOME_NAV_KEY,
           ),
+          default_knowledge_bases: editor.default_knowledge_bases ?? [],
         };
   const formKey =
     editor === "new" ? "new" : editor ? editor.user_role_id : "closed";
@@ -734,6 +752,23 @@ export default function RolesPanel() {
                       </Form.Item>
                     ) : null
                   }
+                </Form.Item>
+                <Form.Item
+                  label={t("adminUsers.roleDefaultKnowledgeBases")}
+                  name="default_knowledge_bases"
+                  extra={t("adminUsers.roleDefaultKnowledgeBasesHint")}
+                >
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    placeholder={t(
+                      "adminUsers.roleDefaultKnowledgeBasesPlaceholder",
+                    )}
+                    options={sharedBases.map((base) => ({
+                      value: base.id,
+                      label: base.name,
+                    }))}
+                  />
                 </Form.Item>
               </div>
             </>

@@ -14,6 +14,7 @@ from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.users.resource_policy import (
     POLICY_WORKSPACE_ROOT_DIR,
     effective_workspace_root_dir,
+    role_default_knowledge_bases,
 )
 from octop.infra.utils.host_dirs import host_fs_tree_root
 from octop.infra.utils.locale import normalize_locale
@@ -45,6 +46,18 @@ def user_policy_workspace_root(server: Any, user_id: int) -> str | None:
     )
 
 
+def role_knowledge_base_ids(server: Any, user_id: int) -> list[str] | None:
+    """Knowledge bases the user's role puts on a first expert, when still visible."""
+    user = server.services.user_repo.get(user_id)
+    if user is None:
+        return None
+    wanted = role_default_knowledge_bases(server.services.db, str(user.role))
+    if not wanted:
+        return None
+    visible = {base.id for base in server.services.knowledge_repo.list_visible(user_id)}
+    return [kb_id for kb_id in wanted if kb_id in visible] or None
+
+
 async def bootstrap_default_agent(
     registry: Any,
     catalog: ExpertCatalog | None,
@@ -53,6 +66,7 @@ async def bootstrap_default_agent(
     locale: str = "zh",
     agent_id: str | None = None,
     root_dir: str | None = None,
+    knowledge_base_ids: list[str] | None = None,
 ) -> Any | None:
     """Create ``general-assistant`` for *user_id* when they have no agents yet.
 
@@ -79,6 +93,7 @@ async def bootstrap_default_agent(
         agent_id=agent_id,
         locale=loc,
         config_extra={"backend": default_home_local_backend(root_dir=root_dir)},
+        knowledge_base_ids=knowledge_base_ids,
     )
     return await registry.create(spec, defer_bootstrap=True)
 
@@ -102,6 +117,7 @@ async def try_bootstrap_default_agent(
             locale=locale,
             agent_id=agent_id,
             root_dir=user_policy_workspace_root(server, user_id),
+            knowledge_base_ids=role_knowledge_base_ids(server, user_id),
         )
     except Exception as exc:  # pragma: no cover - logged; user creation should still succeed
         logger.warning("could not auto-create default agent for user %s: %s", user_id, exc)

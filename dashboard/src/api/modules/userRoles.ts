@@ -20,6 +20,8 @@ export interface UserRole {
   max_agents: number | null;
   /** Sidebar nav keys the role is limited to. Null means no limit. */
   visible_nav: string[] | null;
+  /** Shared knowledge bases put on a new account's first expert. */
+  default_knowledge_bases?: string[];
   created_at: number;
   updated_at: number;
   avatar_url?: string | null;

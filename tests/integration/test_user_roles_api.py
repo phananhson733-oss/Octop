@@ -279,6 +279,56 @@ async def test_role_visible_nav_limits_its_accounts(env):
     assert me.json()["visible_nav"] is None
 
 
+async def test_role_default_knowledge_bases_reach_the_first_expert(env):
+    c, srv, auth = env
+    admin_id = (await c.get("/api/auth/me", headers=auth)).json()["id"]
+    repo = srv.services.knowledge_repo
+    shared = repo.create_base(owner_user_id=admin_id, name="Shared", shared=True)
+    private = repo.create_base(owner_user_id=admin_id, name="Private", shared=False)
+
+    created = await c.post(
+        "/api/users/roles",
+        headers=auth,
+        json={
+            "user_role_name": "选剧成员",
+            "permissions": ["knowledge_bases"],
+            "policies": [
+                {"name": "visible_nav", "value": "chat"},
+                # A base the account cannot see, or one deleted since, is left out.
+                {"name": "default_knowledge_bases", "value": f"{shared.id},{private.id},gone"},
+            ],
+        },
+    )
+    assert created.status_code == 201, created.text
+    role = created.json()
+    assert role["default_knowledge_bases"] == [shared.id, private.id, "gone"]
+
+    user = await c.post(
+        "/api/users",
+        headers=auth,
+        json={"username": "erin", "password": TEST_PASSWORD, "role": role["user_role_id"]},
+    )
+    assert user.status_code == 201, user.text
+    erin = bearer(await login(c, username="erin", password=TEST_PASSWORD))
+    agents = (await c.get("/api/agents", headers=erin)).json()
+    assert [agent["knowledge_base_ids"] for agent in agents] == [[shared.id]]
+
+    invite = await c.post("/api/users/invites", headers=auth, json={"role": role["user_role_id"]})
+    assert invite.status_code == 201, invite.text
+    redeem = await c.post(
+        "/api/auth/invite/redeem",
+        json={"code": invite.json()["code"], "username": "finn", "password": TEST_PASSWORD},
+    )
+    assert redeem.status_code == 200, redeem.text
+    finn = bearer(redeem.json()["access_token"])
+    agents = (await c.get("/api/agents", headers=finn)).json()
+    assert [agent["knowledge_base_ids"] for agent in agents] == [[shared.id]]
+
+    listed = await c.get("/api/users/roles", headers=auth)
+    by_id = {item["user_role_id"]: item for item in listed.json()}
+    assert by_id["admin"]["default_knowledge_bases"] == []
+
+
 _PNG = (
     b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01"
     b"\x08\x06\x00\x00\x00\x1f\x15\xc4\x89\x00\x00\x00\nIDATx\x9cc\x00\x01"

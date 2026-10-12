@@ -23,11 +23,14 @@ from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.users.identity import User
 from octop.infra.users.permissions import ALL_PERMISSION_KEYS, validate_permission_keys
 from octop.infra.users.resource_policy import (
+    POLICY_DEFAULT_KNOWLEDGE_BASES,
     POLICY_MAX_AGENTS,
     POLICY_TOKEN_QUOTA,
     POLICY_VISIBLE_NAV,
     POLICY_WORKSPACE_ROOT_DIR,
+    default_knowledge_bases_of,
     max_agents_of,
+    normalize_default_knowledge_bases,
     normalize_max_agents,
     normalize_token_quota,
     normalize_visible_nav,
@@ -44,6 +47,7 @@ _KNOWN_POLICIES = {
     POLICY_TOKEN_QUOTA,
     POLICY_MAX_AGENTS,
     POLICY_VISIBLE_NAV,
+    POLICY_DEFAULT_KNOWLEDGE_BASES,
 }
 
 
@@ -103,6 +107,7 @@ def _policies_from_fields(
     token_quota: int | None,
     max_agents: int | None,
     visible_nav: str | None,
+    default_knowledge_bases: str | None,
 ) -> list[tuple[str, str]]:
     items: list[tuple[str, str]] = []
     root = normalize_workspace_root_dir(workspace_root_dir)
@@ -117,6 +122,9 @@ def _policies_from_fields(
     nav = normalize_visible_nav(visible_nav)
     if nav:
         items.append((POLICY_VISIBLE_NAV, nav))
+    bases = normalize_default_knowledge_bases(default_knowledge_bases)
+    if bases:
+        items.append((POLICY_DEFAULT_KNOWLEDGE_BASES, bases))
     return items
 
 
@@ -134,6 +142,7 @@ def _policies_from_items(items: list[PolicyItem]) -> list[tuple[str, str]]:
         token_quota=token_quota_of(by_name.get(POLICY_TOKEN_QUOTA)),
         max_agents=max_agents_of(by_name.get(POLICY_MAX_AGENTS)),
         visible_nav=by_name.get(POLICY_VISIBLE_NAV),
+        default_knowledge_bases=by_name.get(POLICY_DEFAULT_KNOWLEDGE_BASES),
     )
 
 
@@ -158,6 +167,7 @@ def public_role(row: UserRoleRow, *, avatar_url: str | None = None) -> dict[str,
         token_quota = None
         max_agents = None
         visible_nav = None
+        default_knowledge_bases: list[str] = []
     else:
         permissions = list(row.permissions)
         system_role = "user"
@@ -166,6 +176,9 @@ def public_role(row: UserRoleRow, *, avatar_url: str | None = None) -> dict[str,
         token_quota = token_quota_of(row.policy_value(POLICY_TOKEN_QUOTA))
         max_agents = max_agents_of(row.policy_value(POLICY_MAX_AGENTS))
         visible_nav = visible_nav_of(row.policy_value(POLICY_VISIBLE_NAV))
+        default_knowledge_bases = default_knowledge_bases_of(
+            row.policy_value(POLICY_DEFAULT_KNOWLEDGE_BASES)
+        )
     return {
         "user_role_id": row.user_role_id,
         "user_role_name": row.user_role_name,
@@ -179,6 +192,7 @@ def public_role(row: UserRoleRow, *, avatar_url: str | None = None) -> dict[str,
         "token_quota": token_quota,
         "max_agents": max_agents,
         "visible_nav": visible_nav,
+        "default_knowledge_bases": default_knowledge_bases,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
         "avatar_icon": row.avatar_icon,
