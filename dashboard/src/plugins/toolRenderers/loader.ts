@@ -2,6 +2,7 @@ import { getApiUrl } from "../../api/config";
 import { getAuthToken } from "../../api/request";
 import type { InstalledPlugin } from "../../api/modules/plugins";
 import { createPluginUiHost } from "./host";
+import { exposeReactGlobals } from "./reactGlobals";
 import { unregisterPluginRenderers } from "./registry";
 import { unregisterWorkbenchPages } from "../workbenchPages/registry";
 import type { PluginUiModule } from "./types";
@@ -60,6 +61,9 @@ let loading: Promise<void> = Promise.resolve();
 export function loadInstalledPluginUis(
   plugins: InstalledPlugin[],
 ): Promise<void> {
+  // A plugin module reads React off window as it is evaluated, and the layout
+  // can get here before the chat page has registered the builtin renderers.
+  exposeReactGlobals();
   loading = loading.then(async () => {
     for (const plugin of plugins) {
       if (plugin.error || !plugin.ui?.entry) continue;

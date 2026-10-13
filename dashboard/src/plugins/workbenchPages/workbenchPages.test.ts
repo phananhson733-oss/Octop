@@ -7,6 +7,7 @@ import {
   workbenchPageTitle,
 } from "./registry";
 import { workbenchAccess, workbenchTabOf } from "./access";
+import { loadInstalledPluginUis } from "../toolRenderers/loader";
 
 const Page = () => null;
 const member = { role: "user", permissions: [] as string[] };
@@ -122,5 +123,14 @@ describe("workbenchAccess", () => {
       "deny",
     );
     expect(workbenchAccess(null, "/workbench", [], true)).toBe("pending");
+  });
+});
+
+describe("plugin UI loader", () => {
+  it("exposes React before any plugin module can be evaluated", async () => {
+    // The layout loads plugin UIs on pages where the chat page never mounts.
+    delete window.__OCTOP_REACT__;
+    await loadInstalledPluginUis([]);
+    expect(window.__OCTOP_REACT__?.createElement).toBeTypeOf("function");
   });
 });
