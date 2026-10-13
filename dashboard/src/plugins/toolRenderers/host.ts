@@ -6,6 +6,7 @@ import {
   parseOctopToolOutput,
 } from "./parseToolOutput";
 import { registerToolRenderer } from "./registry";
+import { registerWorkbenchPage } from "../workbenchPages/registry";
 import type {
   OctopPluginUIHost,
   ToolRenderContext,
@@ -74,6 +75,12 @@ function createHost(defaultPluginId: string): OctopPluginUIHost {
     },
     closeSidePanel(callId) {
       dockHandlers.closeSidePanel?.(callId);
+    },
+    registerWorkbenchPage(reg) {
+      registerWorkbenchPage({
+        ...reg,
+        pluginId: reg.pluginId ?? defaultPluginId,
+      });
     },
   };
 }

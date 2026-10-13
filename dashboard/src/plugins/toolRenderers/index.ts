@@ -35,4 +35,6 @@ export type {
   ToolRenderProps,
   ToolRendererRegistration,
   ToolRenderStatus,
+  WorkbenchPageProps,
+  WorkbenchPageRegistration,
 } from "./types";

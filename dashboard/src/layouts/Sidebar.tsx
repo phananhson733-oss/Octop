@@ -37,6 +37,7 @@ import { sectionsFromLayout, type SidebarNavLayout } from "./sidebarNavLayout";
 import SidebarNavCustomizer from "./SidebarNavCustomizer";
 import styles from "./Sidebar.module.less";
 import { typeSize } from "../utils/mobileTypeScale";
+import { useWorkbenchPages } from "../plugins/workbenchPages";
 import { DESKTOP_DRAG_REGION_CLASS } from "../utils/desktopChrome";
 
 const NAV_GROUPS_STORAGE_KEY = "octop:sidebar-nav-groups";
@@ -394,9 +395,10 @@ export default function Sidebar({
   const { layoutMode, minimalPane, setMinimalPane } = useLayoutMode();
   const isMinimal = layoutMode === "minimal";
   const onChatPath = isChatPath(location.pathname);
+  const workbenchPluginPages = useWorkbenchPages().length > 0;
   const catalog = useMemo(
-    () => buildNavSections(user, { mobileEnabled }),
-    [user, mobileEnabled],
+    () => buildNavSections(user, { mobileEnabled, workbenchPluginPages }),
+    [user, mobileEnabled, workbenchPluginPages],
   );
   const [savedLayout, setSavedLayout] = useState<SidebarNavLayout | null>(null);
   const [customizerOpen, setCustomizerOpen] = useState(false);

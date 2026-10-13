@@ -24,6 +24,8 @@ import { useKeyboardOffset } from "../../hooks/useKeyboardOffset";
 import { useChatSidebarOpen } from "../../pages/Chat/hooks/useChatSidebarState";
 import { EXPAND_CHAT_RAIL_EVENT } from "../../pages/Chat/components/ChatSidebarPanel";
 import RequirePermission from "../../components/RequirePermission";
+import WorkbenchGate from "../../pages/Control/Workbench/WorkbenchGate";
+import { useInstalledPluginUis } from "../../plugins/workbenchPages";
 import ForbiddenPage from "../../components/ForbiddenPage";
 import { navKeyVisible, routeNeedsPermission } from "../../utils/permissions";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
@@ -70,6 +72,7 @@ export default function MainLayout() {
     [...FULLSCREEN_PATHS].some((p) => currentPath.startsWith(p + "/")) ||
     (isMobile && MOBILE_FULLSCREEN_PATHS.has(currentPath));
   const user = useCurrentUser();
+  useInstalledPluginUis(user !== null);
   const onWorkbench =
     isWorkbenchPath(currentPath) && navKeyVisible(user, "workbench");
 
@@ -324,11 +327,11 @@ export default function MainLayout() {
                       flexDirection: "column",
                     }}
                   >
-                    <RequirePermission>
+                    <WorkbenchGate>
                       <Suspense fallback={<PageLoading />}>
                         <WorkbenchPage isVisible={onWorkbench} />
                       </Suspense>
-                    </RequirePermission>
+                    </WorkbenchGate>
                   </div>
                 )}
 

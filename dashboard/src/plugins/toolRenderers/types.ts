@@ -53,6 +53,28 @@ export interface ToolRendererRegistration {
   component: ComponentType<ToolRenderProps>;
 }
 
+/** Plain text, or one label per language (``zh`` / ``en``). */
+export type WorkbenchPageTitle = string | Record<string, string>;
+
+export interface WorkbenchPageProps {
+  pluginId: string;
+  pageId: string;
+  host: OctopPluginUIHost;
+  /** False while another Workbench tab or another route is showing. */
+  isVisible: boolean;
+}
+
+/** A full-width page a plugin adds to the Workbench as its own tab. */
+export interface WorkbenchPageRegistration {
+  /** Plugin-local page id; with the plugin id it forms the URL segment. */
+  id: string;
+  pluginId: string;
+  title: WorkbenchPageTitle;
+  /** Shown under the page title while this tab is active. */
+  description?: WorkbenchPageTitle;
+  component: ComponentType<WorkbenchPageProps>;
+}
+
 export interface OpenSidePanelOptions {
   callId: string;
   title?: string;
@@ -72,6 +94,13 @@ export interface OctopPluginUIHost {
   openSidePanel(opts: OpenSidePanelOptions): void;
   /** Close the side dock tab for this tool call, if open. */
   closeSidePanel(callId: string): void;
+  /**
+   * Add a tab to the Workbench that renders ``component`` full width. It has
+   * no tool call behind it: the page gets its data through ``request``.
+   */
+  registerWorkbenchPage(
+    reg: Omit<WorkbenchPageRegistration, "pluginId"> & { pluginId?: string },
+  ): void;
 }
 
 /** Shape expected from ``ui/dist/index.js``. */

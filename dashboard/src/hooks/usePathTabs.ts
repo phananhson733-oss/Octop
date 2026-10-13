@@ -9,6 +9,12 @@ export interface UsePathTabsOptions<T extends string> {
   defaultTab: T;
   /** When set, saved/bare fallback only uses allowed tabs. Disallowed URLs stay. */
   isAllowed?: (tab: T) => boolean;
+  /**
+   * False while ``tabs`` is still filling in (tabs registered by plugins).
+   * Until it turns true nothing is redirected and no fallback tab is mounted,
+   * so a URL for a tab that has not registered yet survives the wait.
+   */
+  ready?: boolean;
 }
 
 export interface UsePathTabsResult<T extends string> {
@@ -32,6 +38,7 @@ export function usePathTabs<T extends string>({
   storageKey,
   defaultTab,
   isAllowed,
+  ready = true,
 }: UsePathTabsOptions<T>): UsePathTabsResult<T> {
   const location = useLocation();
   const navigate = useNavigate();
@@ -72,19 +79,24 @@ export function usePathTabs<T extends string>({
   const hasInvalidSegment = underBase && !isBare && pathTab === null;
   const activeTab: T = pathTab ?? readSaved();
 
+  // On a bare or unknown URL the tab shown is only a guess until ``ready``.
+  const tabKnown = ready || pathTab !== null;
+
   const [mounted, setMounted] = useState<Partial<Record<T, boolean>>>(
-    () => ({ [activeTab]: true }) as Partial<Record<T, boolean>>,
+    () =>
+      (tabKnown ? { [activeTab]: true } : {}) as Partial<Record<T, boolean>>,
   );
 
   // Canonicalize bare base path and unknown tab segments onto a real tab URL.
   useEffect(() => {
-    if (!underBase) return;
+    if (!underBase || !ready) return;
     if (!isBare && !hasInvalidSegment) return;
     navigate(`${basePath}/${readSaved()}${location.search}${location.hash}`, {
       replace: true,
     });
   }, [
     underBase,
+    ready,
     isBare,
     hasInvalidSegment,
     location.search,
@@ -104,10 +116,11 @@ export function usePathTabs<T extends string>({
   }, [pathTab, storageKey]);
 
   useEffect(() => {
+    if (!tabKnown) return;
     setMounted((prev) =>
       prev[activeTab] ? prev : { ...prev, [activeTab]: true },
     );
-  }, [activeTab]);
+  }, [activeTab, tabKnown]);
 
   const handleTabChange = useCallback(
     (value: string | number) => {

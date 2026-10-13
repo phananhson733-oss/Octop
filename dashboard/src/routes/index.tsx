@@ -130,6 +130,8 @@ export const routeConfigs: RouteConfig[] = [
   { path: "/workbench", element: null },
   { path: "/workbench/terminal", element: null },
   { path: "/workbench/browser", element: null },
+  // Tabs added by plugins (``/workbench/<plugin>.<page>``).
+  { path: "/workbench/:tab", element: null },
   {
     path: "/terminal",
     element: <RedirectPreserveSearch to="/workbench/terminal" />,

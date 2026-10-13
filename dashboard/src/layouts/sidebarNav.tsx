@@ -133,7 +133,11 @@ export function isGroupedNavKey(key: string): boolean {
 
 export function buildNavSections(
   user: OctopUser | null,
-  opts?: { mobileEnabled?: boolean },
+  opts?: {
+    mobileEnabled?: boolean;
+    /** A plugin added a Workbench page: every account that may see the entry gets it. */
+    workbenchPluginPages?: boolean;
+  },
 ): NavSection[] {
   const sections: NavSection[] = [
     {
@@ -223,7 +227,10 @@ export function buildNavSections(
   }
 
   const controlItems: NavItem[] = [];
-  if (navAllowed(user, "workbench")) {
+  if (
+    navAllowed(user, "workbench") ||
+    (opts?.workbenchPluginPages && navKeyVisible(user, "workbench"))
+  ) {
     controlItems.push({
       key: "workbench",
       path: "/workbench",

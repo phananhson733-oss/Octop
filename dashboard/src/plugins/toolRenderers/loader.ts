@@ -3,6 +3,7 @@ import { getAuthToken } from "../../api/request";
 import type { InstalledPlugin } from "../../api/modules/plugins";
 import { createPluginUiHost } from "./host";
 import { unregisterPluginRenderers } from "./registry";
+import { unregisterWorkbenchPages } from "../workbenchPages/registry";
 import type { PluginUiModule } from "./types";
 
 const loadedPlugins = new Set<string>();
@@ -49,22 +50,32 @@ function runSetup(mod: PluginUiModule, pluginId: string): void {
   }
 }
 
-/** Load UI modules for installed plugins that declare ``ui.entry``. */
-export async function loadInstalledPluginUis(
+let loading: Promise<void> = Promise.resolve();
+
+/**
+ * Load UI modules for installed plugins that declare ``ui.entry``.
+ * Calls queue behind each other: the layout and the chat page both ask on
+ * startup, and the second one must find the first one's work done.
+ */
+export function loadInstalledPluginUis(
   plugins: InstalledPlugin[],
 ): Promise<void> {
-  for (const plugin of plugins) {
-    if (plugin.error || !plugin.ui?.entry) continue;
-    if (loadedPlugins.has(plugin.id)) continue;
-    try {
-      const mod = await importPluginEsm(plugin.id, plugin.ui.entry);
-      unregisterPluginRenderers(plugin.id);
-      runSetup(mod, plugin.id);
-      loadedPlugins.add(plugin.id);
-    } catch (err) {
-      console.warn(`[plugin-ui] failed to load ${plugin.id}:`, err);
+  loading = loading.then(async () => {
+    for (const plugin of plugins) {
+      if (plugin.error || !plugin.ui?.entry) continue;
+      if (loadedPlugins.has(plugin.id)) continue;
+      try {
+        const mod = await importPluginEsm(plugin.id, plugin.ui.entry);
+        unregisterPluginRenderers(plugin.id);
+        unregisterWorkbenchPages(plugin.id);
+        runSetup(mod, plugin.id);
+        loadedPlugins.add(plugin.id);
+      } catch (err) {
+        console.warn(`[plugin-ui] failed to load ${plugin.id}:`, err);
+      }
     }
-  }
+  });
+  return loading;
 }
 
 /**
@@ -82,6 +93,7 @@ export async function reloadPluginToolUis(
 export function resetPluginUiLoader(): void {
   for (const id of loadedPlugins) {
     unregisterPluginRenderers(id);
+    unregisterWorkbenchPages(id);
   }
   loadedPlugins.clear();
   while (blobUrls.length) {

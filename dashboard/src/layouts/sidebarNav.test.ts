@@ -44,6 +44,28 @@ describe("sidebarNav", () => {
     }
   });
 
+  it("shows the workbench to an account without terminal or browser once a plugin adds a page", () => {
+    const member = {
+      id: 2,
+      username: "member",
+      role: "user",
+      permissions: [],
+    } as unknown as OctopUser;
+    const keysOf = (user: OctopUser, workbenchPluginPages: boolean) =>
+      buildNavSections(user, { workbenchPluginPages }).flatMap((section) =>
+        section.items.map((item) => item.key),
+      );
+    expect(keysOf(member, false)).not.toContain("workbench");
+    expect(keysOf(member, true)).toContain("workbench");
+    const chatOnly = { ...member, visible_nav: ["chat"] } as OctopUser;
+    expect(keysOf(chatOnly, true)).not.toContain("workbench");
+    const withWorkbench = {
+      ...member,
+      visible_nav: ["chat", "workbench"],
+    } as OctopUser;
+    expect(keysOf(withWorkbench, true)).toContain("workbench");
+  });
+
   it("covers every catalog key from the admin nav", () => {
     const keys = buildNavSections(adminUser, { mobileEnabled: true }).flatMap(
       (section) => section.items.map((item) => item.key),
