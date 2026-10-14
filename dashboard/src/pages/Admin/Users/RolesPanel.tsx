@@ -69,9 +69,17 @@ interface RoleFormValues extends PolicyFormValues {
   /** Pages shown besides chat, which is always visible. */
   visible_nav?: string[];
   default_knowledge_bases?: string[];
+  hidden_expert_tabs?: string[];
 }
 
 const HOME_NAV_KEY = "chat";
+
+/** Experts-page tabs a role can hide. "My experts" always stays. */
+const EXPERT_TAB_CHOICES = [
+  { value: "teams", labelKey: "experts.myTeams" },
+  { value: "library", labelKey: "experts.expertLibrary" },
+  { value: "market", labelKey: "experts.expertMarket" },
+];
 
 /** Every sidebar page except chat, as the admin catalog lists them. */
 const VISIBLE_NAV_CHOICES = buildNavSections({ role: "admin" } as OctopUser, {
@@ -95,6 +103,12 @@ function rolePolicies(
     policies.push({
       name: "default_knowledge_bases",
       value: values.default_knowledge_bases.join(","),
+    });
+  }
+  if (values.hidden_expert_tabs?.length) {
+    policies.push({
+      name: "hidden_expert_tabs",
+      value: values.hidden_expert_tabs.join(","),
     });
   }
   return policies;
@@ -194,6 +208,7 @@ export default function RolesPanel() {
           limit_visible_nav: false,
           visible_nav: [],
           default_knowledge_bases: [],
+          hidden_expert_tabs: [],
         }
       : {
           name: editor.user_role_name,
@@ -215,6 +230,7 @@ export default function RolesPanel() {
             (key) => key !== HOME_NAV_KEY,
           ),
           default_knowledge_bases: editor.default_knowledge_bases ?? [],
+          hidden_expert_tabs: editor.hidden_expert_tabs ?? [],
         };
   const formKey =
     editor === "new" ? "new" : editor ? editor.user_role_id : "closed";
@@ -752,6 +768,23 @@ export default function RolesPanel() {
                       </Form.Item>
                     ) : null
                   }
+                </Form.Item>
+                <Form.Item
+                  label={t("adminUsers.roleHiddenExpertTabs")}
+                  name="hidden_expert_tabs"
+                  extra={t("adminUsers.roleHiddenExpertTabsHint")}
+                >
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    placeholder={t(
+                      "adminUsers.roleHiddenExpertTabsPlaceholder",
+                    )}
+                    options={EXPERT_TAB_CHOICES.map((item) => ({
+                      value: item.value,
+                      label: t(item.labelKey),
+                    }))}
+                  />
                 </Form.Item>
                 <Form.Item
                   label={t("adminUsers.roleDefaultKnowledgeBases")}

@@ -279,6 +279,52 @@ async def test_role_visible_nav_limits_its_accounts(env):
     assert me.json()["visible_nav"] is None
 
 
+async def test_role_hidden_expert_tabs_reach_its_accounts(env):
+    c, _srv, auth = env
+    created = await c.post(
+        "/api/users/roles",
+        headers=auth,
+        json={
+            "user_role_name": "选剧成员",
+            "policies": [{"name": "hidden_expert_tabs", "value": "teams,library,market"}],
+        },
+    )
+    assert created.status_code == 201, created.text
+    role_id = created.json()["user_role_id"]
+    assert created.json()["hidden_expert_tabs"] == ["teams", "library", "market"]
+
+    unknown = await c.patch(
+        f"/api/users/roles/{role_id}",
+        headers=auth,
+        json={"policies": [{"name": "hidden_expert_tabs", "value": "library,my"}]},
+    )
+    assert unknown.status_code == 400, unknown.text
+
+    user = await c.post(
+        "/api/users",
+        headers=auth,
+        json={"username": "erin", "password": TEST_PASSWORD, "role": role_id},
+    )
+    assert user.status_code == 201, user.text
+    erin = bearer(await login(c, username="erin", password=TEST_PASSWORD))
+
+    me = await c.get("/api/auth/me", headers=erin)
+    assert me.json()["hidden_expert_tabs"] == ["teams", "library", "market"]
+    # Hidden in the dashboard only: the templates behind the tabs still answer.
+    library = await c.get("/api/experts", headers=erin)
+    assert library.status_code == 200, library.text
+
+    admin_me = await c.get("/api/auth/me", headers=auth)
+    assert admin_me.json()["hidden_expert_tabs"] == []
+
+    # The role is read on each request, so one edit reaches every account in it.
+    opened = await c.patch(f"/api/users/roles/{role_id}", headers=auth, json={"policies": []})
+    assert opened.status_code == 200, opened.text
+    assert opened.json()["hidden_expert_tabs"] == []
+    me = await c.get("/api/auth/me", headers=erin)
+    assert me.json()["hidden_expert_tabs"] == []
+
+
 async def test_role_default_knowledge_bases_reach_the_first_expert(env):
     c, srv, auth = env
     admin_id = (await c.get("/api/auth/me", headers=auth)).json()["id"]

@@ -23,7 +23,11 @@ POLICY_MAX_AGENTS = "max_agents"
 POLICY_VISIBLE_NAV = "visible_nav"
 # Read from the role template when an account's first expert is created.
 POLICY_DEFAULT_KNOWLEDGE_BASES = "default_knowledge_bases"
+# Read from the role template on each request, like ``visible_nav``.
+POLICY_HIDDEN_EXPERT_TABS = "hidden_expert_tabs"
 _HOME_NAV_KEY = "chat"
+# Tabs of the Experts page a role can hide. "My experts" always stays.
+EXPERT_TAB_KEYS = frozenset({"teams", "library", "market"})
 
 
 def active_policy_value(row: Any) -> str | None:
@@ -118,6 +122,31 @@ def role_visible_nav(db: Any, user: Any) -> list[str] | None:
     if role is None:
         return None
     return visible_nav_of(role.policy_value(POLICY_VISIBLE_NAV))
+
+
+def hidden_expert_tabs_of(raw: Any) -> list[str]:
+    """Experts-page tabs a role hides from its accounts."""
+    text = active_policy_value(raw)
+    if text is None:
+        return []
+    keys = dict.fromkeys(part.strip() for part in text.split(","))
+    return [key for key in keys if key in EXPERT_TAB_KEYS]
+
+
+def role_hidden_expert_tabs(db: Any, user: Any) -> list[str]:
+    """Experts-page tabs the user's role template hides.
+
+    This hides the tabs in the dashboard only; the experts, teams and market
+    APIs still follow permissions. Admin is never limited.
+    """
+    if user.is_admin:
+        return []
+    from octop.infra.db.repos.user_roles import UserRoleRepo
+
+    role = UserRoleRepo(db).get(str(user.role))
+    if role is None:
+        return []
+    return hidden_expert_tabs_of(role.policy_value(POLICY_HIDDEN_EXPERT_TABS))
 
 
 def default_knowledge_bases_of(raw: Any) -> list[str]:
@@ -221,6 +250,17 @@ def normalize_visible_nav(raw: str | None) -> str | None:
     if unknown:
         raise OctopError(ErrorCode.FORBIDDEN, f"unknown nav keys: {unknown}", status=400)
     return ",".join(dict.fromkeys([_HOME_NAV_KEY, *keys]))
+
+
+def normalize_hidden_expert_tabs(raw: str | None) -> str | None:
+    """Return comma-joined Experts-page tab keys, or ``None`` when none is hidden."""
+    if raw is None or not raw.strip():
+        return None
+    keys = [part.strip() for part in raw.split(",") if part.strip()]
+    unknown = sorted(set(keys) - EXPERT_TAB_KEYS)
+    if unknown:
+        raise OctopError(ErrorCode.FORBIDDEN, f"unknown expert tabs: {unknown}", status=400)
+    return ",".join(dict.fromkeys(keys))
 
 
 def normalize_default_knowledge_bases(raw: str | None) -> str | None:

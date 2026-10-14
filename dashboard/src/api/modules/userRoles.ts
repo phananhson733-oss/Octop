@@ -22,6 +22,8 @@ export interface UserRole {
   visible_nav: string[] | null;
   /** Shared knowledge bases put on a new account's first expert. */
   default_knowledge_bases?: string[];
+  /** Experts-page tabs hidden from the role's accounts. */
+  hidden_expert_tabs?: string[];
   created_at: number;
   updated_at: number;
   avatar_url?: string | null;

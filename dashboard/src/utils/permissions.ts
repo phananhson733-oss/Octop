@@ -4,6 +4,7 @@ export type PermissionHolder = {
   role: "admin" | "user" | string;
   permissions?: string[] | null;
   visible_nav?: string[] | null;
+  hidden_expert_tabs?: string[] | null;
 };
 
 /** Any-of module keys, or ``"admin"`` for role-only. */
@@ -113,6 +114,14 @@ export function navKeyVisible(
 ): boolean {
   const visible = user?.visible_nav;
   return !visible || visible.includes(navKey);
+}
+
+/** True when the role hides the Experts-page tab ``tab``. */
+export function expertTabHidden(
+  user: PermissionHolder | null | undefined,
+  tab: string,
+): boolean {
+  return (user?.hidden_expert_tabs ?? []).includes(tab);
 }
 
 export function navAllowed(

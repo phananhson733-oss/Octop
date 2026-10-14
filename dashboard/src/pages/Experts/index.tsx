@@ -63,6 +63,7 @@ import { OctopEmptyMascot } from "../../components/EmptyState";
 import { pickLocale } from "../../utils/localizedText";
 import { isOwnedExpert, ownedExperts } from "../../utils/sharedExpert";
 import { apiErrorMessage } from "../../utils/apiError";
+import { expertTabHidden } from "../../utils/permissions";
 import styles from "./index.module.less";
 
 type TabKey = "my" | "teams" | "library" | "market";
@@ -124,6 +125,9 @@ export default function ExpertsPage() {
 
   // ── Tab state ──────────────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<TabKey>("my");
+  // A role can hide tabs; the links that lead to a hidden tab go with it.
+  const libraryHidden = expertTabHidden(currentUser, "library");
+  const marketHidden = expertTabHidden(currentUser, "market");
   const { viewMode, setViewMode, showCardView } = useCardTableView(
     loadViewMode(),
   );
@@ -425,10 +429,15 @@ export default function ExpertsPage() {
                 label: t("experts.emptyGuideStepHow"),
                 detail: t("experts.emptyGuideStepHowDetail"),
               },
-              {
-                label: t("experts.emptyGuideStepTemplate"),
-                detail: t("experts.emptyGuideStepTemplateDetail"),
-              },
+              // This step points at the library and market tabs.
+              ...(libraryHidden || marketHidden
+                ? []
+                : [
+                    {
+                      label: t("experts.emptyGuideStepTemplate"),
+                      detail: t("experts.emptyGuideStepTemplateDetail"),
+                    },
+                  ]),
             ]}
             primaryAction={{
               label: t("experts.newExpert"),
@@ -437,12 +446,16 @@ export default function ExpertsPage() {
               loading: defaultCreating,
               disabled: defaultCreating,
             }}
-            secondaryAction={{
-              label: t("experts.goToLibrary"),
-              onClick: openExpertLibrary,
-              icon: <BookOpen size={14} />,
-              type: "default",
-            }}
+            secondaryAction={
+              libraryHidden
+                ? undefined
+                : {
+                    label: t("experts.goToLibrary"),
+                    onClick: openExpertLibrary,
+                    icon: <BookOpen size={14} />,
+                    type: "default",
+                  }
+            }
           />
         </div>
       );
@@ -491,9 +504,11 @@ export default function ExpertsPage() {
               <Plus size={14} />
               {t("experts.newExpert")}
             </button>
-            <button className={styles.toolbarBtn} onClick={openExpertLibrary}>
-              {t("experts.addFromLibrary")}
-            </button>
+            {libraryHidden ? null : (
+              <button className={styles.toolbarBtn} onClick={openExpertLibrary}>
+                {t("experts.addFromLibrary")}
+              </button>
+            )}
           </div>
         </div>
         {visibleExpertAgents.length === 0 ? (
@@ -552,6 +567,8 @@ export default function ExpertsPage() {
     defaultCreating,
     expertAgents,
     isMobile,
+    libraryHidden,
+    marketHidden,
     newAgentId,
     openDefaultCreate,
     openExpertLibrary,
@@ -828,7 +845,7 @@ export default function ExpertsPage() {
       subtitle={t("pageShell.experts.subtitle")}
     >
       <Tabs
-        activeKey={activeTab}
+        activeKey={expertTabHidden(currentUser, activeTab) ? "my" : activeTab}
         onChange={(k) => setActiveTab(k as TabKey)}
         items={[
           {
@@ -864,7 +881,7 @@ export default function ExpertsPage() {
             ),
             children: marketContent,
           },
-        ]}
+        ].filter((item) => !expertTabHidden(currentUser, item.key))}
       />
 
       <EditAgentDrawer
