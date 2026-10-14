@@ -29,6 +29,7 @@ vi.mock("@/utils/antdMessage", () => ({
   message: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
 }));
 
+import { message } from "@/utils/antdMessage";
 import RolesPanel from "./RolesPanel";
 
 const pickRole: UserRole = {
@@ -40,6 +41,7 @@ const pickRole: UserRole = {
   policies: [
     { name: "visible_nav", value: "chat,experts" },
     { name: "hidden_expert_tabs", value: "library,market" },
+    { name: "default_published_expert", value: "01TEMPLATE" },
   ],
   deletable: true,
   immutable: false,
@@ -49,15 +51,24 @@ const pickRole: UserRole = {
   visible_nav: ["chat", "experts"],
   default_knowledge_bases: [],
   hidden_expert_tabs: ["library", "market"],
+  default_published_expert: "01TEMPLATE",
   created_at: 1,
   updated_at: 1,
 };
 
-describe("<RolesPanel /> hidden expert tabs", () => {
+describe("<RolesPanel /> expert policies", () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     stable.request.mockReset();
     stable.request.mockImplementation(async (path: string) => {
       if (path === "/users/roles") return [pickRole];
+      if (path === "/experts/published") {
+        return [{ id: "01TEMPLATE", name: "选剧专家模板" }];
+      }
+      // The save names no new template here, but the server may report installs.
+      if (path === "/users/roles/01ROLE") {
+        return { ...pickRole, default_expert_installed: 2 };
+      }
       if (path === "/filesystem/defaults") {
         return { tree_root: "/", browse_roots: [], in_container: true };
       }
@@ -65,7 +76,7 @@ describe("<RolesPanel /> hidden expert tabs", () => {
     });
   });
 
-  it("shows the role's hidden tabs and saves them with its other policies", async () => {
+  it("shows the role's expert policies and saves them with its other policies", async () => {
     const user = userEvent.setup();
     render(<RolesPanel />);
 
@@ -84,6 +95,13 @@ describe("<RolesPanel /> hidden expert tabs", () => {
     expect(chosen.getByText("experts.expertMarket")).toBeInTheDocument();
     expect(chosen.queryByText("experts.myTeams")).not.toBeInTheDocument();
 
+    const template = screen
+      .getByText("adminUsers.roleDefaultPublishedExpert")
+      .closest(".ant-form-item");
+    expect(
+      await within(template as HTMLElement).findByText("选剧专家模板"),
+    ).toBeInTheDocument();
+
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
     await waitFor(() =>
@@ -98,6 +116,13 @@ describe("<RolesPanel /> hidden expert tabs", () => {
     expect(JSON.parse(patch?.[1].body).policies).toEqual([
       { name: "visible_nav", value: "chat,experts" },
       { name: "hidden_expert_tabs", value: "library,market" },
+      { name: "default_published_expert", value: "01TEMPLATE" },
     ]);
+    // The toast says how many existing accounts just got the expert.
+    await waitFor(() =>
+      expect(message.success).toHaveBeenCalledWith(
+        "adminUsers.roleDefaultExpertInstalled",
+      ),
+    );
   });
 });

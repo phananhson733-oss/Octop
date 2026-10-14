@@ -45,6 +45,10 @@ import {
   knowledgeBasesApi,
   type KnowledgeBase,
 } from "../../../api/modules/knowledgeBases";
+import {
+  publishedExpertsApi,
+  type PublishedExpert,
+} from "../../../api/modules/publishedExperts";
 import { request } from "../../../api/request";
 import { buildNavSections } from "../../../layouts/sidebarNav";
 import { apiErrorMessage } from "../../../utils/apiError";
@@ -70,6 +74,7 @@ interface RoleFormValues extends PolicyFormValues {
   visible_nav?: string[];
   default_knowledge_bases?: string[];
   hidden_expert_tabs?: string[];
+  default_published_expert?: string;
 }
 
 const HOME_NAV_KEY = "chat";
@@ -111,6 +116,12 @@ function rolePolicies(
       value: values.hidden_expert_tabs.join(","),
     });
   }
+  if (values.default_published_expert) {
+    policies.push({
+      name: "default_published_expert",
+      value: values.default_published_expert,
+    });
+  }
   return policies;
 }
 
@@ -122,6 +133,9 @@ export default function RolesPanel() {
   const [fsTreeRoots, setFsTreeRoots] = useState<string[]>([HOST_FS_ROOT]);
   const [workspaceRootAllowed, setWorkspaceRootAllowed] = useState(true);
   const [sharedBases, setSharedBases] = useState<KnowledgeBase[]>([]);
+  const [publishedExperts, setPublishedExperts] = useState<PublishedExpert[]>(
+    [],
+  );
   const [editor, setEditor] = useState<UserRole | "new" | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [form] = Form.useForm<RoleFormValues>();
@@ -157,6 +171,10 @@ export default function RolesPanel() {
       .list()
       .then((bases) => setSharedBases(bases.filter((base) => base.shared)))
       .catch(() => setSharedBases([]));
+    publishedExpertsApi
+      .list()
+      .then(setPublishedExperts)
+      .catch(() => setPublishedExperts([]));
     fetchFilesystemDefaults()
       .then((defaults) => {
         setFsTreeRoots(
@@ -209,6 +227,7 @@ export default function RolesPanel() {
           visible_nav: [],
           default_knowledge_bases: [],
           hidden_expert_tabs: [],
+          default_published_expert: undefined,
         }
       : {
           name: editor.user_role_name,
@@ -231,6 +250,8 @@ export default function RolesPanel() {
           ),
           default_knowledge_bases: editor.default_knowledge_bases ?? [],
           hidden_expert_tabs: editor.hidden_expert_tabs ?? [],
+          default_published_expert:
+            editor.default_published_expert ?? undefined,
         };
   const formKey =
     editor === "new" ? "new" : editor ? editor.user_role_id : "closed";
@@ -261,13 +282,19 @@ export default function RolesPanel() {
         });
         message.success(t("adminUsers.roleUpdateSuccess"));
       } else if (editing) {
-        await userRolesApi.update(editing.user_role_id, {
+        const updated = await userRolesApi.update(editing.user_role_id, {
           user_role_name: values.name.trim(),
           description: values.description?.trim() || null,
           permissions: values.permissions ?? [],
           policies: rolePolicies(values, { workspaceRootAllowed }),
         });
-        message.success(t("adminUsers.roleUpdateSuccess"));
+        message.success(
+          updated.default_expert_installed
+            ? t("adminUsers.roleDefaultExpertInstalled", {
+                count: updated.default_expert_installed,
+              })
+            : t("adminUsers.roleUpdateSuccess"),
+        );
       } else {
         const created = await userRolesApi.create({
           user_role_name: values.name.trim(),
@@ -783,6 +810,22 @@ export default function RolesPanel() {
                     options={EXPERT_TAB_CHOICES.map((item) => ({
                       value: item.value,
                       label: t(item.labelKey),
+                    }))}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label={t("adminUsers.roleDefaultPublishedExpert")}
+                  name="default_published_expert"
+                  extra={t("adminUsers.roleDefaultPublishedExpertHint")}
+                >
+                  <Select
+                    allowClear
+                    placeholder={t(
+                      "adminUsers.roleDefaultPublishedExpertPlaceholder",
+                    )}
+                    options={publishedExperts.map((expert) => ({
+                      value: expert.id,
+                      label: expert.name,
                     }))}
                   />
                 </Form.Item>

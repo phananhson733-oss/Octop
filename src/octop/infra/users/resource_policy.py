@@ -25,6 +25,8 @@ POLICY_VISIBLE_NAV = "visible_nav"
 POLICY_DEFAULT_KNOWLEDGE_BASES = "default_knowledge_bases"
 # Read from the role template on each request, like ``visible_nav``.
 POLICY_HIDDEN_EXPERT_TABS = "hidden_expert_tabs"
+# Read from the role template when an account joins the role.
+POLICY_DEFAULT_PUBLISHED_EXPERT = "default_published_expert"
 _HOME_NAV_KEY = "chat"
 # Tabs of the Experts page a role can hide. "My experts" always stays.
 EXPERT_TAB_KEYS = frozenset({"teams", "library", "market"})
@@ -168,6 +170,24 @@ def role_default_knowledge_bases(db: Any, role_id: str) -> list[str]:
     if role is None or role.is_admin:
         return []
     return default_knowledge_bases_of(role.policy_value(POLICY_DEFAULT_KNOWLEDGE_BASES))
+
+
+def default_published_expert_of(raw: Any) -> str | None:
+    """Published-expert id a role installs for its accounts."""
+    return active_policy_value(raw)
+
+
+def role_default_published_expert(db: Any, role_id: str) -> str | None:
+    """Published expert the role template *role_id* installs for its accounts.
+
+    The id is as stored; the caller skips it when the template is gone.
+    """
+    from octop.infra.db.repos.user_roles import UserRoleRepo
+
+    role = UserRoleRepo(db).get(role_id)
+    if role is None or role.is_admin:
+        return None
+    return default_published_expert_of(role.policy_value(POLICY_DEFAULT_PUBLISHED_EXPERT))
 
 
 def public_policy_fields(rows: Sequence[Any] | Mapping[str, str] | None) -> dict[str, Any]:

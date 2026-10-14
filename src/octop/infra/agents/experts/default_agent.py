@@ -2,19 +2,29 @@
 
 Used by the setup wizard (pinned ``agent_id=main``) and by invite redeem
 (auto-allocated agent id) so every new account starts with the same expert.
+A role template can also name a published expert its accounts get.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from pathlib import Path
 from typing import Any
 
 from octop.infra.agents.experts.catalog import ExpertCatalog, build_create_spec_from_expert
+from octop.infra.agents.experts.published_creation import (
+    PublishedExpertInstallOptions,
+    install_published_expert,
+    require_published_expert,
+    snapshot_welcome_message,
+)
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.users.resource_policy import (
     POLICY_WORKSPACE_ROOT_DIR,
     effective_workspace_root_dir,
     role_default_knowledge_bases,
+    role_default_published_expert,
 )
 from octop.infra.utils.host_dirs import host_fs_tree_root
 from octop.infra.utils.locale import normalize_locale
@@ -121,3 +131,67 @@ async def try_bootstrap_default_agent(
         )
     except Exception as exc:  # pragma: no cover - logged; user creation should still succeed
         logger.warning("could not auto-create default agent for user %s: %s", user_id, exc)
+
+
+async def install_role_published_expert(server: Any, *, user_id: int) -> Any | None:
+    """Give *user_id* the published expert their role template names, once.
+
+    Installs it the way the account would from the Experts page with the
+    defaults left alone. Returns ``None`` when the role names no template or
+    the account already has an expert made from it.
+    """
+    user = server.user_manager.get_by_id(user_id)
+    if user is None:
+        return None
+    expert_id = role_default_published_expert(server.services.db, str(user.role))
+    if expert_id is None:
+        return None
+    registry = server.app_runtime.agent_registry
+    if any(row.published_expert_id == expert_id for row in registry.list_agents(user_id)):
+        return None
+    template = require_published_expert(server.services, expert_id)
+    welcome_zh, welcome_en = await asyncio.to_thread(
+        snapshot_welcome_message,
+        Path(server.services.paths.published_experts_dir) / template.id,
+    )
+    welcome = (welcome_zh or welcome_en) if normalize_locale(user.locale) == "zh" else welcome_en
+    return await install_published_expert(
+        services=server.services,
+        registry=registry,
+        user=user,
+        expert_id=expert_id,
+        options=PublishedExpertInstallOptions(
+            name=template.name,
+            backend=default_home_local_backend(
+                root_dir=user_policy_workspace_root(server, user_id)
+            ),
+            knowledge_base_ids=role_knowledge_base_ids(server, user_id),
+            welcome_message=welcome or None,
+        ),
+    )
+
+
+async def try_install_role_published_expert(server: Any, *, user_id: int) -> bool:
+    """Best-effort wrapper used by HTTP adapters. True when an expert was created."""
+    if server.app_runtime is None:
+        logger.warning("skip role default expert: app_runtime not ready")
+        return False
+    try:
+        return await install_role_published_expert(server, user_id=user_id) is not None
+    except Exception as exc:  # logged; the account or role change should still succeed
+        logger.warning("could not install the role's default expert for user %s: %s", user_id, exc)
+        return False
+
+
+async def backfill_role_published_expert(server: Any, role_id: str) -> int:
+    """Install the role's default published expert for the accounts already in it.
+
+    Returns how many accounts got one.
+    """
+    installed = 0
+    for row in server.services.user_repo.list(include_disabled=True):
+        if str(row.role) != role_id:
+            continue
+        if await try_install_role_published_expert(server, user_id=int(row.id)):
+            installed += 1
+    return installed

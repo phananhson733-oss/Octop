@@ -164,9 +164,13 @@ async def redeem_invite(
         email=body.email,
         locale=locale,
     )
-    from octop.infra.agents.experts.default_agent import try_bootstrap_default_agent
+    from octop.infra.agents.experts.default_agent import (
+        try_bootstrap_default_agent,
+        try_install_role_published_expert,
+    )
 
     await try_bootstrap_default_agent(server, user_id=user.id, locale=user.locale)
+    await try_install_role_published_expert(server, user_id=user.id)
     secret = server.services.secret_repo.get("jwt")
     ttl = server.services.config.access_token_ttl_seconds
     token = sign_token(secret, sub=user.id, uname=user.username, role=user.role, ttl_seconds=ttl)

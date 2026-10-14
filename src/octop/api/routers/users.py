@@ -322,6 +322,9 @@ async def create_user(
         from octop.infra.agents.experts.default_agent import try_bootstrap_default_agent
 
         await try_bootstrap_default_agent(server, user_id=user.id, locale=user.locale)
+    from octop.infra.agents.experts.default_agent import try_install_role_published_expert
+
+    await try_install_role_published_expert(server, user_id=user.id)
     row = server.user_manager.get_row(user.id)
     assert row is not None
     return _row_to_dict(row, server.services.user_policy_repo.list_for_user(row.id), server)
@@ -490,6 +493,13 @@ async def patch_user(
         await server.user_manager.set_resource_policy(
             row.username, **_policy_kwargs_replace_from_pairs(template_policies)
         )
+        if role_id != str(row.role):
+            # Moved into another role: it may name a published expert for its accounts.
+            from octop.infra.agents.experts.default_agent import (
+                try_install_role_published_expert,
+            )
+
+            await try_install_role_published_expert(server, user_id=user_id)
     if body.display_name is not None:
         await server.user_manager.set_display_name(row.username, body.display_name)
     if "email" in body.model_fields_set:

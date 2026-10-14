@@ -24,12 +24,14 @@ from octop.infra.users.identity import User
 from octop.infra.users.permissions import ALL_PERMISSION_KEYS, validate_permission_keys
 from octop.infra.users.resource_policy import (
     POLICY_DEFAULT_KNOWLEDGE_BASES,
+    POLICY_DEFAULT_PUBLISHED_EXPERT,
     POLICY_HIDDEN_EXPERT_TABS,
     POLICY_MAX_AGENTS,
     POLICY_TOKEN_QUOTA,
     POLICY_VISIBLE_NAV,
     POLICY_WORKSPACE_ROOT_DIR,
     default_knowledge_bases_of,
+    default_published_expert_of,
     hidden_expert_tabs_of,
     max_agents_of,
     normalize_default_knowledge_bases,
@@ -52,6 +54,7 @@ _KNOWN_POLICIES = {
     POLICY_VISIBLE_NAV,
     POLICY_DEFAULT_KNOWLEDGE_BASES,
     POLICY_HIDDEN_EXPERT_TABS,
+    POLICY_DEFAULT_PUBLISHED_EXPERT,
 }
 
 
@@ -113,6 +116,7 @@ def _policies_from_fields(
     visible_nav: str | None,
     default_knowledge_bases: str | None,
     hidden_expert_tabs: str | None,
+    default_published_expert: str | None,
 ) -> list[tuple[str, str]]:
     items: list[tuple[str, str]] = []
     root = normalize_workspace_root_dir(workspace_root_dir)
@@ -133,6 +137,9 @@ def _policies_from_fields(
     tabs = normalize_hidden_expert_tabs(hidden_expert_tabs)
     if tabs:
         items.append((POLICY_HIDDEN_EXPERT_TABS, tabs))
+    expert = default_published_expert_of(default_published_expert)
+    if expert:
+        items.append((POLICY_DEFAULT_PUBLISHED_EXPERT, expert))
     return items
 
 
@@ -152,6 +159,7 @@ def _policies_from_items(items: list[PolicyItem]) -> list[tuple[str, str]]:
         visible_nav=by_name.get(POLICY_VISIBLE_NAV),
         default_knowledge_bases=by_name.get(POLICY_DEFAULT_KNOWLEDGE_BASES),
         hidden_expert_tabs=by_name.get(POLICY_HIDDEN_EXPERT_TABS),
+        default_published_expert=by_name.get(POLICY_DEFAULT_PUBLISHED_EXPERT),
     )
 
 
@@ -178,6 +186,7 @@ def public_role(row: UserRoleRow, *, avatar_url: str | None = None) -> dict[str,
         visible_nav = None
         default_knowledge_bases: list[str] = []
         hidden_expert_tabs: list[str] = []
+        default_published_expert = None
     else:
         permissions = list(row.permissions)
         system_role = "user"
@@ -190,6 +199,9 @@ def public_role(row: UserRoleRow, *, avatar_url: str | None = None) -> dict[str,
             row.policy_value(POLICY_DEFAULT_KNOWLEDGE_BASES)
         )
         hidden_expert_tabs = hidden_expert_tabs_of(row.policy_value(POLICY_HIDDEN_EXPERT_TABS))
+        default_published_expert = default_published_expert_of(
+            row.policy_value(POLICY_DEFAULT_PUBLISHED_EXPERT)
+        )
     return {
         "user_role_id": row.user_role_id,
         "user_role_name": row.user_role_name,
@@ -205,6 +217,7 @@ def public_role(row: UserRoleRow, *, avatar_url: str | None = None) -> dict[str,
         "visible_nav": visible_nav,
         "default_knowledge_bases": default_knowledge_bases,
         "hidden_expert_tabs": hidden_expert_tabs,
+        "default_published_expert": default_published_expert,
         "created_at": row.created_at,
         "updated_at": row.updated_at,
         "avatar_icon": row.avatar_icon,
@@ -322,7 +335,18 @@ async def patch_user_role(
         action="user_role.update",
         target=updated.user_role_name,
     )
-    return _public(server, updated)
+    payload = _public(server, updated)
+    # A newly named template also reaches the accounts already in the role.
+    expert = payload["default_published_expert"]
+    if expert and expert != default_published_expert_of(
+        current.policy_value(POLICY_DEFAULT_PUBLISHED_EXPERT)
+    ):
+        from octop.infra.agents.experts.default_agent import backfill_role_published_expert
+
+        payload["default_expert_installed"] = await backfill_role_published_expert(
+            server, user_role_id
+        )
+    return payload
 
 
 @router.delete("/{user_role_id}", status_code=204, summary="Delete a role template")

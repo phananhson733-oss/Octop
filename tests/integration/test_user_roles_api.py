@@ -325,6 +325,104 @@ async def test_role_hidden_expert_tabs_reach_its_accounts(env):
     assert me.json()["hidden_expert_tabs"] == []
 
 
+async def test_role_default_published_expert_reaches_its_accounts(env):
+    c, srv, auth = env
+    admin_id = (await c.get("/api/auth/me", headers=auth)).json()["id"]
+    shared = srv.services.knowledge_repo.create_base(
+        owner_user_id=admin_id, name="Shared", shared=True
+    )
+    source = await c.post(
+        "/api/agents/from-expert/default", headers=auth, json={"name": "pick-source"}
+    )
+    assert source.status_code == 201, source.text
+    published = await c.post(
+        f"/api/agents/{source.json()['agent_id']}/publish-expert",
+        headers=auth,
+        json={"name": "选剧专家", "description": "找剧"},
+    )
+    assert published.status_code == 201, published.text
+    expert_id = published.json()["id"]
+
+    async def from_template(headers: dict[str, str]) -> list[dict]:
+        agents = await c.get("/api/agents", headers=headers)
+        assert agents.status_code == 200, agents.text
+        return [row for row in agents.json() if row["published_expert_id"] == expert_id]
+
+    async def account(username: str, role: str) -> tuple[int, dict[str, str]]:
+        created = await c.post(
+            "/api/users",
+            headers=auth,
+            json={"username": username, "password": TEST_PASSWORD, "role": role},
+        )
+        assert created.status_code == 201, created.text
+        token = await login(c, username=username, password=TEST_PASSWORD)
+        return created.json()["id"], bearer(token)
+
+    base_policy = {"name": "default_knowledge_bases", "value": shared.id}
+    role = await c.post(
+        "/api/users/roles",
+        headers=auth,
+        json={
+            "user_role_name": "选剧新人",
+            "permissions": ["knowledge_bases"],
+            "policies": [base_policy],
+        },
+    )
+    assert role.status_code == 201, role.text
+    role_id = role.json()["user_role_id"]
+    assert role.json()["default_published_expert"] is None
+    _, fern = await account("fern", role_id)
+    assert await from_template(fern) == []
+
+    # Naming a template also reaches the accounts already in the role.
+    policies = [base_policy, {"name": "default_published_expert", "value": expert_id}]
+    named = await c.patch(f"/api/users/roles/{role_id}", headers=auth, json={"policies": policies})
+    assert named.status_code == 200, named.text
+    assert named.json()["default_published_expert"] == expert_id
+    assert named.json()["default_expert_installed"] == 1
+    installed = await from_template(fern)
+    assert [row["name"] for row in installed] == ["选剧专家"]
+    # It carries the role's knowledge bases, like the default expert does.
+    assert installed[0]["knowledge_base_ids"] == [shared.id]
+
+    # A new account gets it when it is created.
+    _, gus = await account("gus", role_id)
+    assert len(await from_template(gus)) == 1
+
+    # An invited account gets it next to the default assistant.
+    invite = await c.post("/api/users/invites", headers=auth, json={"role": role_id})
+    assert invite.status_code == 201, invite.text
+    redeem = await c.post(
+        "/api/auth/invite/redeem",
+        json={"code": invite.json()["code"], "username": "ivy", "password": TEST_PASSWORD},
+    )
+    assert redeem.status_code == 200, redeem.text
+    ivy = bearer(redeem.json()["access_token"])
+    ivy_agents = (await c.get("/api/agents", headers=ivy)).json()
+    assert sorted(str(row["template_name"]) for row in ivy_agents) == ["None", "general-assistant"]
+    assert len(await from_template(ivy)) == 1
+
+    # So does an account moved into the role.
+    hal_id, hal = await account("hal", "user")
+    assert await from_template(hal) == []
+    moved = await c.patch(f"/api/users/{hal_id}", headers=auth, json={"role": role_id})
+    assert moved.status_code == 200, moved.text
+    assert len(await from_template(hal)) == 1
+
+    # Saving the role again leaves an account that removed its copy alone.
+    removed = await c.delete(f"/api/agents/{installed[0]['agent_id']}", headers=fern)
+    assert removed.status_code == 204, removed.text
+    again = await c.patch(
+        f"/api/users/roles/{role_id}",
+        headers=auth,
+        json={"description": "选剧用", "policies": policies},
+    )
+    assert again.status_code == 200, again.text
+    assert "default_expert_installed" not in again.json()
+    assert await from_template(fern) == []
+    assert len(await from_template(gus)) == 1
+
+
 async def test_role_default_knowledge_bases_reach_the_first_expert(env):
     c, srv, auth = env
     admin_id = (await c.get("/api/auth/me", headers=auth)).json()["id"]
