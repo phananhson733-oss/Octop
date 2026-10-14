@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import type { OctopAgent } from "./AgentContext";
-import { projectChatAgentOption, selectEnabledExperts } from "./AgentContext";
+import {
+  projectChatAgentOption,
+  selectDefaultExpertId,
+  selectEnabledExperts,
+} from "./AgentContext";
 
 function agent(
   agent_id: string,
@@ -154,5 +158,45 @@ describe("projectChatAgentOption", () => {
       "bridge:cid:aid",
       "L1",
     ]);
+  });
+});
+
+describe("selectDefaultExpertId", () => {
+  const assistant = (state: OctopAgent["state"]) =>
+    agent("A", state, { is_owner: true, template_name: "general-assistant" });
+  const fromTemplate = (
+    id: string,
+    state: OctopAgent["state"],
+    is_owner = true,
+  ) => agent(id, state, { is_owner, published_expert_id: "T1" });
+
+  it("opens on the account's expert from the role's template", () => {
+    const agents = [assistant("running"), fromTemplate("P", "running")];
+    expect(selectDefaultExpertId(agents, "T1")).toBe("P");
+  });
+
+  it("skips a copy of the template that another account shared", () => {
+    const agents = [
+      assistant("running"),
+      fromTemplate("S", "running", false),
+      fromTemplate("P", "running"),
+    ];
+    expect(selectDefaultExpertId(agents, "T1")).toBe("P");
+  });
+
+  it("opens on the first enabled expert while the template's expert is not enabled", () => {
+    const agents = [
+      assistant("stopped"),
+      fromTemplate("P", "stopped"),
+      agent("B", "running", { is_owner: true }),
+    ];
+    expect(selectDefaultExpertId(agents, "T1")).toBe("B");
+    expect(selectDefaultExpertId([assistant("stopped")], "T1")).toBe("A");
+  });
+
+  it("opens on the first expert when the role names no template", () => {
+    const agents = [assistant("stopped"), fromTemplate("P", "running")];
+    expect(selectDefaultExpertId(agents, null)).toBe("A");
+    expect(selectDefaultExpertId([], "T1")).toBeNull();
   });
 });

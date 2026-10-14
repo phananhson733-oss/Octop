@@ -9,6 +9,7 @@ import {
 import type { ReactNode } from "react";
 import { setActiveAgentId } from "../api/request";
 import { agentApi as legacyAgentApi } from "../api/modules/agent";
+import { useCurrentUser } from "../hooks/useCurrentUser";
 import {
   retainDisconnectedBridgeAgents,
   toBridgeShadowAgentId,
@@ -68,6 +69,8 @@ export interface OctopAgent {
   /** Member agent ids when ``kind === "team"``. */
   member_ids?: string[];
   welcome_message?: string | null;
+  /** Published template this expert was installed from. */
+  published_expert_id?: string | null;
   /** True when this row is a remote shadow expert via cloud collab. */
   bridge?: boolean;
   bridge_connection_id?: string | null;
@@ -138,6 +141,25 @@ export function selectEnabledExperts(
   const pinnedActive = agents.find((a) => a.agent_id === resolvedAgentId);
   if (!pinnedActive) return enabled;
   return [pinnedActive, ...enabled];
+}
+
+/**
+ * Pure helper: the expert to open on when none is remembered. An account
+ * whose role names a default template opens on its own expert from that
+ * template, or on the first enabled expert while that one is not enabled.
+ * Everyone else opens on the first expert.
+ */
+export function selectDefaultExpertId(
+  agents: OctopAgent[],
+  defaultTemplateId: string | null | undefined,
+): string | null {
+  const first = agents[0]?.agent_id ?? null;
+  if (!defaultTemplateId) return first;
+  const enabled = selectEnabledExperts(agents, null);
+  const fromTemplate = enabled.find(
+    (a) => a.is_owner && a.published_expert_id === defaultTemplateId,
+  );
+  return (fromTemplate ?? enabled[0])?.agent_id ?? first;
 }
 
 function sameMemberIds(left?: string[], right?: string[]): boolean {
@@ -339,6 +361,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   const [activeAgentId, setActiveAgentIdState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const defaultTemplateId = useCurrentUser()?.default_published_expert ?? null;
 
   const persistAndApply = useCallback((id: string | null) => {
     setActiveAgentIdState((prev) => {
@@ -411,7 +434,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         if (haveStored) {
           persistAndApply(stored);
         } else if (merged.length > 0) {
-          persistAndApply(merged[0].agent_id);
+          persistAndApply(selectDefaultExpertId(merged, defaultTemplateId));
         } else {
           persistAndApply(null);
         }
@@ -425,7 +448,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [persistAndApply],
+    [persistAndApply, defaultTemplateId],
   );
 
   // Initial fetch — fire once on mount. Login flow lives elsewhere; this

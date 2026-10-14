@@ -380,6 +380,11 @@ async def test_role_default_published_expert_reaches_its_accounts(env):
     assert named.status_code == 200, named.text
     assert named.json()["default_published_expert"] == expert_id
     assert named.json()["default_expert_installed"] == 1
+    # The account's profile names the template, so the dashboard can open on that expert.
+    fern_me = await c.get("/api/auth/me", headers=fern)
+    assert fern_me.json()["default_published_expert"] == expert_id
+    admin_me = await c.get("/api/auth/me", headers=auth)
+    assert admin_me.json()["default_published_expert"] is None
     installed = await from_template(fern)
     assert [row["name"] for row in installed] == ["选剧专家"]
     # It carries the role's knowledge bases, like the default expert does.

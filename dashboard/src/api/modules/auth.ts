@@ -60,6 +60,8 @@ export interface OctopUser {
   visible_nav?: string[] | null;
   /** Experts-page tabs the role hides ("teams" | "library" | "market"). */
   hidden_expert_tabs?: string[] | null;
+  /** Published template the role gives its accounts an expert from. */
+  default_published_expert?: string | null;
   sso_linked?: boolean;
   sso_kind?: string | null;
   /** Linked SSO providers (multi-identity). */

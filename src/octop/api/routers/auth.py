@@ -15,7 +15,11 @@ from octop.infra.auth.captcha import current_env, ensure_captcha, load_effective
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.users.email import normalize_email
 from octop.infra.users.permissions import effective_permissions
-from octop.infra.users.resource_policy import role_hidden_expert_tabs, role_visible_nav
+from octop.infra.users.resource_policy import (
+    role_default_published_expert,
+    role_hidden_expert_tabs,
+    role_visible_nav,
+)
 from octop.infra.utils.locale import normalize_locale
 
 logger = logging.getLogger(__name__)
@@ -40,6 +44,9 @@ def me_payload(user: Any, server: Any) -> dict[str, Any]:
     payload = _user_json(user, locale=user.locale)
     payload["visible_nav"] = role_visible_nav(server.services.db, user)
     payload["hidden_expert_tabs"] = role_hidden_expert_tabs(server.services.db, user)
+    payload["default_published_expert"] = role_default_published_expert(
+        server.services.db, str(user.role)
+    )
     row = server.user_manager.get_row(user.id)
     if row is None:
         payload["sso_linked"] = False
