@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 
@@ -66,6 +67,26 @@ async def test_install_from_market(env: Any) -> None:
         headers=auth,
     )
     assert blocked.status_code == 404, blocked.text
+
+    # Installed plugin files keep their URL across reinstalls: browsers must revalidate
+    installed = await client.get(f"/api/plugins/{plugin_id}/ui/plugin.yaml", headers=auth)
+    assert installed.status_code == 200, installed.text
+    assert installed.headers["cache-control"] == "no-cache"
+    revalidated = await client.get(
+        f"/api/plugins/{plugin_id}/ui/plugin.yaml",
+        headers={**auth, "If-None-Match": installed.headers["etag"]},
+    )
+    assert revalidated.status_code == 304
+    assert srv.plugin_manager is not None
+    manifest_file = srv.plugin_manager.plugin_dir(plugin_id) / "plugin.yaml"
+    stat = manifest_file.stat()
+    os.utime(manifest_file, (stat.st_atime, stat.st_mtime + 60))  # what a reinstall does
+    changed = await client.get(
+        f"/api/plugins/{plugin_id}/ui/plugin.yaml",
+        headers={**auth, "If-None-Match": installed.headers["etag"]},
+    )
+    assert changed.status_code == 200
+    assert changed.headers["etag"] != installed.headers["etag"]
 
     assert srv.plugin_manager is not None
     assert srv.plugin_manager.plugin_dir(plugin_id) is not None

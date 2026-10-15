@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import asyncio
 import mimetypes
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, Form, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
+from starlette.staticfiles import NotModifiedResponse
 
 from octop.api.common.agent import assert_agent_owner as _assert_agent_owner
 from octop.api.deps import current_user, get_server, require_permission
@@ -313,22 +315,31 @@ async def uninstall_plugin(
 async def get_plugin_ui_asset(
     plugin_id: str,
     file_path: str,
+    request: Request,
     server: OctopServer = Depends(get_server),
     _user: Any = Depends(current_user),
 ) -> Response:
     """Read-only static files from ``~/.octop/plugins/<id>/`` (typically ``ui/dist/``).
 
     Authenticated users only. Paths are traversal-checked in ``PluginManager``.
+    ``no-cache``: a reinstalled plugin keeps the same URLs, so the browser must
+    revalidate (a 304 when its ETag still matches) instead of reusing a stale copy.
     """
     target = _plugin_manager(server).resolve_ui_file(plugin_id, file_path)
     suffix = target.suffix.lower()
     media_type = _UI_CONTENT_TYPES.get(suffix) or mimetypes.guess_type(target.name)[0]
-    return FileResponse(
+    response = FileResponse(
         path=target,
         media_type=media_type or "application/octet-stream",
         filename=target.name,
         content_disposition_type="inline",
+        headers={"Cache-Control": "no-cache"},
+        stat_result=os.stat(target),
     )
+    sent = request.headers.get("if-none-match", "")
+    if response.headers["etag"] in [tag.strip().removeprefix("W/") for tag in sent.split(",")]:
+        return NotModifiedResponse(response.headers)
+    return response
 
 
 def _agent_row_and_config(
