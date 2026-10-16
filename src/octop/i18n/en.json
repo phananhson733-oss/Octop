@@ -623,7 +623,11 @@
     "seo_list_research_runs": "List SEO research runs",
     "seo_list_research_rows": "Read SEO research rows",
     "seo_save_report": "Save SEO report",
-    "seo_list_reports": "List SEO reports"
+    "seo_list_reports": "List SEO reports",
+    "seo_get_project_context": "Read SEO project background",
+    "seo_update_project_context": "Update SEO project background",
+    "seo_list_serps": "List SEO SERP snapshots",
+    "seo_get_serp": "Read SEO SERP snapshot"
   },
   "skills": {
     "pdf": "PDF",

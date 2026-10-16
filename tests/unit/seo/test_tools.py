@@ -17,6 +17,15 @@ def tool_env(monkeypatch):
     threads = Mock()
     threads.get.return_value = SimpleNamespace(user_id=7, agent_id="agent-a")
     run = {"run_id": "run-a", "status": "completed", "results": []}
+    background = {
+        "sections": [],
+        "missing_sections": ["business_overview"],
+        "custom_sections": [],
+        "competitors": [],
+        "key_pages": [],
+        "research_log": [],
+        "research_log_limit": 20,
+    }
     service = SimpleNamespace(
         project_for_agent=AsyncMock(return_value={"project_id": "project-a"}),
         report_context=AsyncMock(
@@ -24,10 +33,15 @@ def tool_env(monkeypatch):
                 "project": {"project_id": "project-a"},
                 "run": run,
                 "saved_keywords": [],
+                "project_context": background,
                 "context_hash": "a" * 64,
                 "instructions": "Use the evidence.",
             }
         ),
+        project_context=AsyncMock(return_value=background),
+        update_context=AsyncMock(return_value=background),
+        list_serps=AsyncMock(return_value=[]),
+        get_serp=AsyncMock(return_value={"serp_id": "serp-a", "items": []}),
         save_report=AsyncMock(return_value={"report_id": "report-a"}),
         keyword_rows=AsyncMock(return_value=[]),
         get_run=AsyncMock(return_value=run),
@@ -87,6 +101,17 @@ async def test_report_provenance_uses_validated_thread(tool_env):
     assert "seo_research_keywords" not in tools  # Paid requests require the explicit UI action.
 
 
+async def test_agent_context_writes_are_attributed_and_serps_are_read_only(tool_env):
+    _config, _threads, service, tools = tool_env
+    ops = [{"append_research_log": {"summary": "Compared CRM terms"}}]
+    result = json.loads(await tools["seo_update_project_context"].ainvoke({"updates": ops}))
+    service.update_context.assert_awaited_once_with(7, "project-a", ops, author="agent")
+    assert result["applied"] == 1 and result["counts"]["research_log"] == 0
+    await tools["seo_list_serps"].ainvoke({"keyword": "crm"})
+    service.list_serps.assert_awaited_once_with(7, "project-a", keyword="crm")
+    assert not any("buy" in name or "fetch" in name for name in tools)
+
+
 def _row(keyword: str, volume: int | None) -> dict:
     return {
         "keyword": keyword,
@@ -128,13 +153,71 @@ async def test_every_tool_result_stays_readable_at_maximum_size(tool_env):
         }
         for i in range(500)
     ]
+    stamp = {"updated_at": run["observed_at"], "updated_by": "user"}
+    background = {
+        "sections": [
+            {"key": key, "content": "p" * 4000} | stamp
+            for key in ("business_overview", "current_goal", "positioning", "writing_preferences")
+        ],
+        "missing_sections": [],
+        "custom_sections": [
+            {"slug": f"{'s' * 57}-{i:02}", "title": "t" * 120, "content": "c" * 4000} | stamp
+            for i in range(20)
+        ],
+        "competitors": [
+            {"domain": f"{'d' * 240}{i}.com", "name": "n" * 120, "notes": "o" * 500} | stamp
+            for i in range(100)
+        ],
+        "key_pages": [
+            {"url": f"https://example.com/{'u' * 2000}{i}", "role": "money"}
+            | {"topic": "t" * 200, "notes": "o" * 500}
+            | stamp
+            for i in range(100)
+        ],
+        "research_log": [
+            {"log_id": f"log-{i}", "entry_date": "2026-10-14", "summary": "l" * 1000}
+            | {"created_by": "agent", "created_at": run["observed_at"]}
+            for i in range(20)
+        ],
+        "research_log_limit": 20,
+    }
     service.report_context.return_value = {
         "project": {"project_id": "project-a"},
         "run": run,
         "saved_keywords": saved,
+        "project_context": {
+            k: v for k, v in background.items() if k not in {"research_log", "research_log_limit"}
+        },
         "context_hash": "b" * 64,
         "instructions": "Use the evidence.",
     }
+    service.project_context.return_value = background
+    snapshot = {
+        "serp_id": "serp-a",
+        "keyword": long,
+        "device": "desktop",
+        "depth": 100,
+        "status": "completed",
+        "observed_at": run["observed_at"],
+        "items": [
+            {
+                "type": "organic",
+                "rank": i + 1,
+                "organic_rank": i + 1,
+                "title": "t" * 200,
+                "url": f"https://example.com/{'u' * 2000}{i}",
+                "domain": "example.com",
+                "description": "d" * 400,
+            }
+            for i in range(100)
+        ],
+    }
+    service.get_serp.return_value = snapshot
+    service.list_serps.return_value = [
+        {k: v for k, v in snapshot.items() if k != "items"}
+        | {"serp_id": f"s{i}", "item_count": 100}
+        for i in range(300)
+    ]
     service.get_run.return_value = run
     service.keyword_rows.return_value = saved
     service.list_runs.return_value = [run] * 300
@@ -149,12 +232,17 @@ async def test_every_tool_result_stays_readable_at_maximum_size(tool_env):
     preview = json.loads(context)
     assert preview["saved_keywords"]["total_count"] == 500
     assert preview["research_rows_preview"]["rows"][0]["search_volume"] == 499
+    assert 0 < preview["project_context"]["shown"] < preview["project_context"]["total_count"]
+    assert preview["project_context"]["next_offset"] == preview["project_context"]["shown"]
 
     for name, args, key, total, identity in [
         ("seo_list_research_rows", {"run_id": "run-a"}, "rows", 2500, "keyword"),
         ("seo_list_saved_keywords", {}, "rows", 500, "keyword"),
         ("seo_list_research_runs", {}, "runs", 300, None),
         ("seo_list_reports", {}, "reports", 100, "report_id"),
+        ("seo_get_project_context", {}, "entries", 244, None),
+        ("seo_list_serps", {}, "serps", 300, "serp_id"),
+        ("seo_get_serp", {"serp_id": "serp-a"}, "items", 100, "url"),
     ]:
         seen: list = []
         offset: int | None = 0

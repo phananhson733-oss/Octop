@@ -10,6 +10,16 @@ from octop.infra.db.pool import DatabasePool
 from octop.infra.utils.ulid import new_ulid
 
 
+def _run_summary(run: dict[str, Any]) -> dict[str, Any]:
+    """The run without its keyword rows, which is all a listing needs."""
+    return {k: v for k, v in run.items() if k not in {"results", "calls"}} | {
+        "results": [
+            {k: v for k, v in result.items() if k != "rows"} | {"row_count": len(result["rows"])}
+            for result in run["results"]
+        ]
+    }
+
+
 class SeoRepo:
     def __init__(self, db: DatabasePool) -> None:
         self._db = db
@@ -41,11 +51,30 @@ class SeoRepo:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def set_agent(self, user_id: int, project_id: str, agent_id: str) -> str | None:
+        """Bind ``agent_id``; returns the previous agent id, or ``"conflict"`` if it is taken."""
+        with self._db.transaction() as conn:
+            row = conn.execute(
+                "SELECT agent_id FROM seo_projects WHERE project_id=? AND user_id=?"
+                + (" FOR UPDATE" if self._db.dialect == "postgresql" else ""),
+                (project_id, user_id),
+            ).fetchone()
+            taken = conn.execute(
+                "SELECT project_id FROM seo_projects WHERE agent_id=? AND project_id<>?",
+                (agent_id, project_id),
+            ).fetchone()
+            if row is None or taken is not None:
+                return "conflict"
+            conn.execute(
+                "UPDATE seo_projects SET agent_id=? WHERE project_id=?", (agent_id, project_id)
+            )
+            return str(row["agent_id"] or "")
+
     def start_run(self, run: dict[str, Any], key: str, input_hash: str) -> bool:
         with self._db.transaction() as conn:
             cur = conn.execute(
                 "INSERT INTO seo_runs(run_id,project_id,idempotency_key,input_hash,"
-                "created_at,status,payload) VALUES(?,?,?,?,?,?,?) "
+                "created_at,status,payload,summary) VALUES(?,?,?,?,?,?,?,?) "
                 "ON CONFLICT(project_id,idempotency_key) DO NOTHING",
                 (
                     run["run_id"],
@@ -55,6 +84,7 @@ class SeoRepo:
                     int(time.time()),
                     run["status"],
                     json.dumps(run),
+                    json.dumps(_run_summary(run)),
                 ),
             )
             return bool(cur.rowcount == 1)
@@ -79,16 +109,38 @@ class SeoRepo:
     def update_run(self, run: dict[str, Any]) -> None:
         with self._db.transaction() as conn:
             conn.execute(
-                "UPDATE seo_runs SET status=?,payload=? WHERE run_id=?",
-                (run["status"], json.dumps(run), run["run_id"]),
+                "UPDATE seo_runs SET status=?,payload=?,summary=? WHERE run_id=?",
+                (run["status"], json.dumps(run), json.dumps(_run_summary(run)), run["run_id"]),
             )
 
-    def runs(self, project_id: str) -> list[dict[str, Any]]:
+    def run(self, project_id: str, run_id: str) -> dict[str, Any] | None:
+        with self._db.connect() as conn:
+            row = conn.execute(
+                "SELECT payload FROM seo_runs WHERE project_id=? AND run_id=?",
+                (project_id, run_id),
+            ).fetchone()
+        return json.loads(row["payload"]) if row else None
+
+    def run_summaries(self, project_id: str) -> list[dict[str, Any]]:
+        """Runs newest first, without rows, each with its call costs from one grouped query."""
         with self._db.connect() as conn:
             rows = conn.execute(
-                "SELECT payload FROM seo_runs WHERE project_id=? ORDER BY id DESC", (project_id,)
+                "SELECT summary FROM seo_runs WHERE project_id=? ORDER BY id DESC", (project_id,)
             ).fetchall()
-        return [json.loads(row["payload"]) for row in rows]
+            costs = conn.execute(
+                "SELECT c.run_id, COUNT(*) AS calls, SUM(c.cost_usd) AS known,"
+                " SUM(CASE WHEN c.cost_usd IS NULL THEN 1 ELSE 0 END) AS missing"
+                " FROM seo_calls c JOIN seo_runs r ON r.run_id=c.run_id"
+                " WHERE r.project_id=? GROUP BY c.run_id",
+                (project_id,),
+            ).fetchall()
+        by_run = {row["run_id"]: dict(row) for row in costs}
+        out = []
+        for row in rows:
+            summary = json.loads(row["summary"])
+            summary["call_costs"] = by_run.get(summary["run_id"])
+            out.append(summary)
+        return out
 
     def call_start(self, call: dict[str, Any]) -> None:
         with self._db.transaction() as conn:
@@ -197,6 +249,211 @@ class SeoRepo:
             "created_count": created,
             "updated_count": len(rows) - created,
         }
+
+    def start_serp(self, serp: dict[str, Any], key: str) -> bool:
+        with self._db.transaction() as conn:
+            cur = conn.execute(
+                "INSERT INTO seo_serps(serp_id,project_id,idempotency_key,keyword,location_code,"
+                "language_code,device,depth,created_at,status,item_count,cached,payload,items)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(project_id,idempotency_key) DO NOTHING",
+                (
+                    serp["serp_id"],
+                    serp["project_id"],
+                    key,
+                    serp["keyword"],
+                    serp["location_code"],
+                    serp["language_code"],
+                    serp["device"],
+                    serp["depth"],
+                    int(time.time()),
+                    serp["status"],
+                    len(serp["items"]),
+                    int(serp["cached"]),
+                    json.dumps({k: v for k, v in serp.items() if k != "items"}),
+                    json.dumps(serp["items"]),
+                ),
+            )
+            return bool(cur.rowcount == 1)
+
+    def update_serp(self, serp: dict[str, Any]) -> None:
+        with self._db.transaction() as conn:
+            conn.execute(
+                "UPDATE seo_serps SET status=?,item_count=?,payload=?,items=? WHERE serp_id=?",
+                (
+                    serp["status"],
+                    len(serp["items"]),
+                    json.dumps({k: v for k, v in serp.items() if k != "items"}),
+                    json.dumps(serp["items"]),
+                    serp["serp_id"],
+                ),
+            )
+
+    def serp_for_key(self, project_id: str, key: str) -> dict[str, Any] | None:
+        with self._db.connect() as conn:
+            row = conn.execute(
+                "SELECT payload,items FROM seo_serps WHERE project_id=? AND idempotency_key=?",
+                (project_id, key),
+            ).fetchone()
+        return {**json.loads(row["payload"]), "items": json.loads(row["items"])} if row else None
+
+    def serp(self, project_id: str, serp_id: str) -> dict[str, Any] | None:
+        with self._db.connect() as conn:
+            row = conn.execute(
+                "SELECT payload,items FROM seo_serps WHERE project_id=? AND serp_id=?",
+                (project_id, serp_id),
+            ).fetchone()
+        return {**json.loads(row["payload"]), "items": json.loads(row["items"])} if row else None
+
+    def cached_serp(
+        self, project_id: str, market: dict[str, Any], depth: int, since: int
+    ) -> dict[str, Any] | None:
+        """Newest bought, non-empty snapshot at least ``depth`` deep observed after ``since``.
+
+        Cache copies are skipped, so a copy never extends the original's freshness.
+        """
+        with self._db.connect() as conn:
+            row = conn.execute(
+                "SELECT payload,items FROM seo_serps WHERE project_id=? AND keyword=?"
+                " AND location_code=? AND language_code=? AND device=? AND status='completed'"
+                " AND cached=0 AND item_count>0 AND depth>=? AND created_at>?"
+                " ORDER BY id DESC LIMIT 1",
+                (
+                    project_id,
+                    market["keyword"],
+                    market["location_code"],
+                    market["language_code"],
+                    market["device"],
+                    depth,
+                    since,
+                ),
+            ).fetchone()
+        return {**json.loads(row["payload"]), "items": json.loads(row["items"])} if row else None
+
+    def serps(self, project_id: str, keyword: str | None = None) -> list[dict[str, Any]]:
+        """Snapshot summaries newest first, without their result rows."""
+        sql = "SELECT payload,item_count FROM seo_serps WHERE project_id=?"
+        args: list[Any] = [project_id]
+        if keyword is not None:
+            sql += " AND keyword=?"
+            args.append(keyword)
+        with self._db.connect() as conn:
+            rows = conn.execute(sql + " ORDER BY id DESC", args).fetchall()
+        return [json.loads(row["payload"]) | {"item_count": row["item_count"]} for row in rows]
+
+    def context(self, project_id: str, log_limit: int) -> dict[str, list[dict[str, Any]]]:
+        with self._db.connect() as conn:
+            sections = conn.execute(
+                "SELECT section_key,title,content,updated_at,updated_by FROM seo_context_sections"
+                " WHERE project_id=? ORDER BY section_key",
+                (project_id,),
+            ).fetchall()
+            competitors = conn.execute(
+                "SELECT domain,name,notes,updated_at,updated_by FROM seo_competitors"
+                " WHERE project_id=? ORDER BY domain",
+                (project_id,),
+            ).fetchall()
+            pages = conn.execute(
+                "SELECT url,role,topic,notes,updated_at,updated_by FROM seo_key_pages"
+                " WHERE project_id=? ORDER BY url",
+                (project_id,),
+            ).fetchall()
+            log = conn.execute(
+                "SELECT log_id,entry_date,summary,created_by,created_at FROM seo_research_log"
+                " WHERE project_id=? ORDER BY created_at DESC, id DESC LIMIT ?",
+                (project_id, log_limit),
+            ).fetchall()
+        return {
+            "sections": [dict(row) for row in sections],
+            "competitors": [dict(row) for row in competitors],
+            "key_pages": [dict(row) for row in pages],
+            "research_log": [dict(row) for row in log],
+        }
+
+    def apply_context(
+        self, project_id: str, ops: list[tuple[str, Any]], author: str, now: str
+    ) -> None:
+        """Apply resolved context writes in one transaction: all of them or none."""
+        with self._db.transaction() as conn:
+            conn.execute(
+                "SELECT project_id FROM seo_projects WHERE project_id=?"
+                + (" FOR UPDATE" if self._db.dialect == "postgresql" else ""),
+                (project_id,),
+            ).fetchone()
+            for kind, value in ops:
+                if kind == "upsert_section":
+                    conn.execute(
+                        "INSERT INTO seo_context_sections(project_id,section_key,title,content,"
+                        "updated_at,updated_by) VALUES(?,?,?,?,?,?)"
+                        " ON CONFLICT(project_id,section_key) DO UPDATE SET"
+                        " title=coalesce(excluded.title,seo_context_sections.title),"
+                        " content=excluded.content,updated_at=excluded.updated_at,"
+                        " updated_by=excluded.updated_by",
+                        (project_id, value["key"], value["title"], value["content"], now, author),
+                    )
+                elif kind == "delete_section":
+                    conn.execute(
+                        "DELETE FROM seo_context_sections WHERE project_id=? AND section_key=?",
+                        (project_id, value),
+                    )
+                elif kind == "upsert_competitor":
+                    conn.execute(
+                        "INSERT INTO seo_competitors(project_id,domain,name,notes,updated_at,"
+                        "updated_by) VALUES(?,?,?,?,?,?)"
+                        " ON CONFLICT(project_id,domain) DO UPDATE SET"
+                        " name=coalesce(excluded.name,seo_competitors.name),"
+                        " notes=coalesce(excluded.notes,seo_competitors.notes),"
+                        " updated_at=excluded.updated_at,updated_by=excluded.updated_by",
+                        (project_id, value["domain"], value["name"], value["notes"], now, author),
+                    )
+                elif kind == "delete_competitor":
+                    conn.execute(
+                        "DELETE FROM seo_competitors WHERE project_id=? AND domain=?",
+                        (project_id, value),
+                    )
+                elif kind == "upsert_key_page":
+                    # An omitted role keeps the stored one; a new row defaults to "other".
+                    conn.execute(
+                        "INSERT INTO seo_key_pages(project_id,url,role,topic,notes,updated_at,"
+                        "updated_by) VALUES(?,?,?,?,?,?,?)"
+                        " ON CONFLICT(project_id,url) DO UPDATE SET"
+                        + (" role=excluded.role," if value["role"] else "")
+                        + " topic=coalesce(excluded.topic,seo_key_pages.topic),"
+                        " notes=coalesce(excluded.notes,seo_key_pages.notes),"
+                        " updated_at=excluded.updated_at,updated_by=excluded.updated_by",
+                        (
+                            project_id,
+                            value["url"],
+                            value["role"] or "other",
+                            value["topic"],
+                            value["notes"],
+                            now,
+                            author,
+                        ),
+                    )
+                elif kind == "delete_key_page":
+                    conn.execute(
+                        "DELETE FROM seo_key_pages WHERE project_id=? AND url=?",
+                        (project_id, value),
+                    )
+                elif kind == "append_log":
+                    conn.execute(
+                        "INSERT INTO seo_research_log(log_id,project_id,entry_date,summary,"
+                        "created_by,created_at) VALUES(?,?,?,?,?,?)",
+                        (new_ulid(), project_id, now[:10], value["summary"], author, now),
+                    )
+                    # The log only answers "was this already studied recently?".
+                    conn.execute(
+                        "DELETE FROM seo_research_log WHERE project_id=? AND entry_date<?",
+                        (project_id, value["prune_before"]),
+                    )
+                elif kind == "delete_log":
+                    conn.execute(
+                        "DELETE FROM seo_research_log WHERE project_id=? AND log_id=?",
+                        (project_id, value),
+                    )
+                else:
+                    raise ValueError(kind)
 
     def keywords(self, project_id: str) -> list[dict[str, Any]]:
         with self._db.connect() as conn:

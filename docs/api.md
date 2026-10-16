@@ -406,6 +406,31 @@ registration (DCR), stores encrypted tokens in the custom MCP spec, and injects 
 Bearer` when loading tools. Loopback and LAN MCP URLs may use HTTP and do not use remote OAuth
 discovery.
 
+## SEO workbench
+
+Admin only. Paid DataForSEO calls (`research`, `serps`) require
+`confirm_paid: true` and an `idempotency_key`; the same key with the same
+input returns the earlier result instead of paying again. Deleting the bound
+expert keeps the project and its evidence with `agent_id: null` until it is
+rebound.
+
+| Method | Path | Auth | Notes |
+|--------|------|------|-------|
+| `GET`/`POST` | `/seo/projects` | admin | list / create (bound to an owned, unshared expert) |
+| `PATCH`  | `/seo/projects/{id}` | admin | body `{agent_id}` — rebind to another expert |
+| `GET`/`PUT` | `/seo/provider` | admin | `{configured}`; `PUT {login, password}` stores encrypted credentials |
+| `POST`   | `/seo/projects/{id}/research` | admin | paid keyword research → full run |
+| `GET`    | `/seo/projects/{id}/runs` | admin | run summaries (per-seed `row_count`, no rows) |
+| `GET`    | `/seo/projects/{id}/runs/{run_id}` | admin | one run with keyword rows |
+| `POST`   | `/seo/projects/{id}/serps` | admin | body `{keyword, device, depth: 20\|100}` — paid Google SERP; a repeat within 12 h is served from the saved copy at no charge |
+| `GET`    | `/seo/projects/{id}/serps?keyword=` | admin | snapshot summaries, newest first |
+| `GET`    | `/seo/projects/{id}/serps/{serp_id}` | admin | one snapshot with result rows |
+| `GET`/`PATCH` | `/seo/projects/{id}/context` | admin | project background; `PATCH {updates: [...]}` applies all ops or none |
+| `GET`/`POST` | `/seo/projects/{id}/keywords` | admin | saved keywords (paged) / save rows from a run |
+| `GET`    | `/seo/projects/{id}/report-context?run_id=` | admin | evidence and `context_hash` for an agent report |
+| `GET`/`POST` | `/seo/projects/{id}/reports` | admin | report metadata / save an immutable HTML report |
+| `GET`    | `/seo/projects/{id}/reports/{report_id}` | admin | report with HTML |
+
 ## Internal MCP (octop-harness agents)
 
 | Method | Path | Auth | Notes |

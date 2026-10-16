@@ -623,7 +623,11 @@
     "seo_list_research_runs": "列出 SEO 研究记录",
     "seo_list_research_rows": "读取 SEO 研究结果行",
     "seo_save_report": "保存 SEO 报告",
-    "seo_list_reports": "列出 SEO 报告"
+    "seo_list_reports": "列出 SEO 报告",
+    "seo_get_project_context": "读取 SEO 项目背景",
+    "seo_update_project_context": "更新 SEO 项目背景",
+    "seo_list_serps": "列出 SEO 搜索结果快照",
+    "seo_get_serp": "读取 SEO 搜索结果快照"
   },
   "skills": {
     "pdf": "PDF 处理",

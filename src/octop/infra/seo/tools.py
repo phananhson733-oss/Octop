@@ -22,22 +22,29 @@ if TYPE_CHECKING:
 MAX_RESULT_CHARS = 60_000
 _PREVIEW_ROWS = 50
 _PAGE_ROWS = 100
+# Room the report context gives project background before keyword rows.
+_CONTEXT_PREVIEW_CHARS = 20_000
 
 _REPORT_GUIDE = """Write one complete self-contained HTML keyword-research report from the returned
 research and saved-keyword evidence. Include the business opportunity, a prioritized table,
 why each selected term fits, missing metrics and shared-volume caveats, next steps, and an
 explicit methodology/source-date section. Treat keyword metrics as evidence, not guaranteed
 traffic. Never invent metrics or silently replace unknown values with zero. Distinguish a
-saved shortlist from all researched terms. This context shows previews only: when
-saved_keywords or research_rows_preview has more rows than shown, read the rest with
-seo_list_saved_keywords and seo_list_research_rows, passing next_offset until it is null.
-Trend entries are [year, month, search_volume]. Use inline CSS and static HTML/SVG only: no
+saved shortlist from all researched terms. Ground the report in project_context (business,
+goal, positioning, writing preferences, competitors, key pages); say which sections are missing
+rather than guessing them. This context shows previews only: when saved_keywords,
+research_rows_preview or project_context has more entries than shown, read the rest with
+seo_list_saved_keywords, seo_list_research_rows and seo_get_project_context, passing
+next_offset until it is null. SERP snapshots already bought are read with seo_list_serps and
+seo_get_serp; you cannot buy new ones. Trend entries are [year, month, search_volume]. Use inline CSS and static HTML/SVG only: no
 scripts, forms, remote images, remote CSS, or external data fetches. The document must contain
 <html and end with </html>, under 500000 UTF-8 bytes (aim below 80000). Write the actual
 analysis, then call seo_save_report with this exact run_id and context_hash, a title <=120
 characters and summary <=2500. If saving reports a context conflict, read the context again
 and revise the report against the changed evidence before saving; never just substitute a new
 hash. Saving creates a private immutable report; it does not publish it or buy any SEO data.
+After saving, record what you concluded with seo_update_project_context
+append_research_log; the research log is not part of context_hash.
 """
 
 
@@ -98,12 +105,50 @@ def _run_summary(run: dict[str, Any]) -> dict[str, Any]:
                 "ok": result["ok"],
                 "source": result["source"],
                 "used_fallback": result["used_fallback"],
-                "row_count": len(result["rows"]),
+                "row_count": result["row_count"] if "row_count" in result else len(result["rows"]),
                 "error": result.get("error"),
             }
             for result in run["results"]
         ]
     }
+
+
+def _context_entries(context: dict[str, Any]) -> list[dict[str, Any]]:
+    """Project background as one list, so any part of it pages like rows do."""
+    return (
+        [{"kind": "section"} | row for row in context["sections"]]
+        + [{"kind": "custom_section"} | row for row in context["custom_sections"]]
+        + [{"kind": "competitor"} | row for row in context["competitors"]]
+        + [{"kind": "key_page"} | row for row in context["key_pages"]]
+        + [{"kind": "research_log"} | row for row in context.get("research_log", [])]
+    )
+
+
+def _prefix(items: list[Any], budget: int) -> int:
+    """How many leading ``items`` fit ``budget`` characters, halving from all of them."""
+    count = len(items)
+    while count and len(json.dumps(items[:count], ensure_ascii=False)) > budget:
+        count //= 2
+    return count
+
+
+def _serp_summary(serp: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "serp_id",
+        "keyword",
+        "device",
+        "depth",
+        "status",
+        "observed_at",
+        "location_code",
+        "language_code",
+        "cached",
+        "source_serp_id",
+        "cost_usd",
+        "error",
+    )
+    count = serp["item_count"] if "item_count" in serp else len(serp["items"])
+    return {key: serp.get(key) for key in keys} | {"item_count": count}
 
 
 def _fit(build: Callable[[int], dict[str, Any]], count: int) -> str:
@@ -161,6 +206,8 @@ def build_seo_tools(
             _research_rows(data["run"]),
             key=lambda row: (row["search_volume"] is None, -(row["search_volume"] or 0)),
         )
+        background = _context_entries(data["project_context"])
+        shown = _prefix(background, _CONTEXT_PREVIEW_CHARS)
 
         def build(count: int) -> dict[str, Any]:
             # Hash and instructions first; the context_hash covers the full evidence.
@@ -170,6 +217,13 @@ def build_seo_tools(
                 "report_instructions": _REPORT_GUIDE,
                 "instructions": data["instructions"],
                 "project": data["project"],
+                "project_context": {
+                    "missing_sections": data["project_context"]["missing_sections"],
+                    "total_count": len(background),
+                    "shown": shown,
+                    "next_offset": shown if shown < len(background) else None,
+                    "entries": background[:shown],
+                },
                 "run": _run_summary(data["run"]),
                 "saved_keywords": {
                     "total_count": len(saved),
@@ -200,6 +254,46 @@ def build_seo_tools(
         user_id, project_id, _thread_id = await context()
         runs = await service.list_runs(user_id, project_id)
         return _page([_run_summary(run) for run in runs], offset, "runs")
+
+    async def project_context(offset: int = 0) -> str:
+        user_id, project_id, _thread_id = await context()
+        data = await service.project_context(user_id, project_id)
+        head = {
+            "missing_sections": data["missing_sections"],
+            "research_log_limit": data["research_log_limit"],
+        }
+        return _page(_context_entries(data), offset, "entries", head)
+
+    async def update_project_context(updates: list[dict[str, Any]]) -> str:
+        user_id, project_id, _thread_id = await context()
+        data = await service.update_context(user_id, project_id, updates, author="agent")
+        # The whole context can exceed a result; counts confirm the write.
+        return json.dumps(
+            {
+                "applied": len(updates),
+                "missing_sections": data["missing_sections"],
+                "counts": {
+                    key: len(data[key])
+                    for key in (
+                        "sections",
+                        "custom_sections",
+                        "competitors",
+                        "key_pages",
+                        "research_log",
+                    )
+                },
+            }
+        )
+
+    async def serps(keyword: str = "", offset: int = 0) -> str:
+        user_id, project_id, _thread_id = await context()
+        rows = await service.list_serps(user_id, project_id, keyword=keyword or None)
+        return _page([_serp_summary(row) for row in rows], offset, "serps")
+
+    async def serp(serp_id: str, offset: int = 0) -> str:
+        user_id, project_id, _thread_id = await context()
+        snapshot = await service.get_serp(user_id, project_id, serp_id)
+        return _page(snapshot["items"], offset, "items", _serp_summary(snapshot))
 
     async def save_report(
         run_id: str, context_hash: str, title: str, summary: str, html: str
@@ -253,6 +347,41 @@ def build_seo_tools(
             research_runs,
             "List existing research runs for this agent's project as summaries, including "
             "failures, costs and source dates. Rows are read with seo_list_research_rows.",
+        ),
+        (
+            "seo_get_project_context",
+            project_context,
+            "Read this agent's project background: business overview, current goal, "
+            "positioning, writing preferences, custom sections, competitors, key pages and the "
+            "newest research log entries. Free. missing_sections lists standard sections nobody "
+            "filled in. Pass next_offset as offset to read more.",
+        ),
+        (
+            "seo_update_project_context",
+            update_project_context,
+            "Change this agent's project background with a list of ops applied atomically. "
+            'Ops: {"section": "business_overview"|"current_goal"|"positioning"|'
+            '"writing_preferences", "content": "..."} ("" clears it); {"custom_section": '
+            '"launch-plan", "title": "...", "content": "..."}; {"delete_custom_section": slug}; '
+            '{"add_competitors": [{"domain", "name", "notes"}]}; {"remove_competitors": [domain]};'
+            ' {"add_key_pages": [{"url", "role": "hub"|"spoke"|"money"|"other", "topic", '
+            '"notes"}]}; {"remove_key_pages": [url]}; {"append_research_log": {"summary": '
+            '"..."}}; {"remove_research_log": [log_id]}. Sections hold 4000 characters. Confirm '
+            "facts with the user before storing them. Free; buys nothing.",
+        ),
+        (
+            "seo_list_serps",
+            serps,
+            "List Google SERP snapshots already bought for this agent's project, newest first, "
+            "optionally for one keyword. Free; you cannot buy new snapshots. Pass next_offset "
+            "as offset to read more.",
+        ),
+        (
+            "seo_get_serp",
+            serp,
+            "Read one SERP snapshot's results. rank counts every SERP element (ads, People Also "
+            "Ask, ...); organic_rank counts organic results only, as rank trackers do. Free. "
+            "Pass next_offset as offset to read more.",
         ),
         (
             "seo_save_report",

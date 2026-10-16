@@ -5,15 +5,18 @@ from __future__ import annotations
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query, Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from octop.api.deps import current_user, get_server, require_admin
 from octop.infra.seo.models import (
+    ContextUpdate,
     KeywordsSave,
     ProjectCreate,
+    ProjectUpdate,
     ProviderPut,
     ReportCreate,
     ResearchCreate,
+    SerpCreate,
 )
 from octop.infra.seo.service import SeoService
 from octop.infra.server import OctopServer
@@ -26,7 +29,9 @@ class Project(BaseModel):
     project_id: str
     name: str
     domain: str
-    agent_id: str
+    agent_id: str | None = Field(
+        description="Bound expert; null after that expert was deleted, until it is rebound."
+    )
     location_code: int
     language_code: str
     created_at: str
@@ -68,6 +73,121 @@ class ResearchRun(BaseModel):
     cost_known_usd: float = 0
     cached: bool
     error: str | None = None
+
+
+class RunSeedSummary(BaseModel):
+    seed: str
+    ok: bool
+    source: str
+    used_fallback: bool
+    row_count: int
+    error: str | None = None
+
+
+class RunSummary(BaseModel):
+    model_config = ConfigDict(extra="allow")
+    run_id: str
+    project_id: str
+    status: str
+    observed_at: str
+    location_code: int
+    language_code: str
+    results: list[RunSeedSummary]
+    cost_usd: float | None
+    cost_known_usd: float = 0
+    cached: bool
+    error: str | None = None
+
+
+class SerpItem(BaseModel):
+    type: str = Field(description="SERP element type, e.g. organic, people_also_ask, paid.")
+    rank: int | None = Field(description="Position among all SERP elements.")
+    organic_rank: int | None = Field(
+        description="Position among organic results only, as rank trackers count; null otherwise."
+    )
+    title: str | None = None
+    url: str | None = None
+    domain: str | None = None
+    description: str | None = None
+    etv: float | None = None
+    estimated_paid_traffic_cost: float | None = None
+    referring_domains: int | None = None
+    backlinks: int | None = None
+
+
+class SerpSummary(BaseModel):
+    serp_id: str
+    project_id: str
+    keyword: str
+    location_code: int
+    language_code: str
+    device: str
+    depth: int = Field(description="How many rows the snapshot was crawled for.")
+    requested_depth: int
+    status: str
+    observed_at: str
+    item_count: int
+    cost_usd: float | None
+    cached: bool = Field(description="Reused within 12 hours at no charge.")
+    source_serp_id: str | None = None
+    error: str | None = None
+
+
+class SerpSnapshot(SerpSummary):
+    items: list[SerpItem]
+
+
+class ContextSection(BaseModel):
+    key: str
+    content: str
+    updated_at: str
+    updated_by: str
+
+
+class CustomSection(BaseModel):
+    slug: str
+    title: str | None
+    content: str
+    updated_at: str
+    updated_by: str
+
+
+class Competitor(BaseModel):
+    domain: str
+    name: str | None
+    notes: str | None
+    updated_at: str
+    updated_by: str
+
+
+class KeyPage(BaseModel):
+    url: str
+    role: str
+    topic: str | None
+    notes: str | None
+    updated_at: str
+    updated_by: str
+
+
+class ResearchLogEntry(BaseModel):
+    log_id: str
+    entry_date: str
+    summary: str
+    created_by: str
+    created_at: str
+
+
+class ContextEvidence(BaseModel):
+    sections: list[ContextSection]
+    missing_sections: list[str] = Field(description="Standard sections nobody filled in yet.")
+    custom_sections: list[CustomSection]
+    competitors: list[Competitor]
+    key_pages: list[KeyPage]
+
+
+class ProjectContext(ContextEvidence):
+    research_log: list[ResearchLogEntry] = Field(description="Newest entries first.")
+    research_log_limit: int
 
 
 class SavedKeyword(KeywordRow):
@@ -113,12 +233,17 @@ class ReportContext(BaseModel):
     project: Project
     run: ResearchRun
     saved_keywords: list[SavedKeyword]
+    project_context: ContextEvidence
     instructions: str
 
 
 def seo_service(server: OctopServer = Depends(get_server)) -> SeoService:
     assert server.services is not None
     return SeoService(server.services.repos)
+
+
+def _snapshot(serp: dict[str, Any]) -> dict[str, Any]:
+    return serp | {"item_count": len(serp["items"])}
 
 
 @router.get("/projects", response_model=list[Project], summary="List your SEO projects")
@@ -138,6 +263,27 @@ async def create_project(
     project = await service.create_project(user.id, **body.model_dump())
     if server.app_runtime is not None:
         await server.app_runtime.agent_registry.reload(body.agent_id)
+    return project
+
+
+@router.patch(
+    "/projects/{project_id}",
+    response_model=Project,
+    summary="Bind an SEO project to another expert",
+    description="Rebinds a project, for example after its expert was deleted. The target must be "
+    "your own unshared expert without another SEO project. The Agent tools move with the binding.",
+)
+async def update_project(
+    project_id: str,
+    body: ProjectUpdate,
+    user: User = Depends(current_user),
+    service: SeoService = Depends(seo_service),
+    server: OctopServer = Depends(get_server),
+) -> Any:
+    project, previous = await service.bind_agent(user.id, project_id, **body.model_dump())
+    if server.app_runtime is not None:
+        for agent_id in {body.agent_id} | ({previous} if previous else set()):
+            await server.app_runtime.agent_registry.reload(agent_id)
     return project
 
 
@@ -176,8 +322,10 @@ async def research(
 
 @router.get(
     "/projects/{project_id}/runs",
-    response_model=list[ResearchRun],
-    summary="List keyword research evidence",
+    response_model=list[RunSummary],
+    summary="List keyword research runs",
+    description="Newest first, with per-seed status and row counts but no keyword rows. "
+    "Read one run's rows with the run endpoint.",
 )
 async def runs(
     project_id: str, user: User = Depends(current_user), service: SeoService = Depends(seo_service)
@@ -197,6 +345,84 @@ async def run(
     service: SeoService = Depends(seo_service),
 ) -> Any:
     return await service.get_run(user.id, project_id, run_id)
+
+
+@router.post(
+    "/projects/{project_id}/serps",
+    response_model=SerpSnapshot,
+    summary="Buy a Google SERP snapshot",
+    description="Requires explicit paid confirmation. Calls DataForSEO SERP live directly without "
+    "retries, at depth 20 or 100. The same keyword, device and market within 12 hours is served "
+    "from a non-empty snapshot at least as deep, at no charge. Reuse the idempotency key to read "
+    "an existing attempt.",
+)
+async def buy_serp(
+    project_id: str,
+    body: SerpCreate,
+    user: User = Depends(current_user),
+    service: SeoService = Depends(seo_service),
+) -> Any:
+    return _snapshot(await service.serp(user.id, project_id, **body.model_dump()))
+
+
+@router.get(
+    "/projects/{project_id}/serps",
+    response_model=list[SerpSummary],
+    summary="List SERP snapshots",
+    description="Newest first, without result rows. No supplier request is made.",
+)
+async def serps(
+    project_id: str,
+    keyword: str | None = None,
+    user: User = Depends(current_user),
+    service: SeoService = Depends(seo_service),
+) -> Any:
+    return await service.list_serps(user.id, project_id, keyword=keyword)
+
+
+@router.get(
+    "/projects/{project_id}/serps/{serp_id}",
+    response_model=SerpSnapshot,
+    summary="Read a SERP snapshot",
+)
+async def serp(
+    project_id: str,
+    serp_id: str,
+    user: User = Depends(current_user),
+    service: SeoService = Depends(seo_service),
+) -> Any:
+    return _snapshot(await service.get_serp(user.id, project_id, serp_id))
+
+
+@router.get(
+    "/projects/{project_id}/context",
+    response_model=ProjectContext,
+    summary="Read project background",
+    description="Business overview, goal, positioning, writing preferences, custom sections, "
+    "competitors, key pages and the newest research log entries.",
+)
+async def project_context(
+    project_id: str, user: User = Depends(current_user), service: SeoService = Depends(seo_service)
+) -> Any:
+    return await service.project_context(user.id, project_id)
+
+
+@router.patch(
+    "/projects/{project_id}/context",
+    response_model=ProjectContext,
+    summary="Update project background",
+    description="Applies up to 50 ops in order and atomically: a rejected op writes nothing. "
+    "Sections hold up to 4000 characters, a project up to 20 custom sections, 100 competitors "
+    "and 100 key pages. Competitors upsert by domain and key pages by URL.",
+)
+async def update_project_context(
+    project_id: str,
+    body: ContextUpdate,
+    user: User = Depends(current_user),
+    service: SeoService = Depends(seo_service),
+) -> Any:
+    updates = [op.model_dump(exclude_none=True) for op in body.updates]
+    return await service.update_context(user.id, project_id, updates, author="user")
 
 
 @router.post(

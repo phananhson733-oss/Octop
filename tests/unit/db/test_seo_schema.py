@@ -7,7 +7,19 @@ from pathlib import Path
 from octop.infra.db.migrate import _max_discovered_version, run_migrations
 from octop.infra.db.pool import SqlitePool
 
-SEO_TABLES = {"seo_projects", "seo_runs", "seo_calls", "seo_keywords", "seo_tags", "seo_reports"}
+SEO_TABLES = {
+    "seo_projects",
+    "seo_runs",
+    "seo_calls",
+    "seo_keywords",
+    "seo_tags",
+    "seo_reports",
+    "seo_serps",
+    "seo_context_sections",
+    "seo_competitors",
+    "seo_key_pages",
+    "seo_research_log",
+}
 
 
 def _state(pool: SqlitePool) -> tuple[int, set[str]]:

@@ -9,7 +9,12 @@ import {
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import SeoWorkbench from "./index";
-import { seoApi, type ResearchRun } from "../../../api/modules/seo";
+import {
+  seoApi,
+  type ProjectContext,
+  type ResearchRun,
+  type RunSummary,
+} from "../../../api/modules/seo";
 import { octopThreadsApi } from "../../../api/modules/octopThreads";
 import { staticReportHtml } from "./reportPreview";
 
@@ -20,14 +25,22 @@ const translate = vi.hoisted(
       : key,
 );
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: translate }) }));
-vi.mock("../../../api/modules/seo", () => ({
+vi.mock("../../../api/modules/seo", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../api/modules/seo")>()),
   seoApi: {
     projects: vi.fn(),
     provider: vi.fn(),
     createProject: vi.fn(),
+    bindAgent: vi.fn(),
     configureProvider: vi.fn(),
     runs: vi.fn(),
+    run: vi.fn(),
     research: vi.fn(),
+    buySerp: vi.fn(),
+    serps: vi.fn(),
+    serp: vi.fn(),
+    context: vi.fn(),
+    updateContext: vi.fn(),
     keywords: vi.fn(),
     saveKeywords: vi.fn(),
     reports: vi.fn(),
@@ -92,28 +105,41 @@ const run: ResearchRun = {
   cost_usd: null,
   cached: false,
 };
+function summary(full: ResearchRun): RunSummary {
+  return {
+    ...full,
+    results: full.results.map(({ rows, ...rest }) => ({
+      ...rest,
+      row_count: rows.length,
+    })),
+  };
+}
+const project = {
+  project_id: "p1",
+  name: "Site",
+  domain: "example.com",
+  agent_id: "agent-one",
+  location_code: 2840,
+  language_code: "en",
+  created_at: "2026-10-14T12:00:00Z",
+};
 const originalComputedStyle = window.getComputedStyle;
 beforeEach(() => {
   vi.spyOn(window, "getComputedStyle").mockImplementation((element) =>
     originalComputedStyle(element),
   );
   vi.clearAllMocks();
-  vi.mocked(seoApi.projects).mockResolvedValue([
-    {
-      project_id: "p1",
-      name: "Site",
-      domain: "example.com",
-      agent_id: "agent-one",
-      location_code: 2840,
-      language_code: "en",
-      created_at: "2026-10-14T12:00:00Z",
-    },
-  ]);
+  window.sessionStorage.clear();
+  vi.mocked(seoApi.projects).mockResolvedValue([project]);
   vi.mocked(seoApi.provider).mockResolvedValue({ configured: true });
   vi.mocked(seoApi.runs).mockResolvedValue([]);
   vi.mocked(seoApi.keywords).mockResolvedValue({ rows: [], total_count: 0 });
   vi.mocked(seoApi.reports).mockResolvedValue([]);
   vi.mocked(seoApi.research).mockResolvedValue(run);
+  vi.mocked(seoApi.run).mockImplementation(async (_, runId) => {
+    if (runId !== run.run_id) throw new Error(`unexpected run ${runId}`);
+    return run;
+  });
   vi.mocked(seoApi.saveKeywords).mockResolvedValue({
     saved_count: 1,
     created_count: 1,
@@ -235,7 +261,7 @@ describe("SEO native workflow", () => {
     expect(seoApi.research).not.toHaveBeenCalled();
   });
   it("clears selection and preserves the viewed run after returning to the workbench", async () => {
-    vi.mocked(seoApi.runs).mockResolvedValue([run]);
+    vi.mocked(seoApi.runs).mockResolvedValue([summary(run)]);
     const view = render(
       <MemoryRouter>
         <SeoWorkbench isVisible />
@@ -252,7 +278,7 @@ describe("SEO native workflow", () => {
       </MemoryRouter>,
     );
     vi.mocked(seoApi.runs).mockResolvedValue([
-      {
+      summary({
         ...run,
         run_id: "new-run",
         results: [
@@ -264,8 +290,8 @@ describe("SEO native workflow", () => {
             rows: [{ ...row, keyword: "new result" }],
           },
         ],
-      },
-      run,
+      }),
+      summary(run),
     ]);
     view.rerender(
       <MemoryRouter>
@@ -291,6 +317,223 @@ describe("SEO native workflow", () => {
       screen.getByRole("button", { name: "seo.runResearch" }),
     ).toBeDisabled();
     expect(seoApi.research).not.toHaveBeenCalled();
+  });
+  it("opens one tab per seed, loads only the open run and restores tabs for the session", async () => {
+    vi.mocked(seoApi.runs).mockResolvedValue([summary(run)]);
+    const view = render(
+      <MemoryRouter>
+        <SeoWorkbench />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("zero volume")).toBeVisible();
+    expect(screen.getByRole("tab", { name: /^seo\s/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    const failedTab = screen.getByRole("tab", { name: /^failed\s/ });
+    fireEvent.click(failedTab);
+    await waitFor(() =>
+      expect(screen.queryByText("zero volume")).not.toBeInTheDocument(),
+    );
+    expect(screen.getByText("seo.emptyResults")).toBeVisible();
+    expect(seoApi.run).toHaveBeenCalledTimes(1);
+    // Closing the active last tab selects its left neighbour.
+    fireEvent.click(
+      failedTab
+        .closest(".ant-tabs-tab")!
+        .querySelector(".ant-tabs-tab-remove")!,
+    );
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: /^seo\s/ })).toHaveAttribute(
+        "aria-selected",
+        "true",
+      ),
+    );
+    expect(
+      screen.queryByRole("tab", { name: /^failed\s/ }),
+    ).not.toBeInTheDocument();
+    view.unmount();
+    // A newer run does not replace the tabs restored from this session.
+    vi.mocked(seoApi.runs).mockResolvedValue([
+      summary({ ...run, run_id: "new-run" }),
+      summary(run),
+    ]);
+    render(
+      <MemoryRouter>
+        <SeoWorkbench />
+      </MemoryRouter>,
+    );
+    expect(await screen.findByText("zero volume")).toBeVisible();
+    expect(
+      screen.getAllByRole("tab", { name: /^(seo|failed)\s/ }),
+    ).toHaveLength(1);
+    expect(seoApi.run).not.toHaveBeenCalledWith("p1", "new-run");
+    expect(seoApi.research).not.toHaveBeenCalled();
+  });
+  it("reads saved SERP snapshots on open and buys only on a confirmed click", async () => {
+    vi.mocked(seoApi.runs).mockResolvedValue([summary(run)]);
+    vi.mocked(seoApi.serps).mockResolvedValue([]);
+    vi.mocked(seoApi.buySerp)
+      .mockRejectedValueOnce(new Error("Network unavailable"))
+      .mockResolvedValueOnce({
+        serp_id: "serp-one",
+        keyword: "zero volume",
+        device: "desktop",
+        depth: 20,
+        requested_depth: 20,
+        status: "completed",
+        observed_at: "2026-10-14T12:00:00Z",
+        item_count: 2,
+        cost_usd: 0.002,
+        cached: false,
+        items: [
+          {
+            type: "organic",
+            rank: 1,
+            organic_rank: 1,
+            title: "Safe result",
+            url: "https://safe.test/a",
+            domain: "safe.test",
+            description: null,
+          },
+          {
+            type: "organic",
+            rank: 2,
+            organic_rank: 2,
+            title: "Unsafe result",
+            url: "javascript:alert(1)",
+            domain: "evil.test",
+            description: null,
+          },
+        ],
+      });
+    setup();
+    const keyword = await screen.findByText("zero volume");
+    fireEvent.click(
+      within(keyword.closest("tr")!).getByRole("button", {
+        name: "seo.viewSerp",
+      }),
+    );
+    expect(await screen.findByText("seo.serpNotBought")).toBeVisible();
+    expect(seoApi.serps).toHaveBeenCalledWith("p1", "zero volume");
+    expect(seoApi.buySerp).not.toHaveBeenCalled();
+    async function buyTop20() {
+      fireEvent.click(screen.getByRole("button", { name: "seo.serpBuyTop20" }));
+      const confirm = await screen.findAllByRole("button", {
+        name: "seo.serpConfirmBuy",
+      });
+      await act(async () => {
+        fireEvent.click(confirm[confirm.length - 1]);
+      });
+    }
+    await buyTop20();
+    expect(await screen.findByText("Network unavailable")).toBeVisible();
+    await buyTop20();
+    expect(await screen.findByText("Safe result")).toHaveAttribute(
+      "href",
+      "https://safe.test/a",
+    );
+    expect(screen.getByText("Unsafe result").closest("a")).toBeNull();
+    const [first, second] = vi.mocked(seoApi.buySerp).mock.calls;
+    expect(first).toEqual([
+      "p1",
+      {
+        keyword: "zero volume",
+        device: "desktop",
+        depth: 20,
+        idempotency_key: expect.any(String),
+        confirm_paid: true,
+      },
+    ]);
+    expect(second[1].idempotency_key).toBe(first[1].idempotency_key);
+  });
+  it("loads project background only when opened and saves each change as one batch", async () => {
+    const context: ProjectContext = {
+      sections: [],
+      missing_sections: [
+        "business_overview",
+        "current_goal",
+        "positioning",
+        "writing_preferences",
+      ],
+      custom_sections: [],
+      competitors: [],
+      key_pages: [],
+      research_log: [
+        {
+          log_id: "log-one",
+          entry_date: "2026-10-14",
+          summary: "Wrote the first report",
+          created_by: "agent",
+          created_at: "2026-10-14T12:00:00Z",
+        },
+      ],
+      research_log_limit: 20,
+    };
+    vi.mocked(seoApi.context).mockResolvedValue(context);
+    vi.mocked(seoApi.updateContext).mockResolvedValue(context);
+    setup();
+    await screen.findByLabelText("seo.seeds");
+    expect(seoApi.context).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("tab", { name: "seo.context" }));
+    fireEvent.change(
+      await screen.findByLabelText("seo.section_business_overview"),
+      { target: { value: "Short drama apps" } },
+    );
+    const enabled = screen
+      .getAllByRole("button", { name: "seo.contextSave" })
+      .filter((button) => !button.hasAttribute("disabled"));
+    expect(enabled).toHaveLength(1);
+    fireEvent.click(enabled[0]);
+    await waitFor(() =>
+      expect(seoApi.updateContext).toHaveBeenCalledWith("p1", [
+        { section: "business_overview", content: "Short drama apps" },
+      ]),
+    );
+    fireEvent.change(screen.getByLabelText("seo.competitorDomain"), {
+      target: { value: "rival.test" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "seo.addCompetitor" }));
+    await waitFor(() =>
+      expect(seoApi.updateContext).toHaveBeenLastCalledWith("p1", [
+        { add_competitors: [{ domain: "rival.test" }] },
+      ]),
+    );
+    fireEvent.click(
+      within(
+        screen.getByText("Wrote the first report").closest("li")!,
+      ).getByRole("button", { name: "seo.contextRemove" }),
+    );
+    await waitFor(() =>
+      expect(seoApi.updateContext).toHaveBeenLastCalledWith("p1", [
+        { remove_research_log: ["log-one"] },
+      ]),
+    );
+  });
+  it("keeps an unbound project readable and rebinds it to another expert", async () => {
+    vi.mocked(seoApi.projects).mockResolvedValue([
+      { ...project, agent_id: null },
+    ]);
+    vi.mocked(seoApi.runs).mockResolvedValue([summary(run)]);
+    vi.mocked(seoApi.bindAgent).mockResolvedValue(project);
+    setup();
+    expect(await screen.findByText("zero volume")).toBeVisible();
+    expect(screen.getByText("seo.unbound")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "seo.generateReport" }),
+    ).toBeDisabled();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "seo.agent" }));
+    fireEvent.click(await screen.findByTitle("My SEO"));
+    fireEvent.click(screen.getByRole("button", { name: "seo.bindAgent" }));
+    await waitFor(() =>
+      expect(seoApi.bindAgent).toHaveBeenCalledWith("p1", "agent-one"),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("seo.unbound")).not.toBeInTheDocument(),
+    );
+    expect(
+      screen.getByRole("button", { name: "seo.generateReport" }),
+    ).toBeEnabled();
   });
 });
 describe("static private report preview", () => {

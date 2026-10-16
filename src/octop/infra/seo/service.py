@@ -6,6 +6,7 @@ import asyncio
 import hashlib
 import json
 import re
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from functools import partial
@@ -19,11 +20,25 @@ from octop.infra.connectors.crypto import decrypt_credentials, encrypt_credentia
 from octop.infra.db.services import RepoBundle
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.seo.models import (
+    SECTION_KEYS,
+    AddCompetitorsOp,
+    AddKeyPagesOp,
+    AppendResearchLogOp,
+    ContextOp,
+    ContextUpdate,
+    CustomSectionOp,
+    DeleteCustomSectionOp,
     KeywordsSave,
     ProjectCreate,
+    ProjectUpdate,
     ProviderPut,
+    RemoveCompetitorsOp,
+    RemoveKeyPagesOp,
+    RemoveResearchLogOp,
     ReportCreate,
     ResearchCreate,
+    SectionOp,
+    SerpCreate,
 )
 from octop.infra.seo.provider import (
     DataForSeoClient,
@@ -41,6 +56,158 @@ def _now() -> str:
 
 def _error(code: ErrorCode = ErrorCode.SEO_INVALID_INPUT) -> OctopError:
     return OctopError.localized(code)
+
+
+# OpenSEO serves a SERP from its cache for 12 hours (research/serp.ts).
+SERP_CACHE_SECONDS = 12 * 60 * 60
+# Project memory caps from OpenSEO contextUpdateOps.ts / ProjectContextService.ts.
+PROSE_MAX_CHARS = 4000
+MAX_CUSTOM_SECTIONS = 20
+MAX_COMPETITORS = 100
+MAX_KEY_PAGES = 100
+RESEARCH_LOG_LIMIT = 20
+RESEARCH_LOG_RETENTION_DAYS = 90
+CUSTOM_PREFIX = "custom:"
+
+
+def _stale(item: dict[str, Any], minutes: int) -> bool:
+    return item["status"] == "running" and datetime.fromisoformat(
+        item["observed_at"]
+    ) < datetime.now(UTC) - timedelta(minutes=minutes)
+
+
+def _text(value: str | None) -> str | None:
+    return (value.strip() or None) if value is not None else None
+
+
+def _bare_host(raw: str) -> str:
+    """``https://www.Example.com/x`` -> ``example.com``, so one competitor is one row."""
+    text = raw.strip()
+    parts = urlsplit(text if "://" in text else "https://" + text)
+    host = (parts.hostname or "").removeprefix("www.")
+    if (
+        parts.scheme not in {"http", "https"}
+        or parts.username
+        or parts.password
+        or not re.fullmatch(r"[a-z0-9.-]+", host)
+        or "." not in host
+    ):
+        raise ValueError(f"Not a valid domain: {raw}")
+    return host
+
+
+def _key_page_url(raw: str) -> str:
+    """Force https, drop ``www.`` and the fragment, keep path and query (contextUpdateOps.ts)."""
+    text = raw.strip()
+    parts = urlsplit(text if re.match(r"^[a-z][a-z0-9+.-]*://", text, re.I) else "https://" + text)
+    host = (parts.hostname or "").removeprefix("www.")
+    if (
+        parts.scheme.lower() not in {"http", "https"}
+        or not host
+        or parts.username
+        or parts.password
+    ):
+        raise ValueError(f"Not a valid page URL: {raw}")
+    port = f":{parts.port}" if parts.port and parts.port != 443 else ""
+    path = parts.path or "/"
+    url = f"https://{host}{port}{path}" + (f"?{parts.query}" if parts.query else "")
+    return url[:-1] if path == "/" and not parts.query else url
+
+
+def _resolve_context(
+    updates: list[ContextOp], *, custom: set[str], domains: set[str], urls: set[str]
+) -> list[tuple[str, Any]]:
+    """Normalize and cap a whole batch before any write, so a rejected op writes nothing."""
+    prune_before = (datetime.now(UTC) - timedelta(days=RESEARCH_LOG_RETENTION_DAYS)).date()
+    ops: list[tuple[str, Any]] = []
+
+    def prose(content: str) -> str:
+        content = content.strip()
+        if len(content) > PROSE_MAX_CHARS:
+            raise ValueError(f"Sections are capped at {PROSE_MAX_CHARS} characters")
+        return content
+
+    def resolve(op: ContextOp) -> None:
+        if isinstance(op, SectionOp):
+            content = prose(op.content)
+            # Empty clears it, so it reads back as missing rather than as an empty section.
+            if content:
+                ops.append(
+                    ("upsert_section", {"key": op.section, "title": None, "content": content})
+                )
+            else:
+                ops.append(("delete_section", op.section))
+        elif isinstance(op, CustomSectionOp):
+            key = CUSTOM_PREFIX + op.custom_section
+            content = prose(op.content)
+            if not content:
+                ops.append(("delete_section", key))
+                custom.discard(key)
+                return
+            if key not in custom and len(custom) >= MAX_CUSTOM_SECTIONS:
+                raise ValueError(f"A project can hold {MAX_CUSTOM_SECTIONS} custom sections")
+            ops.append(
+                ("upsert_section", {"key": key, "title": _text(op.title), "content": content})
+            )
+            custom.add(key)
+        elif isinstance(op, DeleteCustomSectionOp):
+            key = CUSTOM_PREFIX + op.delete_custom_section
+            ops.append(("delete_section", key))
+            custom.discard(key)
+        elif isinstance(op, AddCompetitorsOp):
+            # A repeated domain in one op collapses to its last occurrence.
+            rows: dict[str, dict[str, Any]] = {}
+            for competitor in op.add_competitors:
+                domain = _bare_host(competitor.domain)
+                rows[domain] = {
+                    "domain": domain,
+                    "name": _text(competitor.name),
+                    "notes": _text(competitor.notes),
+                }
+            if len(domains | rows.keys()) > MAX_COMPETITORS:
+                raise ValueError(f"A project can track {MAX_COMPETITORS} competitors")
+            ops.extend(("upsert_competitor", row) for row in rows.values())
+            domains.update(rows)
+        elif isinstance(op, RemoveCompetitorsOp):
+            removed = [_bare_host(domain) for domain in op.remove_competitors]
+            ops.extend(("delete_competitor", domain) for domain in removed)
+            domains.difference_update(removed)
+        elif isinstance(op, AddKeyPagesOp):
+            pages: dict[str, dict[str, Any]] = {}
+            for page in op.add_key_pages:
+                url = _key_page_url(page.url)
+                pages[url] = {
+                    "url": url,
+                    "role": page.role,
+                    "topic": _text(page.topic),
+                    "notes": _text(page.notes),
+                }
+            if len(urls | pages.keys()) > MAX_KEY_PAGES:
+                raise ValueError(f"A project can hold {MAX_KEY_PAGES} key pages")
+            ops.extend(("upsert_key_page", row) for row in pages.values())
+            urls.update(pages)
+        elif isinstance(op, RemoveKeyPagesOp):
+            removed = [_key_page_url(url) for url in op.remove_key_pages]
+            ops.extend(("delete_key_page", url) for url in removed)
+            urls.difference_update(removed)
+        elif isinstance(op, AppendResearchLogOp):
+            summary = op.append_research_log.summary.strip()
+            if not summary:
+                raise ValueError("A research log entry needs a summary")
+            ops.append(("append_log", {"summary": summary, "prune_before": str(prune_before)}))
+        elif isinstance(op, RemoveResearchLogOp):
+            ops.extend(("delete_log", log_id) for log_id in op.remove_research_log)
+
+    for index, op in enumerate(updates):
+        try:
+            resolve(op)
+        except ValueError as exc:
+            # The batch is atomic, so name the op that sank it.
+            raise OctopError.localized(
+                ErrorCode.SEO_INVALID_INPUT,
+                message=f"updates[{index}] was rejected (nothing in this batch was applied): {exc}",
+            ) from exc
+    return ops
 
 
 async def _db[T](fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
@@ -65,9 +232,8 @@ class SeoService:
         )
         if project is None:
             raise _error(ErrorCode.NOT_FOUND)
-        agent = await _db(self.repos.agent_repo.get, project["agent_id"])
-        if agent is None or agent.user_id != user_id or agent.is_shared or agent.kind != "expert":
-            raise _error(ErrorCode.FORBIDDEN)
+        # The bound agent only matters to Agent tools: a project whose agent was deleted
+        # (agent_id NULL) or shared keeps its evidence readable by its owner.
         return project
 
     async def project_for_agent(self, user_id: int, agent_id: str) -> dict[str, Any] | None:
@@ -76,7 +242,31 @@ class SeoService:
         )
         if project is None:
             return None
-        return await self._project(user_id, project["project_id"])
+        project = await self._project(user_id, project["project_id"])
+        agent = await _db(self.repos.agent_repo.get, agent_id)
+        if agent is None or agent.user_id != user_id or agent.kind != "expert":
+            raise _error(ErrorCode.FORBIDDEN)
+        return project
+
+    async def _bindable_agent(self, user_id: int, agent_id: str) -> None:
+        agent = await _db(self.repos.agent_repo.get, agent_id)
+        if agent is None or agent.user_id != user_id or agent.is_shared or agent.kind != "expert":
+            raise _error(ErrorCode.FORBIDDEN)
+
+    async def bind_agent(
+        self, user_id: int, project_id: str, **kwargs: Any
+    ) -> tuple[dict[str, Any], str | None]:
+        """Bind the project to another owned expert; returns it and the previous agent id."""
+        try:
+            command = ProjectUpdate.model_validate(kwargs)
+        except ValidationError as exc:
+            raise _error() from exc
+        await self._project(user_id, project_id)
+        await self._bindable_agent(user_id, command.agent_id)
+        previous = await _db(self.repo.set_agent, user_id, project_id, command.agent_id)
+        if previous == "conflict":
+            raise _error(ErrorCode.SEO_CONFLICT)
+        return await self._project(user_id, project_id), previous or None
 
     async def create_project(
         self,
@@ -113,9 +303,7 @@ class SeoService:
         domain = host.hostname.lower()
         if not re.fullmatch(r"[a-z0-9.-]+", domain) or "." not in domain:
             raise _error()
-        agent = await _db(self.repos.agent_repo.get, agent_id)
-        if agent is None or agent.user_id != user_id or agent.is_shared or agent.kind != "expert":
-            raise _error(ErrorCode.FORBIDDEN)
+        await self._bindable_agent(user_id, agent_id)
         project = {
             "project_id": new_ulid(),
             "name": name,
@@ -152,33 +340,46 @@ class SeoService:
         value = await _db(decrypt_credentials, self.repos.secret_repo, raw.encode("ascii"))
         return DataForSeoClient(value["login"], value["password"])
 
+    async def _settle_run(self, run: dict[str, Any]) -> dict[str, Any]:
+        # Bounded request has at most 15 calls, each 60s, with auto legs concurrent.
+        # Stale rows remain evidence and are never automatically purchased again.
+        if _stale(run, 20):
+            run.update(status="unknown", error="interrupted")
+            await _db(self.repo.update_run, run)
+        return run
+
     async def list_runs(self, user_id: int, project_id: str) -> list[dict[str, Any]]:
+        """Run summaries, newest first: per-seed status and row counts, no keyword rows."""
         await self._project(user_id, project_id)
-        runs = await _db(self.repo.runs, project_id)
+        runs = await _db(self.repo.run_summaries, project_id)
+        stale = [run["run_id"] for run in runs if _stale(run, 20)]
+        for run_id in stale:
+            full = await _db(self.repo.run, project_id, run_id)
+            if full is not None:
+                await self._settle_run(full)
+        if stale:
+            runs = await _db(self.repo.run_summaries, project_id)
         for run in runs:
-            # Bounded request has at most 15 calls, each 60s, with auto legs concurrent.
-            # Stale rows remain evidence and are never automatically purchased again.
-            if run["status"] == "running" and datetime.fromisoformat(
-                run["observed_at"]
-            ) < datetime.now(UTC) - timedelta(minutes=20):
-                run.update(status="unknown", error="interrupted")
-                await _db(self.repo.update_run, run)
-            run["calls"] = await _db(self.repo.calls, run["run_id"])
+            totals = run.pop("call_costs") or {"calls": 0, "known": None, "missing": 0}
             if not run.get("cached"):
-                costs = [call["cost_usd"] for call in run["calls"]]
-                run["cost_known_usd"] = sum(cost for cost in costs if cost is not None)
+                run["cost_known_usd"] = totals["known"] or 0
                 run["cost_usd"] = (
-                    sum(costs) if costs and all(c is not None for c in costs) else None
+                    totals["known"] if totals["calls"] and not totals["missing"] else None
                 )
         return runs
 
     async def get_run(self, user_id: int, project_id: str, run_id: str) -> dict[str, Any]:
-        result = next(
-            (r for r in await self.list_runs(user_id, project_id) if r["run_id"] == run_id), None
-        )
-        if result is None:
+        await self._project(user_id, project_id)
+        run = await _db(self.repo.run, project_id, run_id)
+        if run is None:
             raise _error(ErrorCode.NOT_FOUND)
-        return result
+        run = await self._settle_run(run)
+        run["calls"] = await _db(self.repo.calls, run_id)
+        if not run.get("cached"):
+            costs = [call["cost_usd"] for call in run["calls"]]
+            run["cost_known_usd"] = sum(cost for cost in costs if cost is not None)
+            run["cost_usd"] = sum(costs) if costs and all(c is not None for c in costs) else None
+        return run
 
     async def research(self, user_id: int, project_id: str, **kwargs: Any) -> dict[str, Any]:
         project = await self._project(user_id, project_id)
@@ -392,15 +593,196 @@ class SeoService:
             if search.lower() in row["keyword"]
         ]
 
+    async def _settle_serp(self, serp: dict[str, Any]) -> dict[str, Any]:
+        # One live call of at most 60s; a row still running after that was interrupted.
+        if _stale(serp, 5):
+            serp.update(status="unknown", error="interrupted")
+            await _db(self.repo.update_serp, serp)
+        return serp
+
+    async def serp(self, user_id: int, project_id: str, **kwargs: Any) -> dict[str, Any]:
+        """Buy, or reuse within 12 hours, one Google organic SERP snapshot for the market."""
+        project = await self._project(user_id, project_id)
+        try:
+            command = SerpCreate.model_validate(kwargs)
+        except ValidationError as exc:
+            raise _error() from exc
+        keyword = normalize_keyword(command.keyword)
+        if not keyword:
+            raise _error()
+        market = {
+            "keyword": keyword,
+            "location_code": project["location_code"],
+            "language_code": project["language_code"],
+            "device": command.device,
+        }
+
+        async def replay() -> dict[str, Any] | None:
+            previous = await _db(self.repo.serp_for_key, project_id, command.idempotency_key)
+            if previous is None:
+                return None
+            if (previous["keyword"], previous["device"], previous["requested_depth"]) != (
+                keyword,
+                command.device,
+                command.depth,
+            ):
+                raise _error(ErrorCode.SEO_CONFLICT)
+            return await self._settle_serp(previous)
+
+        if (previous := await replay()) is not None:
+            return previous
+        # The depth lives in the snapshot, not the cache key: a 100-deep snapshot also
+        # answers a 20-deep request. Empty snapshots never answer from cache, so a
+        # transient "no results" never hides a good snapshot.
+        cached = await _db(
+            self.repo.cached_serp,
+            project_id,
+            market,
+            command.depth,
+            int(time.time()) - SERP_CACHE_SECONDS,
+        )
+        client = None if cached else await self._client(user_id)
+        serp: dict[str, Any] = market | {
+            "serp_id": new_ulid(),
+            "project_id": project_id,
+            "status": "running",
+            "observed_at": _now(),
+            "depth": command.depth,
+            "requested_depth": command.depth,
+            "items": [],
+            "cost_usd": None,
+            "cached": False,
+            "source_serp_id": None,
+            "error": None,
+            "receipt": {},
+        }
+        if cached:
+            # Cache copies keep the original observation date and depth.
+            serp.update(
+                status="completed",
+                observed_at=cached["observed_at"],
+                depth=cached["depth"],
+                items=cached["items"],
+                cost_usd=0,
+                cached=True,
+                source_serp_id=cached["serp_id"],
+                receipt=cached["receipt"],
+            )
+        if not await _db(self.repo.start_serp, serp, command.idempotency_key):
+            previous = await replay()
+            assert previous is not None
+            return previous
+        if cached:
+            return serp
+        assert client is not None
+        try:
+            items, cost, receipt = await client.serp(
+                keyword=keyword,
+                location_code=market["location_code"],
+                language_code=market["language_code"],
+                device=command.device,
+                depth=command.depth,
+            )
+            serp.update(status="completed", items=items, cost_usd=cost, receipt=receipt)
+        except ProviderFailure as exc:
+            serp.update(
+                status="unknown" if exc.unknown else "failed",
+                cost_usd=exc.cost,
+                error=str(exc),
+                receipt=exc.receipt,
+            )
+        except BaseException:
+            serp.update(status="unknown", error="interrupted")
+            await asyncio.shield(_db(self.repo.update_serp, serp))
+            raise
+        await _db(self.repo.update_serp, serp)
+        return serp
+
+    async def list_serps(
+        self, user_id: int, project_id: str, *, keyword: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Snapshot summaries newest first, without result rows."""
+        await self._project(user_id, project_id)
+        keyword = normalize_keyword(keyword) if keyword is not None else None
+        serps = await _db(self.repo.serps, project_id, keyword)
+        stale = [serp["serp_id"] for serp in serps if _stale(serp, 5)]
+        for serp_id in stale:
+            full = await _db(self.repo.serp, project_id, serp_id)
+            if full is not None:
+                await self._settle_serp(full)
+        return await _db(self.repo.serps, project_id, keyword) if stale else serps
+
+    async def get_serp(self, user_id: int, project_id: str, serp_id: str) -> dict[str, Any]:
+        await self._project(user_id, project_id)
+        serp = await _db(self.repo.serp, project_id, serp_id)
+        if serp is None:
+            raise _error(ErrorCode.NOT_FOUND)
+        return await self._settle_serp(serp)
+
+    async def project_context(self, user_id: int, project_id: str) -> dict[str, Any]:
+        await self._project(user_id, project_id)
+        raw = await _db(self.repo.context, project_id, RESEARCH_LOG_LIMIT)
+        stored = {row["section_key"]: row for row in raw["sections"]}
+        return {
+            # Typed sections keep their declared order; missing ones tell what to fill.
+            "sections": [
+                {"key": key}
+                | {k: v for k, v in stored[key].items() if k not in {"section_key", "title"}}
+                for key in SECTION_KEYS
+                if key in stored
+            ],
+            "missing_sections": [key for key in SECTION_KEYS if key not in stored],
+            "custom_sections": [
+                {"slug": row["section_key"].removeprefix(CUSTOM_PREFIX)}
+                | {k: v for k, v in row.items() if k != "section_key"}
+                for row in raw["sections"]
+                if row["section_key"].startswith(CUSTOM_PREFIX)
+            ],
+            "competitors": raw["competitors"],
+            "key_pages": raw["key_pages"],
+            # Newest entries only; the window is the last RESEARCH_LOG_RETENTION_DAYS days.
+            "research_log": raw["research_log"],
+            "research_log_limit": RESEARCH_LOG_LIMIT,
+        }
+
+    async def update_context(
+        self, user_id: int, project_id: str, updates: list[Any], *, author: str
+    ) -> dict[str, Any]:
+        """Apply a batch of context ops atomically; ``author`` is ``user`` or ``agent``."""
+        await self._project(user_id, project_id)
+        try:
+            command = ContextUpdate.model_validate({"updates": updates})
+        except ValidationError as exc:
+            raise _error() from exc
+        raw = await _db(self.repo.context, project_id, 0)
+        ops = _resolve_context(
+            command.updates,
+            custom={
+                row["section_key"]
+                for row in raw["sections"]
+                if row["section_key"].startswith(CUSTOM_PREFIX)
+            },
+            domains={row["domain"] for row in raw["competitors"]},
+            urls={row["url"] for row in raw["key_pages"]},
+        )
+        await _db(self.repo.apply_context, project_id, ops, author, _now())
+        return await self.project_context(user_id, project_id)
+
     async def report_context(self, user_id: int, project_id: str, run_id: str) -> dict[str, Any]:
         project = await self._project(user_id, project_id)
         run = await self.get_run(user_id, project_id, run_id)
         if run["status"] == "running" or not any(r["ok"] for r in run["results"]):
             raise _error()
+        context = await self.project_context(user_id, project_id)
         evidence = {
             "project": project,
             "run": run,
             "saved_keywords": await _db(self.repo.keywords, project_id),
+            # The research log is left out: the Agent appends to it while it works,
+            # which must not invalidate the report it is writing.
+            "project_context": {
+                k: v for k, v in context.items() if k not in {"research_log", "research_log_limit"}
+            },
         }
         context_hash = hashlib.sha256(
             json.dumps(evidence, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode(

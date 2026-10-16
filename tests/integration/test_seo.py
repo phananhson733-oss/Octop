@@ -8,7 +8,7 @@ import json
 import httpx
 
 from octop.infra.seo.provider import DataForSeoClient
-from tests.support.auth import create_user
+from tests.support.auth import create_agent, create_user
 
 
 async def test_private_keyword_and_report_workflow(env_with_agent, monkeypatch):
@@ -141,3 +141,128 @@ async def test_private_keyword_and_report_workflow(env_with_agent, monkeypatch):
     schema = build_app(server).openapi()
     assert schema["paths"]["/api/seo/projects/{project_id}/reports"]["post"]["summary"]
     assert schema["paths"]["/api/seo/projects/{project_id}/reports"]["post"]["requestBody"]
+
+
+async def test_serp_background_and_rebinding_over_http(env_with_agent, monkeypatch):
+    import octop.infra.seo.service as module
+
+    client, server, auth, agent_id = env_with_agent
+    calls = []
+
+    def supplier(request):
+        calls.append(request.url.path)
+        item = (
+            {"type": "organic", "rank_group": 1, "rank_absolute": 3, "domain": "a.com"}
+            if "serp" in request.url.path
+            else {"keyword": "example seo", "keyword_info": {"search_volume": 120}}
+        )
+        task = {"status_code": 20000, "cost": 0.01, "result": [{"items": [item]}]}
+        return httpx.Response(200, json={"status_code": 20000, "tasks": [task]})
+
+    monkeypatch.setattr(
+        module,
+        "DataForSeoClient",
+        functools.partial(DataForSeoClient, transport=httpx.MockTransport(supplier)),
+    )
+    created = await client.post(
+        "/api/seo/projects",
+        headers=auth,
+        json={"name": "Example", "domain": "example.com", "agent_id": agent_id},
+    )
+    project_id = created.json()["project_id"]
+    base = f"/api/seo/projects/{project_id}"
+    await client.put(
+        "/api/seo/provider", headers=auth, json={"login": "fixture", "password": "secret"}
+    )
+    run = (
+        await client.post(
+            base + "/research",
+            headers=auth,
+            json={
+                "keywords": ["example"],
+                "mode": "ideas",
+                "idempotency_key": "r",
+                "confirm_paid": True,
+            },
+        )
+    ).json()
+    listed = (await client.get(base + "/runs", headers=auth)).json()
+    assert listed[0]["results"][0]["row_count"] == 1 and "rows" not in listed[0]["results"][0]
+    one = (await client.get(base + "/runs/" + run["run_id"], headers=auth)).json()
+    assert one["results"][0]["rows"][0]["keyword"] == "example seo"
+
+    serp_request = {"keyword": "example seo", "idempotency_key": "s", "confirm_paid": True}
+    bought = await client.post(base + "/serps", headers=auth, json=serp_request)
+    assert bought.status_code == 200, bought.text
+    serp = bought.json()
+    assert (serp["item_count"], serp["items"][0]["rank"], serp["items"][0]["organic_rank"]) == (
+        1,
+        3,
+        1,
+    )
+    assert "receipt" not in serp
+    unpaid = serp_request | {"idempotency_key": "s2", "confirm_paid": False}
+    assert (await client.post(base + "/serps", headers=auth, json=unpaid)).status_code == 422
+    summaries = (
+        await client.get(base + "/serps", headers=auth, params={"keyword": "example seo"})
+    ).json()
+    assert [s["serp_id"] for s in summaries] == [serp["serp_id"]] and "items" not in summaries[0]
+    read = (await client.get(base + "/serps/" + serp["serp_id"], headers=auth)).json()
+    assert read["items"] == serp["items"]
+    assert calls.count("/v3/serp/google/organic/live/advanced") == 1
+
+    patched = await client.patch(
+        base + "/context",
+        headers=auth,
+        json={
+            "updates": [
+                {"section": "current_goal", "content": "Grow"},
+                {"add_competitors": [{"domain": "www.rival.com"}]},
+            ]
+        },
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["competitors"][0]["domain"] == "rival.com"
+    assert patched.json()["sections"][0]["updated_by"] == "user"
+    bad = await client.patch(
+        base + "/context", headers=auth, json={"updates": [{"section": "x", "content": ""}]}
+    )
+    assert bad.status_code == 422
+    background = (await client.get(base + "/context", headers=auth)).json()
+    assert "business_overview" in background["missing_sections"]
+
+    # Deleting the expert keeps the project; rebinding restores report generation.
+    assert (await client.delete(f"/api/agents/{agent_id}", headers=auth)).status_code == 204
+    (project,) = (await client.get("/api/seo/projects", headers=auth)).json()
+    assert project["agent_id"] is None
+    assert (await client.get(base + "/runs/" + run["run_id"], headers=auth)).status_code == 200
+    second = await create_agent(client, auth, name="seo-second")
+    rebound = await client.patch(base, headers=auth, json={"agent_id": second})
+    assert rebound.status_code == 200, rebound.text
+    assert rebound.json()["agent_id"] == second
+
+    other = await create_user(client, auth, username="seo-r1-other")
+    for method, path, body in [
+        ("patch", base, {"agent_id": second}),
+        ("get", base + "/runs", None),
+        ("post", base + "/serps", serp_request),
+        ("get", base + "/serps", None),
+        ("get", base + "/serps/" + serp["serp_id"], None),
+        ("get", base + "/context", None),
+        ("patch", base + "/context", {"updates": [{"section": "current_goal", "content": ""}]}),
+    ]:
+        kwargs = {"headers": other} | ({"json": body} if body is not None else {})
+        assert (await getattr(client, method)(path, **kwargs)).status_code == 403, path
+
+    from octop.api.app import build_app
+
+    paths = build_app(server).openapi()["paths"]
+    for path, method in [
+        ("/api/seo/projects/{project_id}", "patch"),
+        ("/api/seo/projects/{project_id}/serps", "post"),
+        ("/api/seo/projects/{project_id}/serps", "get"),
+        ("/api/seo/projects/{project_id}/serps/{serp_id}", "get"),
+        ("/api/seo/projects/{project_id}/context", "get"),
+        ("/api/seo/projects/{project_id}/context", "patch"),
+    ]:
+        assert paths[path][method]["summary"], path
