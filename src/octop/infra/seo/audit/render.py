@@ -87,6 +87,13 @@ _EXTRACT_SCRIPT = """
 (details) => {
   const text = document.body ? document.body.innerText : '';
   const clean = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+  // A heading's text as the HTML analyzer reads it: textContent (innerText would apply
+  // CSS text-transform), leaving out the subtrees it skips, such as an SVG logo's <title>.
+  const headingText = (heading) => {
+    const copy = heading.cloneNode(true);
+    copy.querySelectorAll('svg, script, style, noscript').forEach((node) => node.remove());
+    return clean(copy.textContent);
+  };
   const main = document.querySelector('main') || document.querySelector('[role="main"]')
     || document.querySelector('article') || document.body;
   const canonical = document.querySelector('link[rel~="canonical" i][href]');
@@ -97,8 +104,7 @@ _EXTRACT_SCRIPT = """
       (meta) => meta.getAttribute('content') || ''
     ).join(', '),
     canonical: canonical ? canonical.href : null,
-    // textContent, as the HTML parser sees it; innerText would apply CSS text-transform.
-    h1s: Array.from(document.querySelectorAll('h1'), (h) => (h.textContent || '').replace(/\\s+/g, ' ').trim())
+    h1s: Array.from(document.querySelectorAll('h1'), headingText)
       .filter(Boolean).slice(0, 5).map((h) => h.slice(0, 200)),
     word_count: text.split(/\\s+/).filter(Boolean).length,
     links: Array.from(document.querySelectorAll('a[href]'), (a) => a.href)
@@ -111,7 +117,7 @@ _EXTRACT_SCRIPT = """
     document_url: (performance.getEntriesByType('navigation')[0] || {}).name || location.href,
     outline: details
       ? Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6'),
-          (h) => [Number(h.tagName[1]), clean(h.textContent).slice(0, 150)])
+          (h) => [Number(h.tagName[1]), headingText(h).slice(0, 150)])
           .filter((entry) => entry[1]).slice(0, 60)
       : [],
     main_text: details && main ? main.innerText.slice(0, 40000) : '',
