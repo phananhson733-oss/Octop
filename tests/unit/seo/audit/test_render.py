@@ -9,6 +9,7 @@ import pytest
 from octop.infra.seo.audit.render import (
     MAX_REQUESTS_PER_PAGE,
     ChromiumRenderer,
+    Rendered,
     _HostGuard,
     render_record,
 )
@@ -168,6 +169,21 @@ def test_an_unchanged_page_has_no_findings() -> None:
 )
 def test_render_findings(render: dict[str, Any], expected: dict[str, Any]) -> None:
     assert _found(render) == expected
+
+
+def test_a_page_that_sends_the_browser_elsewhere_is_not_compared() -> None:
+    elsewhere = "https://example.com/en/products/bikes/strider"
+    rendered = Rendered(
+        status=200,
+        final_url=f"{elsewhere}#top",
+        title="Another page",
+        links=["https://example.com/en/a", "https://example.com/en/b", "https://example.com/en/c"],
+    )
+    record = render_record(rendered, URL, set())
+    assert record["final_url"] == elsewhere
+    # Its links are the other page's: no rendered-only diff, so no link checks either.
+    assert "rendered_only" not in record
+    assert _found(record) == {"render-redirected": {"final_url": elsewhere}}
 
 
 @pytest.mark.parametrize(

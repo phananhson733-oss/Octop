@@ -63,6 +63,7 @@ ISSUE_SEVERITY: dict[str, Severity] = {
     "images-missing-size": "info",
     "render-noindex": "critical",
     "render-error-state": "critical",
+    "render-redirected": "warning",
     "render-h1-changed": "warning",
     "render-canonical-changed": "warning",
     "render-content-missing-from-html": "warning",
@@ -90,6 +91,7 @@ FINALIZE_TYPES = frozenset(
         "hreflang-no-return-link",
         "render-noindex",
         "render-error-state",
+        "render-redirected",
         "render-h1-changed",
         "render-canonical-changed",
         "render-content-missing-from-html",
@@ -639,6 +641,11 @@ def _render_issues(
     status = render.get("status")
     if render.get("error") or (status is not None and status >= 400):
         report("render-failed", {"error": render.get("error"), "status_code": status})
+        return issues
+    final_url = render.get("final_url")
+    if final_url and final_url != page.url:
+        # The browser showed another page; comparing it with this page's HTML says nothing.
+        report("render-redirected", {"final_url": final_url})
         return issues
     robots = str(render.get("robots") or "")
     title = str(render.get("title") or "")

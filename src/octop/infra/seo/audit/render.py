@@ -101,6 +101,9 @@ _EXTRACT_SCRIPT = """
     unlinked: document.querySelectorAll('a:not([href]), [role="link"]:not([href])').length,
     json_ld_blocks: document.querySelectorAll('script[type="application/ld+json" i]').length,
     trace: window.__octopSeoTrace || [],
+    // Where the shown document was loaded from: a script redirect changes it, while
+    // history.replaceState (which only rewrites the address bar) does not.
+    document_url: (performance.getEntriesByType('navigation')[0] || {}).name || location.href,
     outline: details
       ? Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6'),
           (h) => [Number(h.tagName[1]), clean(h.textContent).slice(0, 150)])
@@ -245,7 +248,7 @@ class ChromiumRenderer:
                 await page.wait_for_load_state("networkidle", timeout=NETWORK_IDLE_MS)
             await page.wait_for_timeout(SETTLE_MS)
             data = await page.evaluate(_EXTRACT_SCRIPT, details)
-            result.final_url = page.url
+            result.final_url = data.get("document_url") or page.url
             for key in (
                 "title",
                 "robots",
@@ -286,7 +289,11 @@ def render_record(
     links = record.pop("links")
     if rendered.canonical:
         record["canonical"] = normalize_url(rendered.canonical) or rendered.canonical
-    if rendered.error is not None:
+    final_url = normalize_url(rendered.final_url) if rendered.final_url else None
+    if final_url is not None:
+        record["final_url"] = final_url
+    # A page that failed, or that sent the browser elsewhere, has no links of its own to diff.
+    if rendered.error is not None or final_url not in (None, page_url):
         return record
     internal = list(
         dict.fromkeys(

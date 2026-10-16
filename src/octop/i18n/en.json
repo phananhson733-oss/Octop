@@ -1122,6 +1122,11 @@
           "explanation": "The served HTML is a normal page, but while its scripts ran the page passed through a \"not found\" title or a noindex directive (the details show which, and how many milliseconds after navigation). If a search engine takes its snapshot in that moment — a slow data request is enough — a valid page is treated as missing or excluded.",
           "how_to_fix": "Do not render a not-found or noindex state while data is loading: keep the server-rendered title and robots until the data request has finished, and only switch to an error state on a confirmed missing record (ideally with a real 404 from the server)."
         },
+        "render-redirected": {
+          "title": "Page goes to another address after rendering",
+          "explanation": "The server returns this page normally, but once its scripts run the browser ends up on another address (a script redirect, or a server redirect only the browser gets). Google follows script redirects much like server ones, so this URL may be indexed as the other page or dropped. The rendered checks were skipped for it, since what the browser showed was the other page.",
+          "how_to_fix": "If the page should move, use a server-side 301 redirect. If it should stay, find the script that navigates away (locale or geo detection, a consent or login wall) and keep it from redirecting search engines."
+        },
         "render-h1-changed": {
           "title": "H1 changes after rendering",
           "explanation": "The page's H1 headings after JavaScript runs differ from those in the served HTML. Search engines may index either version, so the main heading the page ranks for becomes unpredictable, and a heading added only by script is missed by crawlers that do not render.",
