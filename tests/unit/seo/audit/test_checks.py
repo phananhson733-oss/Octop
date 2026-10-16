@@ -100,6 +100,17 @@ def test_a_large_valid_block_is_valid() -> None:
     assert (invalid, missing_required(documents)) == (0, [])
 
 
+def test_a_question_with_suggested_answers_only_is_complete() -> None:
+    documents, _ = parse_blocks(
+        [
+            '{"@type": "QAPage", "mainEntity": {"@type": "Question", "name": "Which bike?",'
+            ' "answerCount": 1, "suggestedAnswer": [{"@type": "Answer", "text": "Any."}]}}',
+            '{"@type": "Question", "name": "Unanswered?"}',
+        ]
+    )
+    assert missing_required(documents) == ["Question: acceptedAnswer | suggestedAnswer"]
+
+
 def test_faq_questions_must_be_visible() -> None:
     documents, _ = parse_blocks(
         [

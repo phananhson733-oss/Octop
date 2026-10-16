@@ -26,7 +26,9 @@ REQUIRED: dict[str, tuple[tuple[str, ...], ...]] = {
     "BreadcrumbList": (("itemListElement",),),
     "ListItem": (("position",), ("name", "item")),
     "FAQPage": (("mainEntity",),),
-    "Question": (("name",), ("acceptedAnswer",)),
+    # A QAPage question may have only suggested answers. An FAQPage question needs an
+    # accepted one, but nodes are judged without their parent, so either will do here.
+    "Question": (("name",), ("acceptedAnswer", "suggestedAnswer")),
     "VideoObject": (("name",), ("thumbnailUrl",), ("uploadDate",)),
     "Event": (("name",), ("startDate",), ("location",)),
     "Recipe": (("name",), ("image",)),
