@@ -15,8 +15,9 @@ from octop.infra.db.pool import DatabasePool
 
 _ROW = (
     "audit_id,project_id,started_by,requested_url,start_url,max_pages,status,phase,"
-    "pages_crawled,pages_total,discovered_count,sitemap_count,crawl_complete,rate_limited,"
-    "error_code,error_detail,failed_phase,cancel_requested,created_at,started_at,completed_at"
+    "pages_crawled,pages_total,discovered_count,sitemap_count,sitemap_truncated,"
+    "crawl_complete,rate_limited,error_code,error_detail,failed_phase,cancel_requested,"
+    "created_at,started_at,completed_at"
 )
 _PAGE = (
     "url,status_code,fetch_class,redirect_url,title,meta_description,canonical_url,"
@@ -47,7 +48,7 @@ _FENCE = (
 
 def _audit(row: Any) -> dict[str, Any]:
     out = dict(row)
-    for key in ("cancel_requested", "rate_limited"):
+    for key in ("cancel_requested", "rate_limited", "sitemap_truncated"):
         out[key] = bool(out[key])
     if out.get("crawl_complete") is not None:
         out["crawl_complete"] = bool(out["crawl_complete"])
@@ -239,11 +240,13 @@ class SeoAuditRepo:
         start: tuple[str, str] | None,
         seeds: list[tuple[str, str]],
         issues: list[dict[str, Any]] | None = None,
+        sitemap_truncated: bool = False,
     ) -> bool:
         """Seed the frontier and move to the crawl phase; repeating it changes nothing.
 
         ``start`` and ``seeds`` are ``(url, cluster)``; ``issues`` are the site-level
-        findings discovery made (sitemap URLs robots.txt blocks).
+        findings discovery made (sitemap URLs robots.txt blocks). ``sitemap_truncated``
+        records that discovery stopped before reading every sitemap.
         """
         with self._db.transaction() as conn:
             if conn.execute(_FENCE, (now, audit_id, token)).rowcount != 1:
@@ -265,9 +268,9 @@ class SeoAuditRepo:
                 )
             self._insert_issues(conn, audit_id, issues or [])
             conn.execute(
-                "UPDATE seo_audits SET start_url=?,robots_text=?,sitemap_count=?,phase='crawl' "
-                "WHERE audit_id=?",
-                (start_url, robots_text, len(seeds), audit_id),
+                "UPDATE seo_audits SET start_url=?,robots_text=?,sitemap_count=?,"
+                "sitemap_truncated=?,phase='crawl' WHERE audit_id=?",
+                (start_url, robots_text, len(seeds), int(sitemap_truncated), audit_id),
             )
             self._progress(conn, audit_id)
         return True

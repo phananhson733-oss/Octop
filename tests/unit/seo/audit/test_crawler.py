@@ -86,9 +86,38 @@ async def test_discovery_keeps_sitemap_urls_past_the_page_budget() -> None:
     )
     robots = parse_robots(ORIGIN, f"Sitemap: {ORIGIN}/index.xml")
     async with site.client() as client:
-        urls = await discover_sitemap_urls(client, ORIGIN, robots, max_pages=2)
+        urls, truncated = await discover_sitemap_urls(client, ORIGIN, robots, max_pages=2)
     assert urls == [*posts, f"{ORIGIN}/"]
+    assert truncated is False
     assert not any("elsewhere" in request for request in site.requests)
+
+
+def _index(*sitemaps: str) -> httpx.Response:
+    entries = "".join(f"<sitemap><loc>{ORIGIN}{path}</loc></sitemap>" for path in sitemaps)
+    return _xml(f"<sitemapindex>{entries}</sitemapindex>".encode())
+
+
+@pytest.mark.parametrize(
+    "routes",
+    [
+        # More URLs than discovery keeps (500 at the smallest budget).
+        {"/big.xml": _xml(_urlset(*(f"{ORIGIN}/p/{i}" for i in range(501))))},
+        # An index nested deeper than three levels.
+        {
+            "/big.xml": _index("/l2.xml"),
+            "/l2.xml": _index("/l3.xml"),
+            "/l3.xml": _index("/l4.xml"),
+            "/l4.xml": _xml(_urlset(f"{ORIGIN}/deep")),
+        },
+    ],
+)
+async def test_discovery_says_when_it_stopped_short(routes: dict[str, httpx.Response]) -> None:
+    site = FakeSite({f"{ORIGIN}{path}": response for path, response in routes.items()})
+    robots = parse_robots(ORIGIN, f"Sitemap: {ORIGIN}/big.xml")
+    async with site.client() as client:
+        urls, truncated = await discover_sitemap_urls(client, ORIGIN, robots, max_pages=2)
+    assert truncated is True
+    assert f"{ORIGIN}/deep" not in urls and len(urls) <= 500
 
 
 def test_seeds_follow_robots() -> None:

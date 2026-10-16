@@ -261,7 +261,7 @@ class AuditJob:
         origin = origin_of(start_url)
         robots_text = await fetch_robots_text(self.client, origin)
         robots = parse_robots(origin, robots_text)
-        sitemap_urls = await discover_sitemap_urls(
+        sitemap_urls, sitemap_truncated = await discover_sitemap_urls(
             self.client, origin, robots, int(self.audit["max_pages"])
         )
         start, seeds = seeds_for(start_url, origin, robots, sitemap_urls, USER_AGENT)
@@ -277,9 +277,15 @@ class AuditJob:
                 start=(start, path_cluster(start)) if start is not None else None,
                 seeds=[(url, path_cluster(url)) for url in seeds],
                 issues=[_issue_row(Issue("sitemap-blocked-by-robots", url)) for url in blocked],
+                sitemap_truncated=sitemap_truncated,
             )
         )
-        self.audit.update(start_url=start_url, robots_text=robots_text, sitemap_count=len(seeds))
+        self.audit.update(
+            start_url=start_url,
+            robots_text=robots_text,
+            sitemap_count=len(seeds),
+            sitemap_truncated=sitemap_truncated,
+        )
         self.phase = "crawl"
 
     async def _crawl(self, origin: str, robots: Robots) -> tuple[bool, bool]:
@@ -398,7 +404,8 @@ class AuditJob:
         # Orphans need the whole frontier and every page's real links.
         if complete and len(readable) == len(pages):
             issues += find_orphans(pages, links, start_url)
-        if self.audit["sitemap_count"]:
+        # A sitemap read only in part cannot show which pages it leaves out.
+        if self.audit["sitemap_count"] and not self.audit["sitemap_truncated"]:
             issues += find_missing_from_sitemap(pages.values())
         issues += find_sitemap_problems(pages.values())
         issues += find_canonical_problems(pages)

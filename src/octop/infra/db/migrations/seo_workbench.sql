@@ -103,6 +103,8 @@ CREATE TABLE IF NOT EXISTS seo_audits (
  status TEXT NOT NULL, phase TEXT NOT NULL,
  pages_crawled INTEGER NOT NULL DEFAULT 0, pages_total INTEGER NOT NULL DEFAULT 0,
  discovered_count INTEGER NOT NULL DEFAULT 0, sitemap_count INTEGER NOT NULL DEFAULT 0,
+ -- 1 when discovery stopped before reading every sitemap (a cap, or deeper nesting).
+ sitemap_truncated INTEGER NOT NULL DEFAULT 0,
  -- robots.txt as fetched (NULL when missing), so a resumed crawl keeps the same rules.
  robots_text TEXT,
  crawl_complete INTEGER, rate_limited INTEGER NOT NULL DEFAULT 0,

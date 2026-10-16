@@ -494,10 +494,13 @@ async def _sitemap_document(client: httpx.AsyncClient, url: str) -> tuple[list[s
 
 async def discover_sitemap_urls(
     client: httpx.AsyncClient, origin: str, robots: Robots, max_pages: int
-) -> list[str]:
+) -> tuple[list[str], bool]:
     """Same-origin page URLs from robots.txt sitemaps and /sitemap.xml, sitemap indexes
     followed three levels deep. Every URL is returned, not only the first ``max_pages``:
     seeding is what marks a page as listed in the sitemap.
+
+    Also returns whether reading stopped short (the URL or document cap, or sitemaps
+    nested deeper), when an unlisted page may still be in a sitemap left unread.
     """
     limit = min(max(max_pages * 20, 500), 50_000)
     sources = (
@@ -511,6 +514,7 @@ async def discover_sitemap_urls(
     seen_docs: set[str] = set()
     urls: dict[str, None] = {}
     fetched_docs = 0
+    truncated = False
     while queue and len(urls) < limit and fetched_docs < MAX_SITEMAP_DOCS:
         batch, queue = queue[:SITEMAP_CONCURRENCY], queue[SITEMAP_CONCURRENCY:]
         batch = [(url, depth) for url, depth in batch if depth > 0 and url not in seen_docs]
@@ -520,16 +524,22 @@ async def discover_sitemap_urls(
         for (_url, depth), (nested, pages) in zip(batch, results, strict=True):
             for page_url in pages:
                 if len(urls) >= limit:
+                    truncated = True
                     break
                 if is_same_origin(page_url, origin):
                     urls[page_url] = None
+            deeper = [
+                sitemap
+                for sitemap in nested
+                if is_same_origin(sitemap, origin) and sitemap not in seen_docs
+            ]
             if depth > 1:
-                queue.extend(
-                    (sitemap, depth - 1)
-                    for sitemap in nested
-                    if is_same_origin(sitemap, origin) and sitemap not in seen_docs
-                )
-    return list(urls)
+                queue.extend((sitemap, depth - 1) for sitemap in deeper)
+            elif deeper:
+                truncated = True
+    # Sitemaps still queued when a cap stopped the loop were never read.
+    truncated |= any(url not in seen_docs for url, _depth in queue)
+    return list(urls), truncated
 
 
 async def resolve_start_url(client: httpx.AsyncClient, start_url: str) -> str:

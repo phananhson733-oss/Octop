@@ -162,6 +162,29 @@ async def test_the_crawl_goes_breadth_first_whatever_the_sitemap_order(project: 
     assert missing == {f"{ORIGIN}/"}
 
 
+@pytest.mark.parametrize(("truncated", "missing"), [(False, {f"{ORIGIN}/b"}), (True, set())])
+async def test_a_sitemap_read_in_part_cannot_show_what_it_leaves_out(
+    project: Any, monkeypatch: pytest.MonkeyPatch, truncated: bool, missing: set[str]
+) -> None:
+    audits, repos, user, project_id = project
+    discover = runner_module.discover_sitemap_urls
+
+    async def read(*args: Any) -> tuple[list[str], bool]:
+        urls, _truncated = await discover(*args)
+        return urls, truncated
+
+    monkeypatch.setattr(runner_module, "discover_sitemap_urls", read)
+    audit = await _start(project)
+    runner = SeoAuditRunner(repos, client_factory=_site().client)
+    runner.submit(audit["audit_id"])
+    await runner.wait(audit["audit_id"])
+
+    result = await audits.issues(user, project_id)
+    assert result["audit"]["sitemap_truncated"] is truncated
+    found = {row["page_url"] for row in result["issues"] if row["issue_type"] == "not-in-sitemap"}
+    assert found == missing
+
+
 async def test_the_budget_visits_every_page_template_before_repeating_one(
     project: Any,
 ) -> None:

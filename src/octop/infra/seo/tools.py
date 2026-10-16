@@ -165,6 +165,7 @@ def _audit_summary(audit: dict[str, Any]) -> dict[str, Any]:
         "pages_crawled",
         "discovered_count",
         "sitemap_count",
+        "sitemap_truncated",
         "crawl_complete",
         "rate_limited",
         "error_code",
@@ -509,7 +510,9 @@ def build_seo_tools(
             "broken-internal-link rows with rendered_only come from the rendered sample, and "
             "render-unavailable means no page was rendered. If status is not completed, "
             "crawl_complete is false or rate_limited is true, the results are partial: say so. "
-            "Free. Pass next_offset as offset to read more.",
+            "sitemap_truncated true means the sitemaps were read only in part, so pages missing "
+            "from them (not-in-sitemap) were not checked. Free. Pass next_offset as offset to "
+            "read more.",
         ),
         (
             "seo_get_audit_pages",
