@@ -1,0 +1,412 @@
+{
+  "pinnedCommit": "d7ea7852480601af9bc8870942af8311a410e567",
+  "pass": true,
+  "passed": 23,
+  "mockOverrides": [
+    "@/server/lib/dataforseo",
+    "@/server/features/keywords/repositories/KeywordResearchRepository",
+    "@/server/lib/errors",
+    "@/server/lib/r2-cache",
+    "@/shared/keyword-locations",
+    "@/server/features/keywords/services/research/local-volume",
+    "@/server/features/reports/repositories/ReportRepository",
+    "@/server/features/reports/shareAccess",
+    "@/server/lib/posthog",
+    "@/shared/format",
+    "@/shared/report-share"
+  ],
+  "realDependencies": {
+    "zod": {
+      "path": "/Users/wzb/.npm-global/lib/node_modules/rea-agents/node_modules/zod",
+      "version": "4.4.3"
+    },
+    "typescript": {
+      "path": "/Users/wzb/Code/Octop/dashboard/node_modules/typescript",
+      "version": "5.8.3"
+    }
+  },
+  "limitations": [
+    "Offline process replay; no browser/UI/provider/API/auth/database/cloud integration validated",
+    "Actual installed Zod 4 used; cache storage mocked to misses, cache hits NOT tested",
+    "Provider and repository outputs are fixtures; persistence is call-contract evidence only",
+    "Report HTML supplied by fixture; no LLM generation quality tested",
+    "Country provider forced to Labs; local-volume and Google Ads routing not tested",
+    "formatCount mocked; validation codes and data-state behavior tested, not localized number formatting"
+  ],
+  "runtime": {
+    "node": "v24.12.0",
+    "typescript": "5.8.3",
+    "zod": "4.4.3"
+  },
+  "fixturesSha256": "96389140b06ca612e0f9c6c7fff537e02144b01e38e342e6414e8150cba1a085",
+  "sources": [
+    {
+      "path": "src/server/features/keywords/services/research/helpers.ts",
+      "sha256": "d469ddee16201ef1a64f71112fc41ed4d8309101f08fa761d7b285f37013b3e7"
+    },
+    {
+      "path": "src/server/features/keywords/services/research/selection.ts",
+      "sha256": "dcbb8ab2de4255d573075f3263baf6095b9eef159e8b618f1b0eff8071be7535"
+    },
+    {
+      "path": "src/server/features/keywords/services/research/research-data.ts",
+      "sha256": "0d833df15fc02e76e89084d4676d1261084ac8f349128073fac3a72a3454e8ef"
+    },
+    {
+      "path": "src/client/features/keywords/groupSharedVolumeRows.ts",
+      "sha256": "e934335c4afae4d808274bcaaf9e4d864152baa8db63b84e2b60ae313519f68d"
+    },
+    {
+      "path": "src/server/features/keywords/services/research/research.ts",
+      "sha256": "605d02fd4d37064bc2cb2ab8e3e8851b21aa8df793826cafe523518876727800"
+    },
+    {
+      "path": "src/server/features/keywords/services/research/saved-keywords.ts",
+      "sha256": "15c3561923e6ef33a78ffb3fc8e69b9828a6480614d34f00e7b0af7be7fd13b1"
+    },
+    {
+      "path": "src/shared/json.ts",
+      "sha256": "94a54911a00b13a437cbccf03bbf92d294b6c6ac49544e24965f81c0946a766d"
+    },
+    {
+      "path": "src/server/features/reports/services/ReportService.ts",
+      "sha256": "213c8f81869841c4b9f3792a50c45deae1b1eb8c612ee4179f3b8961213ef521"
+    },
+    {
+      "path": "src/types/schemas/reports.ts",
+      "sha256": "72c301798a8d73a019c6bb91abc4a7a436ada76aaad9ce9e63a2f0dd5eec559a"
+    }
+  ],
+  "results": [
+    {
+      "id": "normalize-trim-lower",
+      "pass": true,
+      "actual": "caregiving"
+    },
+    {
+      "id": "normalize-preserves-internal-spaces",
+      "pass": true,
+      "actual": "a  b"
+    },
+    {
+      "id": "intent-information",
+      "pass": true,
+      "actual": "informational"
+    },
+    {
+      "id": "intent-transact",
+      "pass": true,
+      "actual": "transactional"
+    },
+    {
+      "id": "intent-null",
+      "pass": true,
+      "actual": "unknown"
+    },
+    {
+      "id": "upstream-alternates-dedupes-limit",
+      "pass": true,
+      "actual": [
+        "a",
+        "x",
+        "b",
+        "c"
+      ]
+    },
+    {
+      "id": "upstream-drains-longer",
+      "pass": true,
+      "actual": [
+        "a",
+        "x",
+        "y",
+        "z"
+      ]
+    },
+    {
+      "id": "non-seed-threshold",
+      "pass": true,
+      "actual": 5
+    },
+    {
+      "id": "non-seed-count",
+      "pass": true,
+      "actual": 5
+    },
+    {
+      "id": "ads-mapping-upstream-literal",
+      "pass": true,
+      "actual": [
+        {
+          "keyword": "northern lights tour",
+          "searchVolume": 320,
+          "trend": [],
+          "cpc": null,
+          "competition": null,
+          "keywordDifficulty": null,
+          "intent": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "labs-clickstream-zero-fallback-and-dedupe",
+      "pass": true,
+      "actual": [
+        {
+          "keyword": "caregiving",
+          "searchVolume": 110000,
+          "trend": [
+            {
+              "year": 2026,
+              "month": 7,
+              "searchVolume": 110000
+            }
+          ],
+          "cpc": 8.14,
+          "competition": 0.27,
+          "keywordDifficulty": 61,
+          "intent": "informational"
+        },
+        {
+          "keyword": "respite care",
+          "searchVolume": 500,
+          "trend": [
+            {
+              "year": 2026,
+              "month": 8,
+              "searchVolume": 490
+            }
+          ],
+          "cpc": 2,
+          "competition": null,
+          "keywordDifficulty": null,
+          "intent": "unknown"
+        }
+      ]
+    },
+    {
+      "id": "group-order-upstream-literal",
+      "pass": true,
+      "actual": [
+        {
+          "keyword": "caregiving",
+          "parentKeyword": null,
+          "keywordDifficulty": 61
+        },
+        {
+          "keyword": "caregiver",
+          "parentKeyword": "caregiving",
+          "keywordDifficulty": 45
+        },
+        {
+          "keyword": "respite care",
+          "parentKeyword": null,
+          "keywordDifficulty": 61
+        }
+      ]
+    },
+    {
+      "id": "group-off-retains-order",
+      "pass": true,
+      "actual": [
+        [
+          "caregiving",
+          null
+        ],
+        [
+          "respite care",
+          null
+        ],
+        [
+          "caregiver",
+          null
+        ]
+      ]
+    },
+    {
+      "id": "searched-variant-leads-upstream-literal",
+      "pass": true,
+      "actual": [
+        [
+          "caregiving",
+          null
+        ],
+        [
+          "caregiver",
+          "caregiving"
+        ]
+      ]
+    },
+    {
+      "id": "flat-and-low-volume-ungrouped-upstream-literal",
+      "pass": true,
+      "actual": [
+        null,
+        null,
+        null,
+        null
+      ]
+    },
+    {
+      "id": "auto-five-non-seed-no-fallback",
+      "pass": true,
+      "actual": {
+        "keywords": [
+          "caregiving",
+          "c",
+          "a",
+          "d",
+          "b",
+          "e"
+        ],
+        "source": "blended",
+        "usedFallback": false,
+        "calls": [
+          {
+            "source": "suggestions",
+            "limit": 75,
+            "ignoreSynonyms": false,
+            "depth": null
+          },
+          {
+            "source": "ideas",
+            "limit": 75,
+            "ignoreSynonyms": false,
+            "depth": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "auto-four-non-seed-fallback",
+      "pass": true,
+      "actual": {
+        "keywords": [
+          "caregiving",
+          "r",
+          "c",
+          "a",
+          "d",
+          "b"
+        ],
+        "source": "blended",
+        "usedFallback": true,
+        "calls": [
+          {
+            "source": "suggestions",
+            "limit": 75,
+            "ignoreSynonyms": false,
+            "depth": null
+          },
+          {
+            "source": "ideas",
+            "limit": 75,
+            "ignoreSynonyms": false,
+            "depth": null
+          },
+          {
+            "source": "related",
+            "limit": 150,
+            "ignoreSynonyms": false,
+            "depth": 3
+          }
+        ]
+      }
+    },
+    {
+      "id": "save-normalize-dedupe-and-tags",
+      "pass": true,
+      "actual": {
+        "result": {
+          "success": true,
+          "savedKeywordIds": [
+            "saved_0",
+            "saved_1"
+          ]
+        },
+        "calls": [
+          [
+            "save",
+            {
+              "projectId": "project_fixture",
+              "keywords": [
+                "caregiving",
+                "respite care"
+              ],
+              "locationCode": 2840,
+              "languageCode": "en"
+            }
+          ],
+          [
+            "addTags",
+            {
+              "projectId": "project_fixture",
+              "savedKeywordIds": [
+                "saved_0",
+                "saved_1"
+              ],
+              "tagNames": [
+                "priority"
+              ]
+            }
+          ]
+        ],
+        "metricWrites": [
+          {
+            "projectId": "project_fixture",
+            "keyword": "caregiving",
+            "locationCode": 2840,
+            "languageCode": "en",
+            "searchVolume": 110000,
+            "cpc": null,
+            "competition": null,
+            "keywordDifficulty": 61,
+            "intent": null,
+            "monthlySearchesJson": "[{\"year\":2026,\"month\":7,\"searchVolume\":110000},{\"year\":2026,\"month\":8,\"searchVolume\":90500}]"
+          }
+        ]
+      }
+    },
+    {
+      "id": "report-create",
+      "pass": true,
+      "actual": {
+        "created": true,
+        "title": "Keyword opportunities",
+        "htmlBytes": 41,
+        "count": 1
+      }
+    },
+    {
+      "id": "report-duplicate-title-rejected",
+      "pass": true,
+      "actual": "VALIDATION_ERROR"
+    },
+    {
+      "id": "report-truncated-update-keeps-original",
+      "pass": true,
+      "actual": {
+        "code": "VALIDATION_ERROR",
+        "html": "<html><body>关键词研究</body></html>"
+      }
+    },
+    {
+      "id": "report-utf8-byte-cap-keeps-original",
+      "pass": true,
+      "actual": {
+        "code": "VALIDATION_ERROR",
+        "html": "<html><body>关键词研究</body></html>"
+      }
+    },
+    {
+      "id": "report-update-overwrites",
+      "pass": true,
+      "actual": {
+        "created": false,
+        "count": 1,
+        "html": "<html><body>更新</body></html>",
+        "skill": "keyword-research"
+      }
+    }
+  ]
+}

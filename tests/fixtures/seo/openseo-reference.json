@@ -1,0 +1,442 @@
+{
+  "description": "Language-neutral expected contracts. Upstream exact literals identified per case; extra cases derived from pinned source conditions.",
+  "baseRow": {
+    "keyword": "caregiving",
+    "searchVolume": 110000,
+    "trend": [
+      {
+        "year": 2026,
+        "month": 7,
+        "searchVolume": 110000
+      },
+      {
+        "year": 2026,
+        "month": 8,
+        "searchVolume": 90500
+      }
+    ],
+    "keywordDifficulty": 61,
+    "cpc": 8.14,
+    "competition": 0.27,
+    "intent": "informational"
+  },
+  "upstreamTestSources": [
+    "src/server/features/keywords/services/research/helpers.test.ts",
+    "src/server/features/keywords/services/research/research-data.test.ts",
+    "src/client/features/keywords/groupSharedVolumeRows.test.ts"
+  ],
+  "normalization": [
+    {
+      "id": "normalize-trim-lower",
+      "input": " CareGiving ",
+      "expected": "caregiving"
+    },
+    {
+      "id": "normalize-preserves-internal-spaces",
+      "input": " A  B ",
+      "expected": "a  b"
+    }
+  ],
+  "intents": [
+    {
+      "id": "intent-information",
+      "input": "Informational",
+      "expected": "informational"
+    },
+    {
+      "id": "intent-transact",
+      "input": "TRANSACTIONAL",
+      "expected": "transactional"
+    },
+    {
+      "id": "intent-null",
+      "input": null,
+      "expected": "unknown"
+    }
+  ],
+  "interleave": [
+    {
+      "id": "upstream-alternates-dedupes-limit",
+      "first": [
+        "a",
+        "b",
+        "c"
+      ],
+      "second": [
+        "x",
+        "a",
+        "y"
+      ],
+      "limit": 4,
+      "expected": [
+        "a",
+        "x",
+        "b",
+        "c"
+      ]
+    },
+    {
+      "id": "upstream-drains-longer",
+      "first": [
+        "a"
+      ],
+      "second": [
+        "x",
+        "y",
+        "z"
+      ],
+      "limit": 10,
+      "expected": [
+        "a",
+        "x",
+        "y",
+        "z"
+      ]
+    }
+  ],
+  "ads": {
+    "items": [
+      {
+        "keyword": "northern lights tour",
+        "search_volume": 320
+      },
+      {
+        "keyword": "Northern Lights Tour",
+        "search_volume": 320
+      },
+      {}
+    ],
+    "expected": [
+      {
+        "keyword": "northern lights tour",
+        "searchVolume": 320,
+        "trend": [],
+        "cpc": null,
+        "competition": null,
+        "keywordDifficulty": null,
+        "intent": "unknown"
+      }
+    ]
+  },
+  "labs": {
+    "items": [
+      {
+        "keyword": " Caregiving ",
+        "keyword_info": {
+          "search_volume": 110000,
+          "cpc": 8.14,
+          "competition": 0.27,
+          "monthly_searches": [
+            {
+              "year": 2026,
+              "month": 7,
+              "search_volume": 110000
+            }
+          ]
+        },
+        "keyword_info_normalized_with_clickstream": {
+          "search_volume": 0,
+          "monthly_searches": []
+        },
+        "keyword_properties": {
+          "keyword_difficulty": 61
+        },
+        "search_intent_info": {
+          "main_intent": "informational"
+        }
+      },
+      {
+        "keyword": "caregiving",
+        "keyword_info": {
+          "search_volume": 2
+        }
+      },
+      {
+        "keyword": "respite care",
+        "keyword_info": {
+          "search_volume": 100,
+          "cpc": 2
+        },
+        "keyword_info_normalized_with_clickstream": {
+          "search_volume": 500,
+          "monthly_searches": [
+            {
+              "year": 2026,
+              "month": 8,
+              "search_volume": 490
+            }
+          ]
+        }
+      }
+    ],
+    "expected": [
+      {
+        "keyword": "caregiving",
+        "searchVolume": 110000,
+        "trend": [
+          {
+            "year": 2026,
+            "month": 7,
+            "searchVolume": 110000
+          }
+        ],
+        "cpc": 8.14,
+        "competition": 0.27,
+        "keywordDifficulty": 61,
+        "intent": "informational"
+      },
+      {
+        "keyword": "respite care",
+        "searchVolume": 500,
+        "trend": [
+          {
+            "year": 2026,
+            "month": 8,
+            "searchVolume": 490
+          }
+        ],
+        "cpc": 2,
+        "competition": null,
+        "keywordDifficulty": null,
+        "intent": "unknown"
+      }
+    ]
+  },
+  "group": {
+    "rows": [
+      {
+        "keyword": "caregiving"
+      },
+      {
+        "keyword": "respite care",
+        "searchVolume": 165000
+      },
+      {
+        "keyword": "caregiver",
+        "keywordDifficulty": 45
+      }
+    ],
+    "expected": [
+      {
+        "keyword": "caregiving",
+        "parentKeyword": null,
+        "keywordDifficulty": 61
+      },
+      {
+        "keyword": "caregiver",
+        "parentKeyword": "caregiving",
+        "keywordDifficulty": 45
+      },
+      {
+        "keyword": "respite care",
+        "parentKeyword": null,
+        "keywordDifficulty": 61
+      }
+    ]
+  },
+  "researchInput": {
+    "projectId": "project_fixture",
+    "keywords": [
+      " Caregiving ",
+      "caregiving"
+    ],
+    "locationCode": 2840,
+    "languageCode": "en",
+    "resultLimit": 150,
+    "mode": "auto",
+    "clickstream": false,
+    "groupKeywords": true
+  },
+  "research": [
+    {
+      "id": "auto-five-non-seed-no-fallback",
+      "providerItems": {
+        "suggestions": [
+          "caregiving",
+          "a",
+          "b"
+        ],
+        "ideas": [
+          "c",
+          "d",
+          "e"
+        ]
+      },
+      "expected": {
+        "keywords": [
+          "caregiving",
+          "c",
+          "a",
+          "d",
+          "b",
+          "e"
+        ],
+        "source": "blended",
+        "usedFallback": false,
+        "calls": [
+          {
+            "source": "suggestions",
+            "limit": 75,
+            "ignoreSynonyms": false,
+            "depth": null
+          },
+          {
+            "source": "ideas",
+            "limit": 75,
+            "ignoreSynonyms": false,
+            "depth": null
+          }
+        ]
+      }
+    },
+    {
+      "id": "auto-four-non-seed-fallback",
+      "providerItems": {
+        "suggestions": [
+          "caregiving",
+          "a",
+          "b"
+        ],
+        "ideas": [
+          "c",
+          "d"
+        ],
+        "related": [
+          "r",
+          "a"
+        ]
+      },
+      "expected": {
+        "keywords": [
+          "caregiving",
+          "r",
+          "c",
+          "a",
+          "d",
+          "b"
+        ],
+        "source": "blended",
+        "usedFallback": true,
+        "calls": [
+          {
+            "source": "suggestions",
+            "limit": 75,
+            "ignoreSynonyms": false,
+            "depth": null
+          },
+          {
+            "source": "ideas",
+            "limit": 75,
+            "ignoreSynonyms": false,
+            "depth": null
+          },
+          {
+            "source": "related",
+            "limit": 150,
+            "ignoreSynonyms": false,
+            "depth": 3
+          }
+        ]
+      }
+    }
+  ],
+  "save": {
+    "input": {
+      "projectId": "project_fixture",
+      "keywords": [
+        " Caregiving ",
+        "caregiving",
+        "Respite Care",
+        " "
+      ],
+      "locationCode": 2840,
+      "languageCode": "en",
+      "tags": [
+        "priority"
+      ],
+      "metrics": [
+        {
+          "keyword": "CAREGIVING",
+          "searchVolume": 110000,
+          "keywordDifficulty": 61,
+          "monthlySearches": [
+            {
+              "year": 2026,
+              "month": 7,
+              "searchVolume": 110000
+            },
+            {
+              "year": 2026,
+              "month": 8,
+              "searchVolume": 90500
+            }
+          ]
+        },
+        {
+          "keyword": "not selected",
+          "searchVolume": 1
+        }
+      ]
+    },
+    "expected": {
+      "result": {
+        "success": true,
+        "savedKeywordIds": [
+          "saved_0",
+          "saved_1"
+        ]
+      },
+      "calls": [
+        [
+          "save",
+          {
+            "projectId": "project_fixture",
+            "keywords": [
+              "caregiving",
+              "respite care"
+            ],
+            "locationCode": 2840,
+            "languageCode": "en"
+          }
+        ],
+        [
+          "addTags",
+          {
+            "projectId": "project_fixture",
+            "savedKeywordIds": [
+              "saved_0",
+              "saved_1"
+            ],
+            "tagNames": [
+              "priority"
+            ]
+          }
+        ]
+      ],
+      "metricWrites": [
+        {
+          "projectId": "project_fixture",
+          "keyword": "caregiving",
+          "locationCode": 2840,
+          "languageCode": "en",
+          "searchVolume": 110000,
+          "cpc": null,
+          "competition": null,
+          "keywordDifficulty": 61,
+          "intent": null,
+          "monthlySearchesJson": "[{\"year\":2026,\"month\":7,\"searchVolume\":110000},{\"year\":2026,\"month\":8,\"searchVolume\":90500}]"
+        }
+      ]
+    }
+  },
+  "report": {
+    "projectId": "project_fixture",
+    "organizationId": "org_fixture",
+    "title": "Keyword opportunities",
+    "summary": "Fixture evidence, not generated by an LLM.",
+    "html": "<html><body>关键词研究</body></html>",
+    "skill": "keyword-research",
+    "createdBy": "reference-replay",
+    "createdByUserId": "user_fixture"
+  }
+}

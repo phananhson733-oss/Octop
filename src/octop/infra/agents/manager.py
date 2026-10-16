@@ -3248,6 +3248,18 @@ class AgentManager:
         merged_tools.extend(knowledge_tools)
         merged_tools.extend(mobile_tools)
         merged_tools.extend(plugin_tools)
+        if not team_host and row.user_id is not None:
+            from octop.infra.seo.service import SeoService  # noqa: PLC0415
+            from octop.infra.seo.tools import build_seo_tools  # noqa: PLC0415
+
+            if any(
+                project["agent_id"] == row.agent_id
+                for project in self._repos.seo_repo.projects(row.user_id)
+            ):
+                seo_service = SeoService(self._repos)
+                merged_tools.extend(
+                    build_seo_tools(seo_service, row.agent_id, self._repos.thread_repo)
+                )
         # agent_list / ask_agent: PeerAgentMiddleware (team_enabled=True), not config.tools.
 
         acp_section = cfg.get("acp")

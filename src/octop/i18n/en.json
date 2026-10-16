@@ -496,7 +496,11 @@
     "TEAM_MEMBER_BUSY": "This expert has an in-flight team job. Wait until it finishes.",
     "TEAM_NOT_SHAREABLE": "Teams cannot be shared in this version.",
     "SKILL_PACKAGE_COPY_DENIED": "The creator of this skill package has disabled copying its skills.",
-    "SKILL_PACKAGE_LOCKED": "This skill was copied from a locked skill package and cannot be edited in the workspace."
+    "SKILL_PACKAGE_LOCKED": "This skill was copied from a locked skill package and cannot be edited in the workspace.",
+    "SEO_INVALID_INPUT": "Invalid SEO input or unsupported market.",
+    "SEO_CONFLICT": "The SEO request conflicts with existing data.",
+    "SEO_PROVIDER_REQUIRED": "Configure your DataForSEO credentials first.",
+    "SEO_REPORT_INTEGRITY": "The saved report failed its integrity check."
   },
   "desktop": {
     "install_log_deps": "Installing Python dependencies…",
@@ -613,7 +617,12 @@
     "ask_user_question": "Ask the user",
     "generate_image": "Generate image",
     "generate_video": "Generate video",
-    "bilibili_search_anime": "Search Bilibili anime"
+    "bilibili_search_anime": "Search Bilibili anime",
+    "seo_get_report_context": "Read SEO report evidence",
+    "seo_list_saved_keywords": "List saved SEO keywords",
+    "seo_list_research_runs": "List SEO research runs",
+    "seo_save_report": "Save SEO report",
+    "seo_list_reports": "List SEO reports"
   },
   "skills": {
     "pdf": "PDF",
@@ -872,5 +881,8 @@
       "bind_failed": "The directory rejected the bind DN or password",
       "search_failed": "The directory refused the user search"
     }
+  },
+  "seo": {
+    "report_instructions": "Write a complete HTML report using only the supplied research evidence. Cite observation dates, market, run IDs, missing metrics, partial failures and known versus unknown costs. Distinguish recommendations from measured facts. Never invent metrics. Saving a report does not call a model or purchase data."
   }
 }

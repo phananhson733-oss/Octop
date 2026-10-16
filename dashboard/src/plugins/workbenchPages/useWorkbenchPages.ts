@@ -1,8 +1,9 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { lazy, useEffect, useSyncExternalStore } from "react";
 import { pluginsApi } from "../../api/modules/plugins";
 import { loadInstalledPluginUis } from "../toolRenderers/loader";
 import { updateToolPluginIndex } from "../toolRenderers/toolPluginIndex";
 import {
+  registerWorkbenchPage,
   arePluginUisSettled,
   getWorkbenchPages,
   setPluginUisSettled,
@@ -38,6 +39,16 @@ export function useInstalledPluginUis(enabled: boolean): void {
   useEffect(() => {
     if (!enabled || started) return;
     started = true;
+    registerWorkbenchPage({
+      pluginId: "seo-workbench",
+      id: "main",
+      title: { en: "SEO", zh: "SEO" },
+      description: {
+        en: "Keyword research, saved keywords and private reports",
+        zh: "关键词研究、保存关键词与私有报告",
+      },
+      component: lazy(() => import("../../pages/Control/SeoWorkbench")),
+    });
     (async () => {
       try {
         const plugins = await pluginsApi.list();

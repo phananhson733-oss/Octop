@@ -11,6 +11,10 @@ from octop.infra.utils.locale import Locale, normalize_locale
 
 
 class ErrorCode(StrEnum):
+    SEO_INVALID_INPUT = "SEO_INVALID_INPUT"
+    SEO_CONFLICT = "SEO_CONFLICT"
+    SEO_PROVIDER_REQUIRED = "SEO_PROVIDER_REQUIRED"
+    SEO_REPORT_INTEGRITY = "SEO_REPORT_INTEGRITY"
     AUTH_FAILED = "AUTH_FAILED"
     TOKEN_EXPIRED = "TOKEN_EXPIRED"
     SETUP_REQUIRED = "SETUP_REQUIRED"
@@ -141,6 +145,10 @@ class ErrorCode(StrEnum):
 
 
 _DEFAULT_STATUS: dict[ErrorCode, int] = {
+    ErrorCode.SEO_INVALID_INPUT: 400,
+    ErrorCode.SEO_CONFLICT: 409,
+    ErrorCode.SEO_PROVIDER_REQUIRED: 409,
+    ErrorCode.SEO_REPORT_INTEGRITY: 500,
     ErrorCode.AUTH_FAILED: 401,
     ErrorCode.TOKEN_EXPIRED: 401,
     ErrorCode.SETUP_REQUIRED: 409,

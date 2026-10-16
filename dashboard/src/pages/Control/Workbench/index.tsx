@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { Suspense, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Globe, LayoutGrid, TerminalSquare } from "lucide-react";
 import PageShell from "../../../layouts/PageShell";
@@ -60,12 +60,14 @@ function PluginPagePanel({
       aria-hidden={!active}
     >
       <PluginPageBoundary title={title}>
-        <Page
-          pluginId={page.pluginId}
-          pageId={page.id}
-          host={host}
-          isVisible={isVisible}
-        />
+        <Suspense fallback={<PageLoading />}>
+          <Page
+            pluginId={page.pluginId}
+            pageId={page.id}
+            host={host}
+            isVisible={isVisible}
+          />
+        </Suspense>
       </PluginPageBoundary>
     </div>
   );
