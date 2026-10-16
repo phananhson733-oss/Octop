@@ -99,7 +99,7 @@ CREATE TABLE IF NOT EXISTS seo_audits (
  project_id TEXT NOT NULL REFERENCES seo_projects(project_id) ON DELETE CASCADE,
  started_by INTEGER NOT NULL, idempotency_key TEXT NOT NULL,
  requested_url TEXT NOT NULL, start_url TEXT, max_pages INTEGER NOT NULL,
- -- status: queued|running|completed|failed|cancelled; phase: discovery|crawl|finalize.
+ -- status: queued|running|completed|failed|cancelled; phase: discovery|crawl|render|finalize.
  status TEXT NOT NULL, phase TEXT NOT NULL,
  pages_crawled INTEGER NOT NULL DEFAULT 0, pages_total INTEGER NOT NULL DEFAULT 0,
  discovered_count INTEGER NOT NULL DEFAULT 0, sitemap_count INTEGER NOT NULL DEFAULT 0,
@@ -145,6 +145,10 @@ CREATE TABLE IF NOT EXISTS seo_audit_pages (
  internal_links TEXT NOT NULL DEFAULT '[]',
  -- H1 texts and [hreflang, href] alternates as JSON arrays, for cross-page checks.
  h1s TEXT NOT NULL DEFAULT '[]', alternates TEXT NOT NULL DEFAULT '[]',
+ -- The HTML was cut at the size limit, so links and markup past the cut are unseen.
+ body_truncated INTEGER NOT NULL DEFAULT 0,
+ -- What headless Chromium saw on a sampled page (JSON), compared with the HTML at finalize.
+ render TEXT,
  UNIQUE(audit_id,url)
 );
 CREATE TABLE IF NOT EXISTS seo_audit_issues (

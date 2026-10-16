@@ -3,6 +3,8 @@
 import asyncio
 import time
 from collections import Counter
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
@@ -10,7 +12,8 @@ import pytest
 
 from octop.infra.errors import OctopError
 from octop.infra.seo.audit import runner as runner_module
-from octop.infra.seo.audit.runner import SeoAuditRunner
+from octop.infra.seo.audit.render import Rendered, RenderUnavailable
+from octop.infra.seo.audit.runner import SeoAuditRunner, render_sample
 from octop.infra.seo.audit.service import SeoAuditService
 from octop.infra.seo.audit.throttle import CrawlThrottle
 
@@ -230,6 +233,181 @@ async def test_cross_page_checks_follow_canonicals_hreflang_and_the_sitemap(
     assert pages[a]["h1s"] == ["A"]
     assert pages[a]["alternates"] == [["en", a], ["fr", f"{ORIGIN}/fr/a"]]
     assert pages[f"{ORIGIN}/gone"]["crawl_depth"] is None
+
+
+class _Browser:
+    """A fake renderer: canned renders by URL, optionally held at one URL."""
+
+    def __init__(self, renders: dict[str, Rendered], hold: asyncio.Event | None = None) -> None:
+        self.renders = renders
+        self.hold = hold
+        self.held = False
+        self.opened = 0
+        self.rendered: list[str] = []
+
+    @asynccontextmanager
+    async def open(self, _start_url: str) -> AsyncIterator["_Browser"]:
+        self.opened += 1
+        yield self
+
+    async def render(self, url: str) -> Rendered:
+        if self.hold is not None and url == f"{ORIGIN}/orphan":
+            self.held = True
+            await self.hold.wait()
+        self.rendered.append(url)
+        return self.renders.get(url, Rendered(status=200))
+
+
+def _rendered(name: str, *links: str, **overrides: Any) -> Rendered:
+    """What a page from ``fakesite.page`` looks like rendered, unchanged unless overridden."""
+    values: dict[str, Any] = {
+        "status": 200,
+        "title": f"{name} page title",
+        "h1s": [name],
+        "word_count": 210,
+        "links": [f"{ORIGIN}{link}" for link in links],
+        **overrides,
+    }
+    return Rendered(**values)
+
+
+async def test_rendering_finds_what_scripts_do_to_the_page(project: Any) -> None:
+    audits, repos, user, project_id = project
+    site = _site()
+    browser = _Browser(
+        {
+            # Valid in the HTML; the page's data fetch shows "not found" + noindex for a moment,
+            # and its rendered navigation links to a page that does not exist.
+            f"{ORIGIN}/": _rendered(
+                "Home",
+                "/a",
+                "/reviews/safety",
+                "/private/z",
+                trace=[
+                    {"t": 0, "title": "", "robots": ""},
+                    {"t": 120, "title": "Product Not Found (404)", "robots": "noindex, nofollow"},
+                    {"t": 900, "title": "Home page title", "robots": ""},
+                ],
+            ),
+            f"{ORIGIN}/a": _rendered("Ay", "/", "/gone", robots="noindex"),
+            f"{ORIGIN}/b": Rendered(error="net::ERR_TIMED_OUT"),
+            f"{ORIGIN}/orphan": _rendered("Orphan", "/", unlinked=2),
+        }
+    )
+    audit = await _start(project)
+    runner = SeoAuditRunner(repos, client_factory=site.client, renderer_factory=browser.open)
+    runner.submit(audit["audit_id"])
+    await runner.wait(audit["audit_id"])
+
+    done = await audits.get(user, project_id, audit["audit_id"])
+    assert (done["status"], done["phase"]) == ("completed", "finalize")
+    assert browser.opened == 1
+    assert sorted(browser.rendered) == [f"{ORIGIN}{path}" for path in ("/", "/a", "/b", "/orphan")]
+    issues = (await audits.issues(user, project_id))["issues"]
+    found = {
+        (row["issue_type"], row["page_url"].removeprefix(ORIGIN)): row["details"]
+        for row in issues
+        if row["issue_type"].startswith("render-")
+        or row["issue_type"] == "links-without-href"
+        or (row["details"] or {}).get("rendered_only")
+    }
+    assert found == {
+        ("render-error-state", "/"): {
+            "title": "Product Not Found (404)",
+            "robots": "noindex, nofollow",
+            "at_ms": 120,
+            "still_shown_at_end": False,
+        },
+        ("broken-internal-link", "/"): {
+            "target_url": f"{ORIGIN}/reviews/safety",
+            "target_status": 404,
+            "rendered_only": True,
+        },
+        ("render-noindex", "/a"): {"rendered_robots": "noindex"},
+        ("render-failed", "/b"): {"error": "net::ERR_TIMED_OUT", "status_code": None},
+        ("links-without-href", "/orphan"): {"count": 2},
+    }
+    # The rendered-only link was checked; robots.txt still keeps the crawler out of /private.
+    assert f"GET {ORIGIN}/reviews/safety" in site.requests
+    assert not any("/private" in request for request in site.requests if "GET" in request)
+
+
+async def test_an_audit_without_a_browser_still_completes(project: Any) -> None:
+    audits, repos, user, project_id = project
+
+    @asynccontextmanager
+    async def no_browser(_start_url: str) -> AsyncIterator[_Browser]:
+        raise RenderUnavailable("Executable doesn't exist")
+        yield  # pragma: no cover
+
+    audit = await _start(project)
+    runner = SeoAuditRunner(repos, client_factory=_site().client, renderer_factory=no_browser)
+    runner.submit(audit["audit_id"])
+    await runner.wait(audit["audit_id"])
+    assert (await audits.get(user, project_id, audit["audit_id"]))["status"] == "completed"
+    issues = (await audits.issues(user, project_id))["issues"]
+    rendered = [row for row in issues if row["issue_type"].startswith("render-")]
+    assert [(row["issue_type"], row["page_url"], row["details"]) for row in rendered] == [
+        ("render-unavailable", f"{ORIGIN}/", {"error": "Executable doesn't exist"})
+    ]
+
+
+async def test_a_restarted_render_phase_renders_each_page_once(project: Any) -> None:
+    audits, repos, user, project_id = project
+    site = _site()
+    hold = asyncio.Event()
+    first_browser = _Browser({}, hold)
+    audit = await _start(project)
+    first = SeoAuditRunner(repos, client_factory=site.client, renderer_factory=first_browser.open)
+    first.submit(audit["audit_id"])
+    await _until(lambda: first_browser.held)
+    await first.stop()
+    paused = await audits.get(user, project_id, audit["audit_id"])
+    assert (paused["status"], paused["phase"]) == ("running", "render")
+
+    second_browser = _Browser({})
+    second = SeoAuditRunner(repos, client_factory=site.client, renderer_factory=second_browser.open)
+    second.submit(audit["audit_id"])
+    await second.wait(audit["audit_id"])
+    assert (await audits.get(user, project_id, audit["audit_id"]))["status"] == "completed"
+    assert not set(first_browser.rendered) & set(second_browser.rendered)
+    assert f"{ORIGIN}/orphan" in second_browser.rendered
+    assert len(first_browser.rendered) + len(second_browser.rendered) == 4
+    issues = (await audits.issues(user, project_id))["issues"]
+    pairs = Counter((row["issue_type"], row["page_url"]) for row in issues)
+    assert max(pairs.values()) == 1
+
+
+def test_the_render_sample_takes_page_templates_in_turns() -> None:
+    def row(path: str, **overrides: Any) -> dict[str, Any]:
+        return {
+            "url": f"{ORIGIN}{path}",
+            "fetch_class": "ok",
+            "status_code": 200,
+            "is_html": True,
+            **overrides,
+        }
+
+    rows = [
+        row("/products/bikes/a"),
+        row("/products/bikes/b"),
+        row("/products/bikes/c"),
+        row("/guides/sizing"),
+        row("/gone", status_code=404),
+        row("/feed.xml", is_html=False),
+        row("/"),
+        row("/guides/fit"),
+    ]
+    sample = render_sample(rows, f"{ORIGIN}/", max_pages=10)
+    assert [url.removeprefix(ORIGIN) for url in sample] == [
+        "/",
+        "/products/bikes/a",
+        "/guides/sizing",
+        "/products/bikes/b",
+        "/guides/fit",
+    ]
+    # The budget's fifth, between five and twenty pages.
+    assert len(render_sample(rows, f"{ORIGIN}/", max_pages=200)) == 6
 
 
 async def test_a_restarted_process_resumes_without_repeating_work(project: Any) -> None:

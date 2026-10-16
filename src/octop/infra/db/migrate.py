@@ -1630,6 +1630,8 @@ def _ensure_seo_schema(db: DatabasePool) -> None:
     _ensure_column(db, "seo_audit_frontier", "cluster", "TEXT")
     _ensure_column(db, "seo_audit_pages", "h1s", "TEXT NOT NULL DEFAULT '[]'")
     _ensure_column(db, "seo_audit_pages", "alternates", "TEXT NOT NULL DEFAULT '[]'")
+    _ensure_column(db, "seo_audit_pages", "body_truncated", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(db, "seo_audit_pages", "render", "TEXT")
 
 
 def _repair_legacy_schema(db: DatabasePool) -> None:

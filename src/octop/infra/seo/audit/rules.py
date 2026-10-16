@@ -61,6 +61,16 @@ ISSUE_SEVERITY: dict[str, Severity] = {
     "faq-schema-not-visible": "warning",
     "internal-nofollow": "warning",
     "images-missing-size": "info",
+    "render-noindex": "critical",
+    "render-error-state": "critical",
+    "render-h1-changed": "warning",
+    "render-canonical-changed": "warning",
+    "render-content-missing-from-html": "warning",
+    "render-links-missing-from-html": "warning",
+    "render-title-changed": "info",
+    "links-without-href": "info",
+    "render-failed": "info",
+    "render-unavailable": "info",
 }
 SEVERITY_ORDER: dict[str, int] = {"critical": 0, "warning": 1, "info": 2}
 FINALIZE_TYPES = frozenset(
@@ -78,6 +88,16 @@ FINALIZE_TYPES = frozenset(
         "canonical-target-invalid",
         "hreflang-target-invalid",
         "hreflang-no-return-link",
+        "render-noindex",
+        "render-error-state",
+        "render-h1-changed",
+        "render-canonical-changed",
+        "render-content-missing-from-html",
+        "render-links-missing-from-html",
+        "render-title-changed",
+        "links-without-href",
+        "render-failed",
+        "render-unavailable",
     }
 )
 
@@ -105,6 +125,12 @@ _HREFLANG_CODE = re.compile(
 )
 # Well-formed but wrong: the United Kingdom's region code is GB.
 _HREFLANG_WRONG = frozenset({"en-uk"})
+# Rendered text counts as missing from the HTML only past both bars, so a footer or a
+# cookie banner added by script does not.
+RENDER_EXTRA_WORDS = 200
+RENDER_WORD_RATIO = 1.5
+# A link or two added by script (cart, account) is normal; a set of them is navigation.
+RENDER_ONLY_LINKS_MIN = 3
 
 
 @dataclass
@@ -537,6 +563,159 @@ def find_hreflang_problems(pages: dict[str, PageFacts]) -> list[Issue]:
                 )
             if len(issues) >= CROSS_PAGE_ISSUE_CAP:
                 return issues
+    return issues
+
+
+def _plain(text: str) -> str:
+    return " ".join(text.split()).casefold()
+
+
+def _not_found(texts: Iterable[str]) -> bool:
+    return any(NOT_FOUND.search(text) for text in texts if text)
+
+
+def _title_change(
+    html_title: str, title: str, trace: list[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """A title other than the HTML's, at the end or on the way; "not found" ones are errors."""
+
+    def differs(text: str) -> bool:
+        return bool(text) and _plain(text) != _plain(html_title) and not _not_found([text])
+
+    if differs(title):
+        at = next(
+            (
+                state.get("t")
+                for state in trace
+                if _plain(str(state.get("title") or "")) == _plain(title)
+            ),
+            None,
+        )
+        return {
+            "html_title": html_title,
+            "rendered_title": title,
+            "at_ms": at,
+            "still_shown_at_end": True,
+        }
+    for state in trace:
+        seen = str(state.get("title") or "")
+        if differs(seen):
+            return {
+                "html_title": html_title,
+                "rendered_title": seen,
+                "at_ms": state.get("t"),
+                "still_shown_at_end": False,
+            }
+    return None
+
+
+def find_render_problems(
+    pages: dict[str, PageFacts], renders: dict[str, dict[str, Any]]
+) -> list[Issue]:
+    """Compare each rendered page with its HTML: what the page's scripts take back or add.
+
+    ``renders`` holds what the render phase stored per URL; the runner has already
+    reduced the rendered links to internal ones missing from the HTML, with statuses.
+    """
+    issues: list[Issue] = []
+    for url, render in renders.items():
+        page = pages.get(url)
+        if page is not None:
+            issues += _render_issues(page, render, pages)
+    return issues
+
+
+def _render_issues(
+    page: PageFacts, render: dict[str, Any], pages: dict[str, PageFacts]
+) -> list[Issue]:
+    issues: list[Issue] = []
+
+    def report(issue_type: str, details: dict[str, Any] | None = None) -> None:
+        issues.append(Issue(issue_type, page.url, details))
+
+    if render.get("unavailable"):
+        report("render-unavailable", {"error": render.get("error")})
+        return issues
+    status = render.get("status")
+    if render.get("error") or (status is not None and status >= 400):
+        report("render-failed", {"error": render.get("error"), "status_code": status})
+        return issues
+    robots = str(render.get("robots") or "")
+    title = str(render.get("title") or "")
+    h1s = [str(h1) for h1 in render.get("h1s") or []]
+    final_noindex = "noindex" in robots.lower()
+    if page.is_indexable and final_noindex:
+        report("render-noindex", {"rendered_robots": robots})
+    # A page whose HTML is fine but passes through "not found" or noindex while its
+    # data loads: a crawler that snapshots that moment drops a valid page.
+    if not _not_found([page.title, *page.h1s]):
+        on_final = _not_found([title, *h1s])
+        bad = next(
+            (
+                state
+                for state in render.get("trace") or []
+                if _not_found([str(state.get("title") or "")])
+                or (
+                    page.is_indexable
+                    and not final_noindex
+                    and "noindex" in str(state.get("robots") or "").lower()
+                )
+            ),
+            None,
+        )
+        if bad is not None or on_final:
+            state = bad or {"title": title, "robots": robots, "t": None}
+            report(
+                "render-error-state",
+                {
+                    "title": state.get("title"),
+                    "robots": state.get("robots"),
+                    "at_ms": state.get("t"),
+                    "still_shown_at_end": on_final,
+                },
+            )
+    title_change = _title_change(page.title, title, render.get("trace") or [])
+    if title_change is not None:
+        report("render-title-changed", title_change)
+    if [_plain(h1) for h1 in h1s] != [_plain(h1) for h1 in page.h1s]:
+        report("render-h1-changed", {"html_h1s": page.h1s, "rendered_h1s": h1s})
+    canonical = render.get("canonical")
+    if canonical != page.canonical_url:
+        report(
+            "render-canonical-changed",
+            {"html_canonical": page.canonical_url, "rendered_canonical": canonical},
+        )
+    words = int(render.get("word_count") or 0)
+    if words >= page.word_count * RENDER_WORD_RATIO and words - page.word_count >= (
+        RENDER_EXTRA_WORDS
+    ):
+        report(
+            "render-content-missing-from-html",
+            {"html_words": page.word_count, "rendered_words": words},
+        )
+    rendered_only = render.get("rendered_only")
+    if rendered_only is not None:
+        count = int(render.get("rendered_only_count") or 0)
+        if count >= RENDER_ONLY_LINKS_MIN:
+            report(
+                "render-links-missing-from-html",
+                {"count": count, "examples": rendered_only[:DUPLICATE_GROUP_SAMPLE]},
+            )
+        checked = render.get("link_status") or {}
+        for target in rendered_only:
+            crawled = pages.get(target)
+            target_status = (
+                crawled.status_code
+                if crawled is not None and crawled.fetch_class == "ok"
+                else checked.get(target)
+            )
+            if target_status is not None and target_status >= 400:
+                report(
+                    "broken-internal-link",
+                    {"target_url": target, "target_status": target_status, "rendered_only": True},
+                )
+    if render.get("unlinked"):
+        report("links-without-href", {"count": render["unlinked"]})
     return issues
 
 

@@ -6701,6 +6701,7 @@
     "auditStatus_cancelled": "已取消",
     "auditPhase_discovery": "读取 robots.txt 和站点地图",
     "auditPhase_crawl": "爬取页面",
+    "auditPhase_render": "无头浏览器渲染抽样页面",
     "auditPhase_finalize": "跨页面检查",
     "auditProgress": "已爬 {{crawled}} / {{total}} 页 · 发现 {{discovered}} 个网址 · 其中 {{sitemap}} 个来自站点地图",
     "auditSeverity": "严重程度",

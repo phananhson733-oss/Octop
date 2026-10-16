@@ -1111,6 +1111,56 @@
           "title": "图片没有写宽高",
           "explanation": "页面上的图片没有 width 和 height 属性，浏览器在图片加载前无法预留位置，页面会跳动（累积布局偏移 CLS，属于核心网页指标）。",
           "how_to_fix": "给每张图片写上 width 和 height 属性（或用 CSS aspect-ratio），让图片加载时布局保持稳定。"
+        },
+        "render-noindex": {
+          "title": "渲染后页面变成了 noindex",
+          "explanation": "服务器返回的 HTML 允许收录，但 JavaScript 执行完后页面上出现了 noindex。Google 会渲染页面并按渲染后的指令处理，所以即使源码看起来没问题，这个页面也可能被移出索引。",
+          "how_to_fix": "找到写 robots meta 标签的脚本（常见是默认值为 noindex 的 SEO 或 head 管理组件），让它对这个页面保持可收录。改完用 Search Console 的网址检查看渲染后的页面。"
+        },
+        "render-error-state": {
+          "title": "渲染过程中页面出现了错误状态",
+          "explanation": "服务器返回的 HTML 是正常页面，但脚本执行过程中页面经历了「找不到」标题或 noindex（详情里有具体是哪一种、在打开后第几毫秒出现）。如果搜索引擎恰好在那一刻截取页面（数据请求慢一点就会发生），一个有效页面就会被当成不存在或被排除收录。",
+          "how_to_fix": "不要在数据加载期间渲染「找不到」或 noindex 状态：数据请求完成前保留服务端输出的标题和 robots，只有确认记录不存在时才切换到错误状态（最好由服务器直接返回 404）。"
+        },
+        "render-h1-changed": {
+          "title": "渲染后 H1 变了",
+          "explanation": "JavaScript 执行后的 H1 和服务器返回的 HTML 里的不一样。搜索引擎可能按任意一个版本收录，页面的主标题就变得不可预测；只靠脚本加上的标题，不渲染的爬虫看不到。",
+          "how_to_fix": "让服务器直接输出最终的 H1，使 HTML 和渲染后的页面一致；避免在 hydration 时替换或删除标题。"
+        },
+        "render-canonical-changed": {
+          "title": "渲染后 canonical 变了",
+          "explanation": "JavaScript 执行后的 canonical 和服务器返回的 HTML 里的不一样（或者其中一个没有）。Google 可能用任意一个，两者冲突时它会自己挑，结果可能把权重归到错误的网址上。",
+          "how_to_fix": "在服务端 HTML 里输出正确的 canonical，并确认没有脚本改写或删除它。"
+        },
+        "render-content-missing-from-html": {
+          "title": "主要内容要渲染后才出现",
+          "explanation": "渲染后的页面比服务器返回的 HTML 多出大量文字，说明内容主要由 JavaScript 生成。Google 能渲染，但更晚也更不稳定；不执行脚本的其他搜索引擎和 AI 爬虫只能看到一个内容很少的页面。",
+          "how_to_fix": "对主要内容做服务端渲染或预渲染，让 HTML 响应里就包含要拿来排名的文字。"
+        },
+        "render-links-missing-from-html": {
+          "title": "有站内链接只在渲染后才出现",
+          "explanation": "渲染后的页面里有好几个站内链接，服务器返回的 HTML 里却没有。不执行 JavaScript 的爬虫永远发现不了它们，Google 也要等渲染后才能发现，链接指向的页面会被晚发现甚至发现不了。",
+          "how_to_fix": "把导航和重要的站内链接作为普通的 <a href> 元素放进服务端 HTML。"
+        },
+        "render-title-changed": {
+          "title": "渲染过程中标题变了",
+          "explanation": "JavaScript 执行中或执行后，页面显示的标题和服务器返回的 HTML 里的 <title> 不一样（详情里有出现的时间、最后是否还在）。Google 一般收录渲染后的标题，不渲染的爬虫保留原来的，页面就可能以不同的标题出现；只是闪一下的标题，说明有两段脚本在争着改 head。",
+          "how_to_fix": "在服务端 HTML 里输出最终标题，并确认脚本设置的是同一个值或者不去改它，数据加载期间也一样。"
+        },
+        "links-without-href": {
+          "title": "有不带 href 的链接元素",
+          "explanation": "渲染后的页面上有不带 href 的 <a> 元素，或者带 role=\"link\" 却没有 href 的元素，通常靠点击事件跳转。搜索引擎只会跟踪真正带 href 的链接，这些元素指向的页面无法通过它们被发现。",
+          "how_to_fix": "凡是跳转到其他页面的元素都用 <a href=\"...\">；不改变网址的操作再用按钮。"
+        },
+        "render-failed": {
+          "title": "页面没能渲染",
+          "explanation": "无头 Chromium 打不开这个页面，或者拿到了错误状态码，所以这个页面跳过了渲染相关的检查。详情里有具体错误。",
+          "how_to_fix": "通常不是网站本身的问题：看一下错误，如果是超时就重跑一次审计。如果是网站拦了审计用的浏览器，按放行爬虫的同样方式放行它。"
+        },
+        "render-unavailable": {
+          "title": "无法渲染页面",
+          "explanation": "Octop 服务器上启动不了无头浏览器，所以这次审计只检查了服务器返回的 HTML，渲染相关的检查都没有执行。",
+          "how_to_fix": "请管理员为 Playwright 安装 Chromium，或把 OCTOP_SEO_AUDIT_CHROMIUM 设为某个 Chromium 程序的路径，然后重跑审计。"
         }
       },
       "errors": {

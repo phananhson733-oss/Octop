@@ -1111,6 +1111,56 @@
           "title": "Images without width and height",
           "explanation": "Images on the page lack width and height attributes, so the browser cannot reserve their space before they load and the layout shifts (Cumulative Layout Shift, a Core Web Vital).",
           "how_to_fix": "Set width and height attributes (or a CSS aspect-ratio) on each image so the layout is stable while images load."
+        },
+        "render-noindex": {
+          "title": "Page becomes noindex after rendering",
+          "explanation": "The HTML the server sends lets search engines index the page, but once its JavaScript has run the page carries a noindex robots directive. Google renders pages and obeys the rendered directive, so this page can drop out of the index even though its source looks fine.",
+          "how_to_fix": "Find the script that writes the robots meta tag (often an SEO or head-management component with a default of noindex) and make it keep the page indexable. Check the rendered page with Search Console's URL Inspection."
+        },
+        "render-error-state": {
+          "title": "Page shows an error state while rendering",
+          "explanation": "The served HTML is a normal page, but while its scripts ran the page passed through a \"not found\" title or a noindex directive (the details show which, and how many milliseconds after navigation). If a search engine takes its snapshot in that moment — a slow data request is enough — a valid page is treated as missing or excluded.",
+          "how_to_fix": "Do not render a not-found or noindex state while data is loading: keep the server-rendered title and robots until the data request has finished, and only switch to an error state on a confirmed missing record (ideally with a real 404 from the server)."
+        },
+        "render-h1-changed": {
+          "title": "H1 changes after rendering",
+          "explanation": "The page's H1 headings after JavaScript runs differ from those in the served HTML. Search engines may index either version, so the main heading the page ranks for becomes unpredictable, and a heading added only by script is missed by crawlers that do not render.",
+          "how_to_fix": "Render the final H1 on the server so the HTML and the rendered page agree; avoid replacing or removing the heading during hydration."
+        },
+        "render-canonical-changed": {
+          "title": "Canonical changes after rendering",
+          "explanation": "The canonical URL after JavaScript runs is different from the one in the served HTML (or one of them is missing). Google may use either, and conflicting canonicals make it pick its own, which can consolidate signals onto the wrong URL.",
+          "how_to_fix": "Output the correct canonical in the server HTML and make sure no script rewrites or removes it."
+        },
+        "render-content-missing-from-html": {
+          "title": "Main content appears only after rendering",
+          "explanation": "The rendered page has far more text than the served HTML, so much of its content is produced by JavaScript. Google can render it, but later and less reliably, and other search engines and AI crawlers that do not run scripts see a thin page.",
+          "how_to_fix": "Server-render or prerender the main content, so the HTML response already contains the text that should rank."
+        },
+        "render-links-missing-from-html": {
+          "title": "Internal links exist only after rendering",
+          "explanation": "Several internal links appear in the rendered page but not in the served HTML. Crawlers that do not run JavaScript never find them, and Google discovers them only after rendering, so the pages they lead to are found later or not at all.",
+          "how_to_fix": "Put navigation and important internal links in the server HTML as normal <a href> elements."
+        },
+        "render-title-changed": {
+          "title": "Title changes while rendering",
+          "explanation": "While or after its JavaScript runs, the page shows a title other than the <title> in the served HTML (the details say when it appeared and whether it stays). Google usually indexes the rendered title and crawlers that do not render keep the original, so the page can appear under different titles; a title that only flickers means two scripts are competing over the head.",
+          "how_to_fix": "Output the final title in the server HTML, and make sure scripts set the same value or leave it alone, including while data is loading."
+        },
+        "links-without-href": {
+          "title": "Link-like elements without an href",
+          "explanation": "The rendered page has <a> elements without an href, or elements with role=\"link\" and no href, usually navigated by a click handler. Search engines only follow real href links, so whatever these lead to is not discovered through them.",
+          "how_to_fix": "Use <a href=\"...\"> for anything that navigates to another page; keep buttons for actions that do not change the URL."
+        },
+        "render-failed": {
+          "title": "Page could not be rendered",
+          "explanation": "Headless Chromium could not open this page, or got an error status for it, so the rendered-page checks were skipped for it. The details give the error.",
+          "how_to_fix": "Usually nothing to fix on the site: check the error, and run the audit again if it was a timeout. If the site blocks the audit browser, admit it the same way as the crawler."
+        },
+        "render-unavailable": {
+          "title": "Rendering was not available",
+          "explanation": "No headless browser could be started on the Octop server, so this audit checked only the served HTML and none of the rendered-page checks ran.",
+          "how_to_fix": "Ask the administrator to install Chromium for Playwright, or set OCTOP_SEO_AUDIT_CHROMIUM to a Chromium binary, then run the audit again."
         }
       },
       "errors": {

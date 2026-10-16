@@ -155,6 +155,7 @@ Each variable, when set, takes precedence over the matching key in
 | `OCTOP_REQUIRE_SETUP_PASSWORD` | bool | `true` | Require wizard password during initial setup |
 | `OCTOP_MAX_UPLOAD_MB` | int | `100` | Max upload size in MiB for chat attachments, IM inbound, and knowledge documents (1–1024) |
 | `OCTOP_SEO_AUDIT_HEADERS` | JSON object | empty | SEO site audit: extra request headers per site, e.g. `{"example.com": {"x-audit-key": "…"}}`. Sent only to that host and its `www.` form (never to other hosts, redirect targets included), so the site's firewall can let the crawler through by a secret header. Read when each audit starts; malformed JSON is logged without its values and ignored |
+| `OCTOP_SEO_AUDIT_CHROMIUM` | path | empty | SEO site audit: the Chromium (or headless shell) binary used to render a sample of the audited pages. Empty uses Playwright's own browser install. If no browser starts, the audit checks the served HTML only and reports `render-unavailable` |
 | `OCTOP_DATABASE_URL` | string | empty | Full DSN — overrides the `OCTOP_DATABASE_*` fields below |
 | `OCTOP_DATABASE_DRIVER` | `sqlite` \| `postgresql` | `sqlite` | Storage backend |
 | `OCTOP_DATABASE_SQLITE_PATH` | path | `octop.db` | SQLite file path (relative to `OCTOP_HOME` unless absolute) |

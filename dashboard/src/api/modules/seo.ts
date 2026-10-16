@@ -171,7 +171,7 @@ export interface SeoAudit {
   start_url: string | null;
   max_pages: number;
   status: "queued" | "running" | "completed" | "failed" | "cancelled";
-  phase: "discovery" | "crawl" | "finalize";
+  phase: "discovery" | "crawl" | "render" | "finalize";
   pages_crawled: number;
   pages_total: number;
   discovered_count: number;

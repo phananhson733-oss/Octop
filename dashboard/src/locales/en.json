@@ -6701,6 +6701,7 @@
     "auditStatus_cancelled": "Cancelled",
     "auditPhase_discovery": "Reading robots.txt and sitemaps",
     "auditPhase_crawl": "Crawling pages",
+    "auditPhase_render": "Rendering sample pages in a headless browser",
     "auditPhase_finalize": "Checking across pages",
     "auditProgress": "{{crawled}} of {{total}} pages crawled · {{discovered}} URLs found · {{sitemap}} from sitemaps",
     "auditSeverity": "Severity",

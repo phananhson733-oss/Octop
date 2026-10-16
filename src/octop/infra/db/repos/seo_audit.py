@@ -23,7 +23,7 @@ _PAGE = (
     "header_canonical_url,robots_meta,x_robots_tag,og_title,og_description,og_image,h1_count,"
     "heading_order,word_count,content_hash,is_html,javascript_shell,images_total,"
     "images_missing_alt,internal_link_count,external_link_count,has_structured_data,hreflang,"
-    "is_indexable,response_time_ms,crawl_depth,in_sitemap,crawled_at,h1s,alternates"
+    "is_indexable,response_time_ms,crawl_depth,in_sitemap,crawled_at,h1s,alternates,body_truncated"
 )
 # Page columns stored as JSON text.
 _JSON_COLUMNS = frozenset({"heading_order", "hreflang", "internal_links", "h1s", "alternates"})
@@ -34,6 +34,7 @@ _BOOLEANS = (
     "has_structured_data",
     "is_indexable",
     "in_sitemap",
+    "body_truncated",
     "cancel_requested",
     "rate_limited",
 )
@@ -378,17 +379,37 @@ class SeoAuditRepo:
                 ),
             )
 
-    def start_finalize(
+    def end_crawl(
         self, audit_id: str, token: str, now: int, *, crawl_complete: bool, rate_limited: bool
+    ) -> bool:
+        """Close the crawl and move to rendering, keeping how the crawl ended."""
+        with self._db.transaction() as conn:
+            if conn.execute(_FENCE, (now, audit_id, token)).rowcount != 1:
+                return False
+            conn.execute(
+                "UPDATE seo_audits SET phase='render',crawl_complete=?,rate_limited=? "
+                "WHERE audit_id=?",
+                (int(crawl_complete), int(rate_limited), audit_id),
+            )
+        return True
+
+    def record_render(
+        self, audit_id: str, token: str, now: int, url: str, render: dict[str, Any]
     ) -> bool:
         with self._db.transaction() as conn:
             if conn.execute(_FENCE, (now, audit_id, token)).rowcount != 1:
                 return False
             conn.execute(
-                "UPDATE seo_audits SET phase='finalize',crawl_complete=?,rate_limited=? "
-                "WHERE audit_id=?",
-                (int(crawl_complete), int(rate_limited), audit_id),
+                "UPDATE seo_audit_pages SET render=? WHERE audit_id=? AND url=?",
+                (json.dumps(render), audit_id, url),
             )
+        return True
+
+    def start_finalize(self, audit_id: str, token: str, now: int) -> bool:
+        with self._db.transaction() as conn:
+            if conn.execute(_FENCE, (now, audit_id, token)).rowcount != 1:
+                return False
+            conn.execute("UPDATE seo_audits SET phase='finalize' WHERE audit_id=?", (audit_id,))
         return True
 
     def complete(
@@ -429,6 +450,16 @@ class SeoAuditRepo:
                 (audit_id,),
             ).fetchall()
         return [_page(row) for row in rows]
+
+    def renders(self, audit_id: str) -> dict[str, dict[str, Any]]:
+        """The stored render of each page that has one, by URL."""
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                "SELECT url,render FROM seo_audit_pages WHERE audit_id=? AND render IS NOT NULL "
+                "ORDER BY id",
+                (audit_id,),
+            ).fetchall()
+        return {str(row["url"]): json.loads(row["render"]) for row in rows}
 
     def issues(self, audit_id: str) -> list[dict[str, Any]]:
         with self._db.connect() as conn:

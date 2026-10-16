@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections import defaultdict
 from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import partial
@@ -20,6 +21,7 @@ from typing import Any
 import httpx
 
 from octop.infra.db.services import RepoBundle
+from octop.infra.seo.audit.analyzer import MAX_EXTRACTED_LINKS
 from octop.infra.seo.audit.crawler import (
     MAX_BLOCKED_SITEMAP_ISSUES,
     CrawledPage,
@@ -32,6 +34,7 @@ from octop.infra.seo.audit.crawler import (
     seeds_for,
 )
 from octop.infra.seo.audit.net import USER_AGENT, crawler_client
+from octop.infra.seo.audit.render import Rendered, RendererFactory, RenderUnavailable
 from octop.infra.seo.audit.robots import Robots, parse_robots
 from octop.infra.seo.audit.rules import (
     FINALIZE_TYPES,
@@ -44,11 +47,18 @@ from octop.infra.seo.audit.rules import (
     find_missing_from_sitemap,
     find_orphans,
     find_redirect_chains_and_loops,
+    find_render_problems,
     find_sitemap_problems,
     page_issues,
 )
 from octop.infra.seo.audit.throttle import CrawlThrottle
-from octop.infra.seo.audit.urls import TargetBlocked, origin_of, path_cluster
+from octop.infra.seo.audit.urls import (
+    TargetBlocked,
+    is_same_origin,
+    normalize_url,
+    origin_of,
+    path_cluster,
+)
 from octop.infra.utils.ulid import new_ulid
 
 logger = logging.getLogger(__name__)
@@ -60,6 +70,13 @@ SWEEP_S = 30.0
 MAX_CONCURRENT_AUDITS = 2
 # Mega-menu pages can carry 1000+ links; the link checks only need these.
 MAX_STORED_LINKS_PER_PAGE = 500
+# Rendering takes seconds a page: a sample, the start page first, then the page
+# templates in turns, scaled to the crawl budget.
+MIN_RENDERED_PAGES = 5
+MAX_RENDERED_PAGES = 20
+# Internal links only the rendered DOM has, which the crawl never fetched, get a status check.
+MAX_RENDERED_LINK_CHECKS = 30
+MAX_STORED_RENDERED_ONLY = 100
 
 
 class Fenced(Exception):
@@ -118,6 +135,7 @@ def page_row(page: CrawledPage, internal_links: list[str]) -> dict[str, Any]:
         "crawled_at": _now(),
         "h1s": page.h1s,
         "alternates": page.alternates,
+        "body_truncated": page.body_truncated,
         "internal_links": internal_links,
     }
 
@@ -149,12 +167,43 @@ def facts_from_row(row: dict[str, Any]) -> PageFacts:
         in_sitemap=row["in_sitemap"],
         h1s=row["h1s"],
         alternates=[(lang, href) for lang, href in row["alternates"]],
+        body_truncated=row["body_truncated"],
+    )
+
+
+def render_sample(rows: list[dict[str, Any]], start_url: str, max_pages: int) -> list[str]:
+    """The pages to render: the start page, then one page per template in turns."""
+    limit = max(MIN_RENDERED_PAGES, min(MAX_RENDERED_PAGES, max_pages // 5))
+    clusters: dict[str, list[str]] = defaultdict(list)
+    for row in sorted(rows, key=lambda row: row["url"] != start_url):
+        if row["fetch_class"] == "ok" and row["status_code"] == 200 and row["is_html"]:
+            clusters[path_cluster(row["url"])].append(row["url"])
+    sample: list[str] = []
+    for turn in range(limit):
+        for urls in clusters.values():
+            if turn < len(urls) and len(sample) < limit:
+                sample.append(urls[turn])
+    return sample
+
+
+def _links_complete(row: dict[str, Any]) -> bool:
+    """Whether the stored links are all the page's HTML has, so a diff against them is fair."""
+    return (
+        not row["body_truncated"]
+        and row["internal_link_count"] <= len(row["internal_links"])
+        and row["internal_link_count"] + row["external_link_count"] < MAX_EXTRACTED_LINKS
     )
 
 
 class AuditJob:
     def __init__(
-        self, repos: RepoBundle, audit: dict[str, Any], token: str, client: httpx.AsyncClient
+        self,
+        repos: RepoBundle,
+        audit: dict[str, Any],
+        token: str,
+        client: httpx.AsyncClient,
+        renderer_factory: RendererFactory | None = None,
+        render_lock: asyncio.Lock | None = None,
     ) -> None:
         self.repo = repos.seo_audit_repo
         self.audit = audit
@@ -162,6 +211,8 @@ class AuditJob:
         self.token = token
         self.client = client
         self.phase = str(audit["phase"])
+        self.renderer_factory = renderer_factory
+        self.render_lock = render_lock or asyncio.Lock()
 
     async def _fenced(self, ok: bool) -> None:
         if not ok:
@@ -175,9 +226,17 @@ class AuditJob:
         robots = parse_robots(origin, self.audit["robots_text"])
         if self.phase == "crawl":
             complete, rate_limited = await self._crawl(origin, robots)
+            self.phase = "render"
         else:
             complete = bool(self.audit["crawl_complete"])
             rate_limited = bool(self.audit["rate_limited"])
+        if self.phase == "render":
+            # A site that is already throttling the crawl gets no more requests.
+            if self.renderer_factory is not None and not rate_limited:
+                await self._render(start_url, origin, robots)
+            await self._fenced(
+                await _db(self.repo.start_finalize, self.id, self.token, int(time.time()))
+            )
         self.phase = "finalize"
         await self._finalize(start_url, complete, rate_limited)
 
@@ -265,7 +324,7 @@ class AuditJob:
         complete = pending == 0 and not rate_limited
         await self._fenced(
             await _db(
-                self.repo.start_finalize,
+                self.repo.end_crawl,
                 self.id,
                 self.token,
                 int(time.time()),
@@ -274,6 +333,35 @@ class AuditJob:
             )
         )
         return complete, rate_limited
+
+    async def _render(self, start_url: str, origin: str, robots: Robots) -> None:
+        assert self.renderer_factory is not None
+        rows = await _db(self.repo.pages, self.id, with_links=True)
+        done = await _db(self.repo.renders, self.id)
+        sample = [
+            url
+            for url in render_sample(rows, start_url, int(self.audit["max_pages"]))
+            if url not in done
+        ]
+        if not sample:
+            return
+        by_url = {row["url"]: row for row in rows}
+        checks = _LinkChecks(self.client, origin, robots, by_url)
+        # One browser at a time in this process, whatever the number of audits.
+        async with self.render_lock:
+            try:
+                async with self.renderer_factory(start_url) as renderer:
+                    for url in sample:
+                        rendered = await renderer.render(url)
+                        stored = await _stored_render(rendered, by_url[url], checks)
+                        await self._record_render(url, stored)
+            except RenderUnavailable as exc:
+                await self._record_render(sample[0], {"error": str(exc), "unavailable": True})
+
+    async def _record_render(self, url: str, render: dict[str, Any]) -> None:
+        await self._fenced(
+            await _db(self.repo.record_render, self.id, self.token, int(time.time()), url, render)
+        )
 
     async def _finalize(self, start_url: str, complete: bool, rate_limited: bool) -> None:
         rows = await _db(self.repo.pages, self.id, with_links=True)
@@ -294,6 +382,7 @@ class AuditJob:
         issues += find_sitemap_problems(pages.values())
         issues += find_canonical_problems(pages)
         issues += find_hreflang_problems(pages)
+        issues += find_render_problems(pages, await _db(self.repo.renders, self.id))
         if rate_limited:
             issues.append(Issue("crawl-rate-limited", start_url))
         await self._fenced(
@@ -307,6 +396,66 @@ class AuditJob:
                 FINALIZE_TYPES,
             )
         )
+
+
+class _LinkChecks:
+    """Status checks for links only the rendered DOM has, through the crawl's own client."""
+
+    def __init__(
+        self,
+        client: httpx.AsyncClient,
+        origin: str,
+        robots: Robots,
+        crawled: dict[str, dict[str, Any]],
+    ) -> None:
+        self.client = client
+        self.origin = origin
+        self.robots = robots
+        self.crawled = crawled
+        self.left = MAX_RENDERED_LINK_CHECKS
+        self.throttle = CrawlThrottle()
+
+    async def statuses(self, links: list[str]) -> dict[str, int]:
+        found: dict[str, int] = {}
+        for link in links:
+            if self.left <= 0 or self.throttle.stopped:
+                break
+            if link in self.crawled or not queueable(link, self.origin, self.robots, USER_AGENT):
+                continue
+            self.left -= 1
+            page = await crawl_page(self.client, link, None, False, self.throttle)
+            # Only a fetch that reached the site is evidence; a block or a cooldown is not.
+            if page is not None and page.fetch_class == "ok":
+                found[link] = page.status_code
+        return found
+
+
+async def _stored_render(
+    rendered: Rendered, row: dict[str, Any], checks: _LinkChecks
+) -> dict[str, Any]:
+    """What finalize needs from one render: the page state, and links the HTML lacks."""
+    stored = rendered.to_json()
+    links = stored.pop("links")
+    canonical = rendered.canonical
+    stored["canonical"] = (normalize_url(canonical) or canonical) if canonical else None
+    if rendered.error is not None:
+        return stored
+    internal = list(
+        dict.fromkeys(
+            target
+            for target in (normalize_url(link) for link in links)
+            if target and is_same_origin(target, row["url"])
+        )
+    )
+    stored["internal_links"] = len(internal)
+    stored["rendered_only"] = None
+    if _links_complete(row):
+        html_links = set(row["internal_links"])
+        only = [link for link in internal if link not in html_links and link != row["url"]]
+        stored["rendered_only_count"] = len(only)
+        stored["rendered_only"] = only[:MAX_STORED_RENDERED_ONLY]
+        stored["link_status"] = await checks.statuses(stored["rendered_only"])
+    return stored
 
 
 def _error_code(exc: BaseException) -> str:
@@ -324,10 +473,14 @@ class SeoAuditRunner:
         repos: RepoBundle,
         client_factory: Callable[[], httpx.AsyncClient] = crawler_client,
         max_concurrent: int = MAX_CONCURRENT_AUDITS,
+        renderer_factory: RendererFactory | None = None,
     ) -> None:
+        """``renderer_factory`` opens a browser per audit; without one, nothing is rendered."""
         self.repos = repos
         self.token = new_ulid()
         self._client_factory = client_factory
+        self._renderer_factory = renderer_factory
+        self._render_lock = asyncio.Lock()
         self._slots = asyncio.Semaphore(max_concurrent)
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._sweeper: asyncio.Task[None] | None = None
@@ -403,7 +556,14 @@ class SeoAuditRunner:
                         return
 
             async with self._client_factory() as client:
-                runner = AuditJob(self.repos, audit, self.token, client)
+                runner = AuditJob(
+                    self.repos,
+                    audit,
+                    self.token,
+                    client,
+                    self._renderer_factory,
+                    self._render_lock,
+                )
                 job = asyncio.create_task(runner.run())
                 beater = asyncio.create_task(beat(job))
                 try:

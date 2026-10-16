@@ -480,8 +480,10 @@ def build_seo_tools(
             "Start a technical site audit of this agent's project website when the user asks for "
             "one or agrees to it. Crawls up to max_pages pages (10-200, default 50) from "
             "start_url (default the project domain; only the project's own site, with or without "
-            "www), one page a second, following robots.txt; it does not run JavaScript. Free: no "
-            "paid provider is called. Only one audit per project runs at a time.",
+            "www), one page a second, following robots.txt, then renders a sample of the pages "
+            "(the start page and one per page template) in headless Chromium to compare them "
+            "with the HTML. Free: no paid provider is called. Only one audit per project runs at "
+            "a time.",
         ),
         (
             "seo_list_audits",
@@ -495,7 +497,9 @@ def build_seo_tools(
             "Read a site audit's issues; audit_id defaults to the newest audit. summary has one "
             "entry per issue type with severity, count, explanation and how_to_fix; issues lists "
             "every affected URL with details. Filter by severity (critical|warning|info) or "
-            "issue_type. The crawler does not run JavaScript. If status is not completed, "
+            "issue_type. Content checks read the served HTML; render-* issues and "
+            "broken-internal-link rows with rendered_only come from the rendered sample, and "
+            "render-unavailable means no page was rendered. If status is not completed, "
             "crawl_complete is false or rate_limited is true, the results are partial: say so. "
             "Free. Pass next_offset as offset to read more.",
         ),

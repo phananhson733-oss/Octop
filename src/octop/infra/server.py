@@ -568,10 +568,13 @@ class OctopServer:
             history_archive=history_archive,
             bridge_manager=bridge_mgr,
         )
+        from octop.infra.seo.audit.render import open_chromium_renderer  # noqa: PLC0415
         from octop.infra.seo.audit.runner import SeoAuditRunner  # noqa: PLC0415
 
         # Picks up queued audits and the ones a stopped process left running.
-        self.app_runtime.seo_audits = SeoAuditRunner(self.services.repos)
+        self.app_runtime.seo_audits = SeoAuditRunner(
+            self.services.repos, renderer_factory=open_chromium_renderer
+        )
         self.app_runtime.seo_audits.start()
         from octop.infra.knowledge.jobs import resume_pending_index_jobs  # noqa: PLC0415
 
