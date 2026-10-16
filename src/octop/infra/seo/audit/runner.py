@@ -21,7 +21,9 @@ import httpx
 
 from octop.infra.db.services import RepoBundle
 from octop.infra.seo.audit.crawler import (
+    MAX_BLOCKED_SITEMAP_ISSUES,
     CrawledPage,
+    blocked_for_google,
     crawl_page,
     discover_sitemap_urls,
     fetch_robots_text,
@@ -36,14 +38,17 @@ from octop.infra.seo.audit.rules import (
     Issue,
     PageFacts,
     find_broken_links,
+    find_canonical_problems,
     find_duplicates,
+    find_hreflang_problems,
     find_missing_from_sitemap,
     find_orphans,
     find_redirect_chains_and_loops,
+    find_sitemap_problems,
     page_issues,
 )
 from octop.infra.seo.audit.throttle import CrawlThrottle
-from octop.infra.seo.audit.urls import TargetBlocked, origin_of
+from octop.infra.seo.audit.urls import TargetBlocked, origin_of, path_cluster
 from octop.infra.utils.ulid import new_ulid
 
 logger = logging.getLogger(__name__)
@@ -111,6 +116,8 @@ def page_row(page: CrawledPage, internal_links: list[str]) -> dict[str, Any]:
         "crawl_depth": page.crawl_depth,
         "in_sitemap": page.in_sitemap,
         "crawled_at": _now(),
+        "h1s": page.h1s,
+        "alternates": page.alternates,
         "internal_links": internal_links,
     }
 
@@ -140,6 +147,8 @@ def facts_from_row(row: dict[str, Any]) -> PageFacts:
         response_time_ms=row["response_time_ms"],
         crawl_depth=row["crawl_depth"],
         in_sitemap=row["in_sitemap"],
+        h1s=row["h1s"],
+        alternates=[(lang, href) for lang, href in row["alternates"]],
     )
 
 
@@ -181,6 +190,7 @@ class AuditJob:
             self.client, origin, robots, int(self.audit["max_pages"])
         )
         start, seeds = seeds_for(start_url, origin, robots, sitemap_urls, USER_AGENT)
+        blocked = blocked_for_google(sitemap_urls, origin, robots)[:MAX_BLOCKED_SITEMAP_ISSUES]
         await self._fenced(
             await _db(
                 self.repo.save_discovery,
@@ -189,8 +199,9 @@ class AuditJob:
                 int(time.time()),
                 start_url=start_url,
                 robots_text=robots_text,
-                start=start,
-                seeds=seeds,
+                start=(start, path_cluster(start)) if start is not None else None,
+                seeds=[(url, path_cluster(url)) for url in seeds],
+                issues=[_issue_row(Issue("sitemap-blocked-by-robots", url)) for url in blocked],
             )
         )
         self.audit.update(start_url=start_url, robots_text=robots_text, sitemap_count=len(seeds))
@@ -220,6 +231,16 @@ class AuditJob:
                     link.target_url, origin, robots, USER_AGENT
                 ):
                     discovered[link.target_url] = depth + 1 if depth is not None else None
+            # Canonical and hreflang targets are queued too, for the cross-page checks; no
+            # click leads there, so they carry no depth and wait behind linked pages.
+            for related in [page.canonical_url, *(href for _lang, href in page.alternates)]:
+                if (
+                    related
+                    and related != page.url
+                    and related not in discovered
+                    and queueable(related, origin, robots, USER_AGENT)
+                ):
+                    discovered[related] = None
             # A redirect continues the same navigation path: same depth.
             if (
                 page.redirect_url
@@ -235,7 +256,7 @@ class AuditJob:
                     int(time.time()),
                     page_row(page, targets),
                     issues,
-                    list(discovered.items()),
+                    [(url, found, path_cluster(url)) for url, found in discovered.items()],
                 )
             )
             crawled += 1
@@ -270,6 +291,9 @@ class AuditJob:
             issues += find_orphans(pages, links, start_url)
         if self.audit["sitemap_count"]:
             issues += find_missing_from_sitemap(pages.values())
+        issues += find_sitemap_problems(pages.values())
+        issues += find_canonical_problems(pages)
+        issues += find_hreflang_problems(pages)
         if rate_limited:
             issues.append(Issue("crawl-rate-limited", start_url))
         await self._fenced(

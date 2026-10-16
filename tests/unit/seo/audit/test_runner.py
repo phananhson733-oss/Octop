@@ -14,7 +14,7 @@ from octop.infra.seo.audit.runner import SeoAuditRunner
 from octop.infra.seo.audit.service import SeoAuditService
 from octop.infra.seo.audit.throttle import CrawlThrottle
 
-from .fakesite import FakeSite, page, redirect
+from .fakesite import FakeSite, html, page, redirect
 
 ORIGIN = "https://example.com"
 
@@ -111,13 +111,15 @@ async def test_audit_crawls_the_site_and_reports_issues(project: Any) -> None:
     assert ("broken-internal-link", f"{ORIGIN}/a") in found
     assert ("broken-page", f"{ORIGIN}/gone") in found
     assert ("orphan-page", f"{ORIGIN}/orphan") in found
+    # The sitemap lists a URL robots.txt keeps Google out of.
+    assert ("sitemap-blocked-by-robots", f"{ORIGIN}/private/x") in found
     summary = {row["issue_type"]: row for row in result["summary"]}
     assert summary["broken-internal-link"]["title"] == "站内死链"
     assert [row["severity"] for row in result["summary"]] == sorted(
         (row["severity"] for row in result["summary"]),
         key=["critical", "warning", "info"].index,
     )
-    assert done["issue_counts"]["critical"] == 1
+    assert done["issue_counts"]["critical"] == 2
 
 
 async def test_the_crawl_goes_breadth_first_whatever_the_sitemap_order(project: Any) -> None:
@@ -155,6 +157,79 @@ async def test_the_crawl_goes_breadth_first_whatever_the_sitemap_order(project: 
     issues = (await audits.issues(user, project_id))["issues"]
     missing = {row["page_url"] for row in issues if row["issue_type"] == "not-in-sitemap"}
     assert missing == {f"{ORIGIN}/"}
+
+
+async def test_the_budget_visits_every_page_template_before_repeating_one(
+    project: Any,
+) -> None:
+    audits, repos, _user, _project_id = project
+    posts = [f"/blog/post-{i}" for i in range(12)]
+    others = ["/about", "/pricing", "/docs/start"]
+    routes: dict[str, Any] = {f"{ORIGIN}/": page("Home", *posts, *others)}
+    for path in [*posts, *others]:
+        routes[f"{ORIGIN}{path}"] = page(path, "/")
+    site = FakeSite(routes)
+    audit = await _start(project, max_pages=10)
+    runner = SeoAuditRunner(repos, client_factory=site.client)
+    runner.submit(audit["audit_id"])
+    await runner.wait(audit["audit_id"])
+    crawled = {
+        request.removeprefix(f"GET {ORIGIN}")
+        for request in site.requests
+        if request.startswith("GET") and "robots" not in request and "sitemap" not in request
+    }
+    assert len(crawled) == 10
+    # The home page links twelve posts first; the other sections still get their turn.
+    assert set(others) <= crawled
+
+
+async def test_cross_page_checks_follow_canonicals_hreflang_and_the_sitemap(
+    project: Any,
+) -> None:
+    audits, repos, user, project_id = project
+    sitemap = "".join(f"<url><loc>{ORIGIN}{path}</loc></url>" for path in ("/", "/en/a", "/moved"))
+    head = (
+        '<link rel="canonical" href="/gone">'
+        '<link rel="alternate" hreflang="en" href="https://example.com/en/a">'
+        '<link rel="alternate" hreflang="fr" href="https://example.com/fr/a">'
+    )
+    site = FakeSite(
+        {
+            f"{ORIGIN}/robots.txt": httpx.Response(200, text=f"Sitemap: {ORIGIN}/sitemap.xml"),
+            f"{ORIGIN}/sitemap.xml": httpx.Response(
+                200, headers={"content-type": "application/xml"}, text=f"<urlset>{sitemap}</urlset>"
+            ),
+            f"{ORIGIN}/": page("Home", "/en/a"),
+            # Neither /gone nor /fr/a is linked: the crawler queues them for these checks.
+            f"{ORIGIN}/en/a": html(
+                f"<html><head><title>English A page</title>{head}</head>"
+                f"<body><h1>A</h1><p>{'word ' * 200}</p><a href='/'>home</a></body></html>"
+            ),
+            f"{ORIGIN}/fr/a": page("French A", "/"),
+            f"{ORIGIN}/moved": redirect("/"),
+        }
+    )
+    audit = await _start(project, max_pages=10)
+    runner = SeoAuditRunner(repos, client_factory=site.client)
+    runner.submit(audit["audit_id"])
+    await runner.wait(audit["audit_id"])
+    issues = (await audits.issues(user, project_id))["issues"]
+    found = {(row["issue_type"], row["page_url"]): row["details"] for row in issues}
+    a = f"{ORIGIN}/en/a"
+    assert found[("canonical-target-invalid", a)] == {
+        "canonical_url": f"{ORIGIN}/gone",
+        "reason": "error",
+        "target_status": 404,
+    }
+    assert found[("hreflang-no-return-link", a)] == {
+        "hreflang": "fr",
+        "target_url": f"{ORIGIN}/fr/a",
+    }
+    assert found[("sitemap-url-not-indexable", f"{ORIGIN}/moved")]["reason"] == "redirect"
+    pages = {row["url"]: row for row in (await audits.pages(user, project_id))["pages"]}
+    assert pages[a]["h1s"] == ["A"]
+    assert pages[a]["alternates"] == [["en", a], ["fr", f"{ORIGIN}/fr/a"]]
+    assert pages[f"{ORIGIN}/gone"]["crawl_depth"] is None
 
 
 async def test_a_restarted_process_resumes_without_repeating_work(project: Any) -> None:

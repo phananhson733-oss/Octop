@@ -1626,6 +1626,10 @@ def _ensure_seo_schema(db: DatabasePool) -> None:
     else:
         with db.connect() as conn:
             conn.executescript(sql)
+    # Columns added after the tables first shipped (CREATE TABLE IF NOT EXISTS skips them).
+    _ensure_column(db, "seo_audit_frontier", "cluster", "TEXT")
+    _ensure_column(db, "seo_audit_pages", "h1s", "TEXT NOT NULL DEFAULT '[]'")
+    _ensure_column(db, "seo_audit_pages", "alternates", "TEXT NOT NULL DEFAULT '[]'")
 
 
 def _repair_legacy_schema(db: DatabasePool) -> None:

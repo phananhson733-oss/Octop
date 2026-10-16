@@ -23,8 +23,10 @@ _PAGE = (
     "header_canonical_url,robots_meta,x_robots_tag,og_title,og_description,og_image,h1_count,"
     "heading_order,word_count,content_hash,is_html,javascript_shell,images_total,"
     "images_missing_alt,internal_link_count,external_link_count,has_structured_data,hreflang,"
-    "is_indexable,response_time_ms,crawl_depth,in_sitemap,crawled_at"
+    "is_indexable,response_time_ms,crawl_depth,in_sitemap,crawled_at,h1s,alternates"
 )
+# Page columns stored as JSON text.
+_JSON_COLUMNS = frozenset({"heading_order", "hreflang", "internal_links", "h1s", "alternates"})
 _PAGE_COLUMNS = _PAGE.split(",")
 _BOOLEANS = (
     "is_html",
@@ -56,7 +58,7 @@ def _page(row: Any) -> dict[str, Any]:
     for key in _BOOLEANS:
         if key in out:
             out[key] = bool(out[key])
-    for key in ("heading_order", "hreflang", "internal_links"):
+    for key in _JSON_COLUMNS:
         if key in out:
             out[key] = json.loads(out[key])
     return out
@@ -233,27 +235,34 @@ class SeoAuditRepo:
         *,
         start_url: str,
         robots_text: str | None,
-        start: str | None,
-        seeds: list[str],
+        start: tuple[str, str] | None,
+        seeds: list[tuple[str, str]],
+        issues: list[dict[str, Any]] | None = None,
     ) -> bool:
-        """Seed the frontier and move to the crawl phase; repeating it changes nothing."""
+        """Seed the frontier and move to the crawl phase; repeating it changes nothing.
+
+        ``start`` and ``seeds`` are ``(url, cluster)``; ``issues`` are the site-level
+        findings discovery made (sitemap URLs robots.txt blocks).
+        """
         with self._db.transaction() as conn:
             if conn.execute(_FENCE, (now, audit_id, token)).rowcount != 1:
                 return False
             if start is not None:
                 conn.execute(
-                    "INSERT INTO seo_audit_frontier(audit_id,url,depth,source,in_sitemap) "
-                    "VALUES(?,?,0,'link',0) ON CONFLICT(audit_id,url) DO NOTHING",
-                    (audit_id, start),
+                    "INSERT INTO seo_audit_frontier(audit_id,url,depth,source,in_sitemap,cluster) "
+                    "VALUES(?,?,0,'link',0,?) ON CONFLICT(audit_id,url) DO NOTHING",
+                    (audit_id, *start),
                 )
             for chunk in _chunks(seeds):
                 # A URL already queued (the start URL) keeps its place and gains the flag.
                 conn.execute(
-                    "INSERT INTO seo_audit_frontier(audit_id,url,depth,source,in_sitemap) VALUES "
-                    + ",".join(["(?,?,NULL,'sitemap',1)"] * len(chunk))
+                    "INSERT INTO seo_audit_frontier(audit_id,url,depth,source,in_sitemap,cluster) "
+                    "VALUES "
+                    + ",".join(["(?,?,NULL,'sitemap',1,?)"] * len(chunk))
                     + " ON CONFLICT(audit_id,url) DO UPDATE SET in_sitemap=1",
-                    tuple(value for url in chunk for value in (audit_id, url)),
+                    tuple(value for seed in chunk for value in (audit_id, *seed)),
                 )
+            self._insert_issues(conn, audit_id, issues or [])
             conn.execute(
                 "UPDATE seo_audits SET start_url=?,robots_text=?,sitemap_count=?,phase='crawl' "
                 "WHERE audit_id=?",
@@ -276,17 +285,22 @@ class SeoAuditRepo:
         )
 
     def next_url(self, audit_id: str) -> dict[str, Any] | None:
-        """Link-discovered URLs before sitemap-only ones, shallowest first.
+        """The next URL, taking the page templates in turns, shallowest first within a turn.
 
-        Ordering by depth is what keeps the crawl breadth-first: a sitemap seed reached
-        by a link keeps its seeding id, so ``id`` alone replays the sitemap's order.
+        A URL from the cluster with the fewest crawled pages goes first, so a 50-page
+        budget sees every section before a second product page. Within that, link-found
+        before sitemap-only, then by depth: a sitemap seed reached by a link keeps its
+        seeding id, so ``id`` alone would replay the sitemap's order.
         """
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT url,depth,in_sitemap FROM seo_audit_frontier WHERE audit_id=? "
-                "AND state='pending' ORDER BY CASE source WHEN 'link' THEN 0 ELSE 1 END, "
-                "depth IS NULL, depth, id LIMIT 1",
-                (audit_id,),
+                "SELECT f.url,f.depth,f.in_sitemap FROM seo_audit_frontier f LEFT JOIN "
+                "(SELECT cluster,COUNT(*) AS n FROM seo_audit_frontier WHERE audit_id=? "
+                "AND state='done' GROUP BY cluster) d ON d.cluster=f.cluster "
+                "WHERE f.audit_id=? AND f.state='pending' ORDER BY COALESCE(d.n,0), "
+                "CASE f.source WHEN 'link' THEN 0 ELSE 1 END, f.depth IS NULL, f.depth, f.id "
+                "LIMIT 1",
+                (audit_id, audit_id),
             ).fetchone()
         return {**dict(row), "in_sitemap": bool(row["in_sitemap"])} if row else None
 
@@ -305,15 +319,18 @@ class SeoAuditRepo:
         now: int,
         page: dict[str, Any],
         issues: list[dict[str, Any]],
-        discovered: list[tuple[str, int | None]],
+        discovered: list[tuple[str, int | None, str]],
     ) -> bool:
-        """Store one crawled page with its issues and the URLs it adds, all or nothing."""
+        """Store one crawled page with its issues and the URLs it adds, all or nothing.
+
+        ``discovered`` holds ``(url, depth, cluster)``.
+        """
         with self._db.transaction() as conn:
             if conn.execute(_FENCE, (now, audit_id, token)).rowcount != 1:
                 return False
             values = [
                 json.dumps(page[key])
-                if key in {"heading_order", "hreflang", "internal_links"}
+                if key in _JSON_COLUMNS
                 else int(page[key])
                 if key in _BOOLEANS
                 else page[key]
@@ -328,12 +345,13 @@ class SeoAuditRepo:
             for chunk in _chunks(discovered):
                 # A pending sitemap seed reached by a link takes the link's depth and queue.
                 conn.execute(
-                    "INSERT INTO seo_audit_frontier(audit_id,url,depth,source,in_sitemap) VALUES "
-                    + ",".join(["(?,?,?,'link',0)"] * len(chunk))
+                    "INSERT INTO seo_audit_frontier(audit_id,url,depth,source,in_sitemap,cluster) "
+                    "VALUES "
+                    + ",".join(["(?,?,?,'link',0,?)"] * len(chunk))
                     + " ON CONFLICT(audit_id,url) DO UPDATE SET source='link',depth=excluded.depth "
                     "WHERE seo_audit_frontier.state='pending' AND seo_audit_frontier.depth IS NULL "
                     "AND excluded.depth IS NOT NULL",
-                    tuple(value for url, depth in chunk for value in (audit_id, url, depth)),
+                    tuple(value for entry in chunk for value in (audit_id, *entry)),
                 )
             conn.execute(
                 "UPDATE seo_audit_frontier SET state='done' WHERE audit_id=? AND url=?",

@@ -19,9 +19,15 @@ from xml.etree import ElementTree
 import anyio
 import httpx
 
-from octop.infra.seo.audit.analyzer import Link, analyze_html
+from octop.infra.seo.audit.analyzer import Link, PageAnalysis, analyze_html
 from octop.infra.seo.audit.robots import MAX_ROBOTS_BYTES, Robots
 from octop.infra.seo.audit.rules import PageFacts
+from octop.infra.seo.audit.structured import (
+    faq_questions,
+    hidden_questions,
+    missing_required,
+    parse_blocks,
+)
 from octop.infra.seo.audit.throttle import CrawlThrottle
 from octop.infra.seo.audit.urls import (
     TargetBlocked,
@@ -44,6 +50,13 @@ ROBOTS_TIMEOUT_S = 10.0
 PROBE_TIMEOUT_S = 10.0
 MAX_REDIRECT_HOPS = 5
 ACCEPT_HTML = "text/html,application/xhtml+xml"
+# The crawler token search-facing robots checks are judged for, not this crawler's own.
+GOOGLEBOT = "Googlebot"
+MAX_BLOCKED_SITEMAP_ISSUES = 500
+MAX_STORED_H1S = 5
+MAX_H1_CHARS = 200
+MAX_ALTERNATES = 100
+_ABSOLUTE = re.compile(r"^\s*https?://", re.I)
 # Network failures that make a page an "error" row instead of stopping the audit.
 FETCH_ERRORS = (httpx.HTTPError, httpx.InvalidURL, httpx.StreamError, TargetBlocked, OSError)
 
@@ -117,6 +130,18 @@ class CrawledPage:
     is_indexable: bool = False
     # A 429 was retried for this URL; not stored.
     rate_limited: bool = False
+    h1s: list[str] = field(default_factory=list)
+    alternates: list[tuple[str, str]] = field(default_factory=list)
+    # Page-level only, judged while crawling and not stored.
+    relative_alternates: int = 0
+    nofollow_internal: list[str] = field(default_factory=list)
+    images_missing_size: int = 0
+    schema_invalid: int = 0
+    schema_missing: list[str] = field(default_factory=list)
+    faq_hidden: list[str] = field(default_factory=list)
+    head_broken_by: str | None = None
+    misplaced_head: list[str] = field(default_factory=list)
+    body_truncated: bool = False
 
     def facts(self) -> PageFacts:
         return PageFacts(
@@ -143,6 +168,17 @@ class CrawledPage:
             response_time_ms=self.response_time_ms,
             crawl_depth=self.crawl_depth,
             in_sitemap=self.in_sitemap,
+            h1s=self.h1s,
+            alternates=self.alternates,
+            relative_alternates=self.relative_alternates,
+            nofollow_internal=self.nofollow_internal,
+            images_missing_size=self.images_missing_size,
+            schema_invalid=self.schema_invalid,
+            schema_missing=self.schema_missing,
+            faq_hidden=self.faq_hidden,
+            head_broken_by=self.head_broken_by,
+            misplaced_head=self.misplaced_head,
+            body_truncated=self.body_truncated,
         )
 
 
@@ -226,6 +262,26 @@ async def crawl_page(
         )
 
 
+@dataclass
+class _Analyzed:
+    analysis: PageAnalysis
+    schema_invalid: int
+    schema_missing: list[str]
+    faq_hidden: list[str]
+
+
+def _analyze(body: str, url: str) -> _Analyzed:
+    """Parse the page and its JSON-LD; CPU work, run in an executor."""
+    analysis = analyze_html(body, url)
+    documents, invalid = parse_blocks(analysis.json_ld)
+    return _Analyzed(
+        analysis,
+        invalid,
+        missing_required(documents),
+        hidden_questions(faq_questions(documents), analysis.body_text),
+    )
+
+
 async def _page_from_response(
     response: httpx.Response,
     url: str,
@@ -254,7 +310,7 @@ async def _page_from_response(
     body = ""
     if is_html:
         # The first 1 MiB still holds the metadata and navigation of normal pages.
-        raw, _truncated = await _read_bytes(response, MAX_HTML_BYTES)
+        raw, page.body_truncated = await _read_bytes(response, MAX_HTML_BYTES)
         try:
             body = raw.decode(_charset(response), "replace")
         except LookupError:
@@ -266,11 +322,12 @@ async def _page_from_response(
     if not is_html or page.fetch_class != "ok" or status >= 400:
         return page
     try:
-        analysis = await asyncio.get_running_loop().run_in_executor(None, analyze_html, body, url)
+        analyzed = await asyncio.get_running_loop().run_in_executor(None, _analyze, body, url)
     except Exception:
         # One document the parser cannot handle must not fail the whole audit.
         logger.warning("SEO audit could not parse %s", url, exc_info=True)
         return page
+    analysis = analyzed.analysis
     directives = ",".join(v for v in (analysis.robots_meta, page.x_robots_tag) if v).lower()
     page.is_html = True
     page.is_indexable = "noindex" not in directives
@@ -296,6 +353,22 @@ async def _page_from_response(
     page.links = analysis.links
     page.has_structured_data = analysis.has_structured_data
     page.hreflang_tags = analysis.hreflang_tags
+    page.h1s = [heading[:MAX_H1_CHARS] for heading in analysis.h1s if heading][:MAX_STORED_H1S]
+    for lang, href in analysis.alternates[:MAX_ALTERNATES]:
+        if not _ABSOLUTE.match(href):
+            page.relative_alternates += 1
+        target = normalize_url(href, url) if href else None
+        if target:
+            page.alternates.append((lang, target))
+    page.nofollow_internal = [
+        link.target_url for link in analysis.links if link.is_internal and link.is_nofollow
+    ]
+    page.images_missing_size = analysis.images_missing_size
+    page.schema_invalid = analyzed.schema_invalid
+    page.schema_missing = analyzed.schema_missing
+    page.faq_hidden = analyzed.faq_hidden
+    page.head_broken_by = analysis.head_broken_by
+    page.misplaced_head = analysis.misplaced_head
     return page
 
 
@@ -496,6 +569,15 @@ def seeds_for(
         and robots.is_allowed(url, user_agent)
     ]
     return start, seeds
+
+
+def blocked_for_google(sitemap_urls: list[str], origin: str, robots: Robots) -> list[str]:
+    """Sitemap URLs that robots.txt forbids Google's crawler to fetch."""
+    return [
+        url
+        for url in dict.fromkeys(sitemap_urls)
+        if is_same_origin(url, origin) and not robots.is_allowed(url, GOOGLEBOT)
+    ]
 
 
 def queueable(url: str, origin: str, robots: Robots, user_agent: str) -> bool:

@@ -1046,6 +1046,71 @@
           "title": "Indexable page missing from the sitemap",
           "explanation": "The page is indexable, is its own canonical and is linked from the site, but none of the site's sitemaps lists it. Search engines can still find it through links, yet the sitemap is how the site tells them which pages it wants indexed, so a missing page is discovered and refreshed later.",
           "how_to_fix": "Add the page's final canonical URL to the sitemap the site generates. If the page should not be indexed, make it noindex or canonicalize it instead of leaving it out silently."
+        },
+        "sitemap-blocked-by-robots": {
+          "title": "Sitemap lists a URL robots.txt blocks",
+          "explanation": "The sitemap asks search engines to index this URL, but robots.txt forbids Googlebot from fetching it. The two signals contradict each other: Google cannot read the page, and Search Console reports it as \"Submitted URL blocked by robots.txt\".",
+          "how_to_fix": "Decide whether the page should be indexed. If it should, remove the robots.txt rule that blocks it; if not, drop it from the sitemap generator. Re-check with Search Console's robots.txt report."
+        },
+        "sitemap-url-not-indexable": {
+          "title": "Sitemap lists a URL that cannot be indexed",
+          "explanation": "A URL in the sitemap redirects, returns an error, is noindex, or names another URL as canonical. A sitemap should list only final, indexable, self-canonical URLs; anything else wastes crawl budget and makes the sitemap a less trusted signal.",
+          "how_to_fix": "Have the sitemap generator output only URLs that return 200, are indexable and canonicalize to themselves. Replace redirected URLs with their destination and drop removed or noindex pages."
+        },
+        "soft-404": {
+          "title": "Soft 404",
+          "explanation": "The page answers 200 OK but its title or H1 says it was not found, and it carries little text. Search engines treat such pages as errors that waste crawling, and a valid page that shows this state while loading can drop out of the index.",
+          "how_to_fix": "Return a real 404 or 410 for missing content, or 301 to the closest equivalent page. If the page is valid, make sure the server sends its real content and title, not a not-found placeholder."
+        },
+        "canonical-target-invalid": {
+          "title": "Canonical points to an unusable page",
+          "explanation": "The page's canonical names a URL that returns an error, redirects, is noindex, or itself names another canonical (a chain). Search engines then ignore the canonical or consolidate signals onto the wrong page.",
+          "how_to_fix": "Point the canonical straight at the final, indexable URL that should rank — usually this page itself. Remove canonical chains so every variant names the same final URL."
+        },
+        "head-elements-in-body": {
+          "title": "Head tags end up in the body",
+          "explanation": "An element that does not belong in <head> (such as an <img>, <div> or stray text) appears before the head tags have all been read, so the HTML parser starts the body early. Directives after that point — canonical, meta robots, meta description, hreflang — land in the body, where Google ignores canonical and hreflang and may ignore the others.",
+          "how_to_fix": "Move the element named in the details out of <head> (or below the SEO tags), and keep canonical, robots, description and hreflang tags at the top of <head>. Check the served HTML, not the browser's repaired DOM."
+        },
+        "hreflang-invalid": {
+          "title": "hreflang annotations are malformed",
+          "explanation": "The page's hreflang set has problems Google rejects: invalid language or region codes (en-UK instead of en-GB, underscores), relative URLs, or no entry pointing at the page itself. Invalid annotations are ignored, so the wrong language version can rank.",
+          "how_to_fix": "Use ISO 639-1 language codes with optional ISO 3166-1 regions (en-GB, zh-Hans, x-default), fully qualified URLs, and include a self-referencing entry on every page of the set."
+        },
+        "hreflang-target-invalid": {
+          "title": "hreflang points to an unusable page",
+          "explanation": "An alternate language version named in hreflang returns an error, redirects, is noindex, or names another canonical. Google ignores alternates that are not final, indexable URLs.",
+          "how_to_fix": "Point each hreflang entry at the final, indexable, self-canonical URL of that language version; update or remove entries for pages that moved or were removed."
+        },
+        "hreflang-no-return-link": {
+          "title": "hreflang has no return link",
+          "explanation": "This page names another language version, but that version does not name this page back. Google requires hreflang annotations to be reciprocal and ignores one-way pairs.",
+          "how_to_fix": "Add the matching hreflang entry on the target page so every page in the set lists every other page and itself."
+        },
+        "structured-data-invalid": {
+          "title": "Structured data cannot be parsed",
+          "explanation": "A JSON-LD block on the page is not valid JSON (often a trailing comma, an unescaped quote or template output). Search engines skip the whole block, so none of its rich-result data is used.",
+          "how_to_fix": "Validate the block with Google's Rich Results Test or a JSON validator and fix the syntax in the template that renders it."
+        },
+        "structured-data-missing-fields": {
+          "title": "Structured data lacks required properties",
+          "explanation": "Markup for a rich-result type (Product, Review, BreadcrumbList, FAQPage, Event, ...) is missing a property Google requires, so the page is not eligible for that rich result. Types outside Octop's reviewed table are not judged.",
+          "how_to_fix": "Add the properties listed in the details (for example a Product needs offers, review or aggregateRating) with values that match what the page shows, then re-test with the Rich Results Test."
+        },
+        "faq-schema-not-visible": {
+          "title": "FAQ markup does not match the page",
+          "explanation": "The page's FAQPage markup declares questions that do not appear in its visible text. Google requires FAQ markup to describe content users can see; mismatched markup is ignored and can count as spammy structured data.",
+          "how_to_fix": "Show every marked-up question and answer on the page, or remove the questions that are not shown from the markup."
+        },
+        "internal-nofollow": {
+          "title": "Internal links marked nofollow",
+          "explanation": "The page links to pages on the same site with rel=\"nofollow\". That tells search engines not to pass signals through those links, which starves the target pages and is almost never intended for your own pages.",
+          "how_to_fix": "Remove nofollow from internal links. To keep a page out of search, use noindex on that page instead."
+        },
+        "images-missing-size": {
+          "title": "Images without width and height",
+          "explanation": "Images on the page lack width and height attributes, so the browser cannot reserve their space before they load and the layout shifts (Cumulative Layout Shift, a Core Web Vital).",
+          "how_to_fix": "Set width and height attributes (or a CSS aspect-ratio) on each image so the layout is stable while images load."
         }
       },
       "errors": {

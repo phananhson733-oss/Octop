@@ -230,3 +230,26 @@ def parse_link_header_canonical(header: str | None, page_url: str) -> str | None
         if match and re.search(r'rel\s*=\s*"?canonical"?', match.group(2), re.I):
             return normalize_url(match.group(1).strip(), page_url)
     return None
+
+
+# A leading path segment that names a locale ("en", "zh-cn", "pt_BR"), not a section.
+_LOCALE_SEGMENT = re.compile(r"^[a-z]{2}(?:[-_][a-z0-9]{2,4})?$", re.I)
+
+
+def path_cluster(url: str) -> str:
+    """The page template a URL most likely shares with its siblings, from its path shape.
+
+    ``/products/bikes/strider-12`` -> ``/products/*/*``. A top-level page is its own
+    cluster, a leading locale segment is dropped so translations share one, and a
+    query string marks a variant (``/products?``). A heuristic: it only spreads the
+    crawl budget across sections, nothing is judged by it.
+    """
+    parts = urlsplit(url)
+    segments = [segment for segment in parts.path.split("/") if segment]
+    if segments and _LOCALE_SEGMENT.match(segments[0]):
+        segments = segments[1:]
+    if len(segments) <= 1:
+        key = "/" + "".join(segments)
+    else:
+        key = "/" + "/".join([segments[0], *["*"] * (len(segments) - 1)])
+    return key + "?" if parts.query else key

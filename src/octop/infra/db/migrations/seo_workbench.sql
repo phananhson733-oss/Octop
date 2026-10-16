@@ -121,6 +121,8 @@ CREATE TABLE IF NOT EXISTS seo_audit_frontier (
  audit_id TEXT NOT NULL REFERENCES seo_audits(audit_id) ON DELETE CASCADE,
  url TEXT NOT NULL, depth INTEGER, source TEXT NOT NULL,
  in_sitemap INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'pending',
+ -- Path shape (/products/*/*), so the crawl budget is spread across page templates.
+ cluster TEXT,
  UNIQUE(audit_id,url)
 );
 CREATE INDEX IF NOT EXISTS seo_audit_frontier_next ON seo_audit_frontier(audit_id,state);
@@ -141,6 +143,8 @@ CREATE TABLE IF NOT EXISTS seo_audit_pages (
  crawl_depth INTEGER, in_sitemap INTEGER NOT NULL DEFAULT 0, crawled_at TEXT NOT NULL,
  -- Internal link targets as a JSON array (at most 500), for broken-link and orphan checks.
  internal_links TEXT NOT NULL DEFAULT '[]',
+ -- H1 texts and [hreflang, href] alternates as JSON arrays, for cross-page checks.
+ h1s TEXT NOT NULL DEFAULT '[]', alternates TEXT NOT NULL DEFAULT '[]',
  UNIQUE(audit_id,url)
 );
 CREATE TABLE IF NOT EXISTS seo_audit_issues (

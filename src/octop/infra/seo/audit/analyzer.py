@@ -27,6 +27,26 @@ _APP_ROOT_IDS = frozenset({"root", "app", "__next", "__nuxt"})
 _EXECUTABLE_SCRIPT_TYPES = frozenset({"", "module", "text/javascript", "application/javascript"})
 # JavaScript's \s, which also covers the byte-order mark.
 _JS_SPACE = "[\\s\\ufeff]"
+# Elements the HTML parser keeps in <head>; any other element (or text) there starts the
+# body early, and search engines ignore head-only tags that come after that point.
+_HEAD_ELEMENTS = frozenset(
+    {
+        "html",
+        "head",
+        "title",
+        "meta",
+        "link",
+        "script",
+        "style",
+        "base",
+        "basefont",
+        "bgsound",
+        "noscript",
+        "noframes",
+        "template",
+    }
+)
+MAX_JSON_LD_BLOCKS = 20
 
 _VOID = frozenset(
     [
@@ -147,6 +167,15 @@ class PageAnalysis:
     links: list[Link] = field(default_factory=list)
     has_structured_data: bool = False
     hreflang_tags: list[str] = field(default_factory=list)
+    # Octop additions; the fields above keep upstream's shape.
+    json_ld: list[str] = field(default_factory=list)
+    # (hreflang, href as written) of each <link rel="alternate" hreflang>.
+    alternates: list[tuple[str, str]] = field(default_factory=list)
+    images_missing_size: int = 0
+    # The element (or "#text") that ended <head> before <body>, if one did.
+    head_broken_by: str | None = None
+    # Head-only directives found after the body began: "canonical", "robots", ...
+    misplaced_head: list[str] = field(default_factory=list)
 
     @property
     def content_hash(self) -> str | None:
@@ -179,6 +208,9 @@ class _Analyzer(HTMLParser):
         self.saw_body = False
         self.body_parts: list[str] = []
         self.fallback_parts: list[str] = []
+        self.json_ld_parts: list[str] | None = None
+        # The parser has left head content: <body> opened or a body element appeared.
+        self.body_mode = False
 
     # htmlparser2's element stack -------------------------------------------------
 
@@ -237,6 +269,10 @@ class _Analyzer(HTMLParser):
             return
         if self.head_depth == 0 and self.suppress_depth == 0:
             self.has_app_root |= attribs.get("id") in _APP_ROOT_IDS or name == "app-root"
+        if not self.body_mode and (name == "body" or name not in _HEAD_ELEMENTS):
+            self.body_mode = True
+            if name != "body":
+                self.result.head_broken_by = name
         if name == "title":
             # Only the document title counts, never an SVG <title>.
             if not self.title_done and self.suppress_depth == 0:
@@ -255,11 +291,17 @@ class _Analyzer(HTMLParser):
         elif name == "img":
             if len(self.result.images) < MAX_EXTRACTED_IMAGES:
                 self.result.images.append({"src": attribs.get("src"), "alt": attribs.get("alt")})
+                if not attribs.get("width") or not attribs.get("height"):
+                    self.result.images_missing_size += 1
         elif name == "script":
             kind = attribs.get("type")
             self.has_executable_script |= (kind or "").lower() in _EXECUTABLE_SCRIPT_TYPES
             if kind == "application/ld+json":
                 self.result.has_structured_data = True
+            if (kind or "").strip().lower() == "application/ld+json" and (
+                len(self.result.json_ld) < MAX_JSON_LD_BLOCKS
+            ):
+                self.json_ld_parts = []
         elif name == "a":
             # HTML forbids nested <a>; browsers close the open one.
             self._close_anchor()
@@ -273,12 +315,18 @@ class _Analyzer(HTMLParser):
                 self.open_h1 = []
 
     def _on_text(self, text: str) -> None:
+        if self.json_ld_parts is not None:
+            self.json_ld_parts.append(text)
+            return
         if self.suppress_depth > 0:
             return
         if self.title_depth > 0:
             if self.title is not None:
                 self.title += text
             return
+        if not self.body_mode and js_trim(text):
+            self.body_mode = True
+            self.result.head_broken_by = "#text"
         if self.open_h1 is not None:
             self.open_h1.append(text)
         if self.open_anchor is not None:
@@ -289,6 +337,9 @@ class _Analyzer(HTMLParser):
             self.fallback_parts.append(text)
 
     def _on_close(self, name: str) -> None:
+        if name == "script" and self.json_ld_parts is not None:
+            self.result.json_ld.append("".join(self.json_ld_parts))
+            self.json_ld_parts = None
         if name in _NON_CONTENT and self.suppress_depth > 0:
             self.suppress_depth -= 1
         if name == "noscript" and self.noscript_depth > 0:
@@ -317,11 +368,13 @@ class _Analyzer(HTMLParser):
         prop = attribs.get("property")
         result = self.result
         if name == "description":
+            self._misplaced("description")
             if self.meta_description is None:
                 self.meta_description = js_trim(content) if content is not None else ""
         elif name == "robots":
             if result.robots_meta is None:
                 result.robots_meta = content
+            self._misplaced("robots")
         elif prop == "og:title":
             if result.og_title is None:
                 result.og_title = content
@@ -331,13 +384,20 @@ class _Analyzer(HTMLParser):
         elif prop == "og:image" and result.og_image is None:
             result.og_image = content
 
+    def _misplaced(self, directive: str) -> None:
+        if self.body_mode and directive not in self.result.misplaced_head:
+            self.result.misplaced_head.append(directive)
+
     def _link(self, attribs: dict[str, str]) -> None:
         rel = attribs.get("rel")
         if rel == "canonical":
+            self._misplaced("canonical")
             if self.result.canonical is None:
                 self.result.canonical = attribs.get("href")
         elif rel == "alternate" and attribs.get("hreflang"):
+            self._misplaced("hreflang")
             self.result.hreflang_tags.append(attribs["hreflang"])
+            self.result.alternates.append((attribs["hreflang"], attribs.get("href") or ""))
 
     def _close_anchor(self) -> None:
         if self.open_anchor is None:

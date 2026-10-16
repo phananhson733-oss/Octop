@@ -1046,6 +1046,71 @@
           "title": "可收录页面不在站点地图里",
           "explanation": "页面可以被收录、规范网址指向自己、站内也有链接到它，但网站所有站点地图里都没有它。搜索引擎仍能顺着链接找到它，但站点地图是网站告诉搜索引擎「这些页要收录」的清单，漏掉的页面会被更晚发现、更新得更慢。",
           "how_to_fix": "把页面的最终规范网址加进网站生成的站点地图。如果这个页面不该被收录，就给它加 noindex 或把 canonical 指向别处，而不是只从站点地图里漏掉。"
+        },
+        "sitemap-blocked-by-robots": {
+          "title": "站点地图里有被 robots.txt 拦截的网址",
+          "explanation": "站点地图要搜索引擎收录这个网址，robots.txt 却禁止 Googlebot 抓取它。两个信号互相矛盾：Google 读不到页面内容，Search Console 会报「已提交的网址被 robots.txt 屏蔽」。",
+          "how_to_fix": "先确定这个页面要不要被收录。要收录，就去掉 robots.txt 里拦截它的规则；不要，就让站点地图不再输出它。改完用 Search Console 的 robots.txt 报告复核。"
+        },
+        "sitemap-url-not-indexable": {
+          "title": "站点地图里有不能被收录的网址",
+          "explanation": "站点地图里的这个网址会跳转、返回错误、设置了 noindex，或把别的网址声明为规范网址。站点地图应当只列最终的、可收录的、规范网址指向自己的网址；其他网址会浪费抓取预算，也让站点地图这个信号变得不可信。",
+          "how_to_fix": "让站点地图只输出返回 200、可收录、canonical 指向自己的网址。跳转的网址换成跳转终点，删掉已下线和 noindex 的页面。"
+        },
+        "soft-404": {
+          "title": "软 404",
+          "explanation": "页面返回 200，但标题或 H1 写着「找不到」，正文也很少。搜索引擎会把这种页面当成错误页，白白浪费抓取；如果是有效页面在加载时显示了这种状态，还可能被移出索引。",
+          "how_to_fix": "内容已不存在就返回真正的 404 或 410，或者 301 到最接近的页面。如果页面是有效的，确认服务器直接输出真实内容和标题，而不是「找不到」的占位状态。"
+        },
+        "canonical-target-invalid": {
+          "title": "canonical 指向的页面不可用",
+          "explanation": "页面的 canonical 指向的网址返回错误、会跳转、设置了 noindex，或者它自己的 canonical 又指向别处（形成链）。搜索引擎会因此忽略这个 canonical，或者把权重归到错误的页面上。",
+          "how_to_fix": "把 canonical 直接指向应该排名的最终可收录网址，通常就是页面自己。消除 canonical 链，让所有变体都指向同一个最终网址。"
+        },
+        "head-elements-in-body": {
+          "title": "head 里的标签落进了 body",
+          "explanation": "在 head 的标签还没读完之前出现了不属于 head 的元素（比如 img、div 或多余的文字），HTML 解析器会提前开始 body。之后的 canonical、meta robots、meta description、hreflang 都落进 body：Google 会忽略 body 里的 canonical 和 hreflang，其他几项也可能不认。",
+          "how_to_fix": "把详情里列出的那个元素移出 head（或至少放到这些 SEO 标签后面），让 canonical、robots、description、hreflang 留在 head 顶部。要看服务器返回的原始 HTML，不要看浏览器修复过的 DOM。"
+        },
+        "hreflang-invalid": {
+          "title": "hreflang 标注格式有误",
+          "explanation": "页面的 hreflang 有 Google 不认的问题：语言或地区代码无效（比如 en-UK 应写 en-GB、用了下划线）、用了相对网址，或者没有指向页面自己的那一条。无效的标注会被忽略，结果可能是错误语言的版本去排名。",
+          "how_to_fix": "语言用 ISO 639-1 代码、地区可选 ISO 3166-1 代码（en-GB、zh-Hans、x-default），网址写完整的绝对地址，并且组内每个页面都包含指向自己的一条。"
+        },
+        "hreflang-target-invalid": {
+          "title": "hreflang 指向的页面不可用",
+          "explanation": "hreflang 里列出的某个语言版本返回错误、会跳转、设置了 noindex，或者 canonical 指向别处。Google 会忽略不是最终可收录网址的语言版本。",
+          "how_to_fix": "让每条 hreflang 指向那个语言版本最终的、可收录的、canonical 指向自己的网址；页面迁移或下线后要同步更新或删掉对应条目。"
+        },
+        "hreflang-no-return-link": {
+          "title": "hreflang 缺少回链",
+          "explanation": "这个页面列出了另一个语言版本，但那个版本没有反过来列出这个页面。Google 要求 hreflang 双向互指，单向的会被忽略。",
+          "how_to_fix": "在目标页面上补上对应的 hreflang 条目，让组内每个页面都列出其他所有页面和它自己。"
+        },
+        "structured-data-invalid": {
+          "title": "结构化数据无法解析",
+          "explanation": "页面上有 JSON-LD 块不是合法的 JSON（常见原因是多余的逗号、没转义的引号或模板输出出错）。搜索引擎会跳过整块，里面的富结果数据一条都用不上。",
+          "how_to_fix": "用 Google 富媒体搜索结果测试或 JSON 校验工具检查这一块，在输出它的模板里修好语法。"
+        },
+        "structured-data-missing-fields": {
+          "title": "结构化数据缺少必填字段",
+          "explanation": "某个富结果类型（Product、Review、BreadcrumbList、FAQPage、Event 等）的标记缺了 Google 要求的字段，页面因此拿不到对应的富结果。不在 Octop 核对表里的类型不做判定。",
+          "how_to_fix": "补上详情里列出的字段（例如 Product 至少要有 offers、review 或 aggregateRating 之一），取值要和页面上显示的一致，再用富媒体搜索结果测试复核。"
+        },
+        "faq-schema-not-visible": {
+          "title": "FAQ 标记和页面内容对不上",
+          "explanation": "页面的 FAQPage 标记里有问题在可见正文中找不到。Google 要求 FAQ 标记描述的是用户能看到的内容，对不上的标记会被忽略，还可能被当成违规的结构化数据。",
+          "how_to_fix": "把标记里的每个问题和答案都显示在页面上，或者从标记里删掉页面上没有的问题。"
+        },
+        "internal-nofollow": {
+          "title": "站内链接加了 nofollow",
+          "explanation": "页面链接到本站其他页面时用了 rel=\"nofollow\"，等于告诉搜索引擎不要通过这些链接传递信号，目标页面会因此得不到站内权重，对自己的页面几乎从来不是本意。",
+          "how_to_fix": "去掉站内链接上的 nofollow。如果是不想让某个页面被收录，应给那个页面加 noindex。"
+        },
+        "images-missing-size": {
+          "title": "图片没有写宽高",
+          "explanation": "页面上的图片没有 width 和 height 属性，浏览器在图片加载前无法预留位置，页面会跳动（累积布局偏移 CLS，属于核心网页指标）。",
+          "how_to_fix": "给每张图片写上 width 和 height 属性（或用 CSS aspect-ratio），让图片加载时布局保持稳定。"
         }
       },
       "errors": {

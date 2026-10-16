@@ -7,6 +7,7 @@ from page rules, so finalize can replace exactly its own rows on a retry.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, Literal
@@ -47,6 +48,19 @@ ISSUE_SEVERITY: dict[str, Severity] = {
     "deep-page": "info",
     # Octop additions, not in upstream's registry.
     "not-in-sitemap": "warning",
+    "sitemap-blocked-by-robots": "critical",
+    "sitemap-url-not-indexable": "warning",
+    "soft-404": "critical",
+    "canonical-target-invalid": "warning",
+    "head-elements-in-body": "warning",
+    "hreflang-invalid": "warning",
+    "hreflang-target-invalid": "warning",
+    "hreflang-no-return-link": "warning",
+    "structured-data-invalid": "warning",
+    "structured-data-missing-fields": "warning",
+    "faq-schema-not-visible": "warning",
+    "internal-nofollow": "warning",
+    "images-missing-size": "info",
 }
 SEVERITY_ORDER: dict[str, int] = {"critical": 0, "warning": 1, "info": 2}
 FINALIZE_TYPES = frozenset(
@@ -60,6 +74,10 @@ FINALIZE_TYPES = frozenset(
         "orphan-page",
         "crawl-rate-limited",
         "not-in-sitemap",
+        "sitemap-url-not-indexable",
+        "canonical-target-invalid",
+        "hreflang-target-invalid",
+        "hreflang-no-return-link",
     }
 )
 
@@ -72,6 +90,21 @@ SLOW_RESPONSE_MS = 1500
 DEEP_PAGE_DEPTH = 5
 DUPLICATE_GROUP_SAMPLE = 3
 BROKEN_LINK_ISSUE_CAP = 2000
+# Cross-page finders other than broken links stop here too.
+CROSS_PAGE_ISSUE_CAP = 2000
+# A 200 page whose title or H1 says "not found" is a soft 404 only when it is also short.
+SOFT_404_MAX_WORDS = 300
+NOT_FOUND = re.compile(
+    r"\b(?:404|not found|page (?:does not|doesn't) exist|no longer (?:available|exists))\b"
+    r"|找不到|未找到|不存在|已下架",
+    re.I,
+)
+# BCP 47 as hreflang allows it: language, optional script, optional region; or x-default.
+_HREFLANG_CODE = re.compile(
+    r"^(?:x-default|[a-z]{2,3}(?:-[a-z]{4})?(?:-(?:[a-z]{2}|\d{3}))?)$", re.I
+)
+# Well-formed but wrong: the United Kingdom's region code is GB.
+_HREFLANG_WRONG = frozenset({"en-uk"})
 
 
 @dataclass
@@ -112,6 +145,19 @@ class PageFacts:
     response_time_ms: int = 0
     crawl_depth: int | None = None
     in_sitemap: bool = False
+    h1s: list[str] = field(default_factory=list)
+    # (hreflang, absolute href) of each alternate the page declares.
+    alternates: list[tuple[str, str]] = field(default_factory=list)
+    # Only known while the page is crawled; finalize reads stored rows without them.
+    relative_alternates: int = 0
+    nofollow_internal: list[str] = field(default_factory=list)
+    images_missing_size: int = 0
+    schema_invalid: int = 0
+    schema_missing: list[str] = field(default_factory=list)
+    faq_hidden: list[str] = field(default_factory=list)
+    head_broken_by: str | None = None
+    misplaced_head: list[str] = field(default_factory=list)
+    body_truncated: bool = False
 
 
 def _heading_skip(order: list[int]) -> bool:
@@ -166,6 +212,21 @@ def page_issues(page: PageFacts) -> list[Issue]:
         report("canonicalized-page", {"canonical_url": effective})
     if page.crawl_depth is not None and page.crawl_depth >= DEEP_PAGE_DEPTH:
         report("deep-page", {"crawl_depth": page.crawl_depth})
+    if (
+        page.status_code == 200
+        and page.word_count < SOFT_404_MAX_WORDS
+        and any(NOT_FOUND.search(text) for text in [page.title, *page.h1s])
+    ):
+        report("soft-404", {"title": page.title, "word_count": page.word_count})
+    if page.misplaced_head:
+        report(
+            "head-elements-in-body",
+            {"head_ended_at": page.head_broken_by, "ignored": page.misplaced_head},
+        )
+    if page.alternates or page.relative_alternates:
+        problems = _hreflang_problems(page)
+        if problems:
+            report("hreflang-invalid", {"problems": problems})
     # An unrendered app shell cannot show what the page lacks: report the gap instead.
     if page.javascript_shell:
         report("javascript-rendering-suspected", {"word_count": page.word_count})
@@ -201,7 +262,45 @@ def page_issues(page: PageFacts) -> list[Issue]:
         )
     if page.is_indexable and page.link_count == 0:
         report("no-outgoing-links")
+
+    # A body cut at the size limit can end inside a JSON-LD block; do not call that invalid.
+    if page.schema_invalid and not page.body_truncated:
+        report("structured-data-invalid", {"invalid_blocks": page.schema_invalid})
+    if page.schema_missing:
+        report("structured-data-missing-fields", {"missing": page.schema_missing})
+    if page.faq_hidden:
+        report(
+            "faq-schema-not-visible",
+            {"count": len(page.faq_hidden), "questions": page.faq_hidden[:DUPLICATE_GROUP_SAMPLE]},
+        )
+    if page.nofollow_internal:
+        report(
+            "internal-nofollow",
+            {
+                "count": len(page.nofollow_internal),
+                "examples": page.nofollow_internal[:DUPLICATE_GROUP_SAMPLE],
+            },
+        )
+    if page.images_missing_size:
+        report(
+            "images-missing-size",
+            {"images_missing_size": page.images_missing_size, "images_total": page.images_total},
+        )
     return issues
+
+
+def _hreflang_problems(page: PageFacts) -> list[str]:
+    problems = [
+        f"invalid code: {lang}"
+        for lang in dict.fromkeys(lang for lang, _href in page.alternates)
+        if not _HREFLANG_CODE.match(lang) or lang.lower() in _HREFLANG_WRONG
+    ]
+    if page.relative_alternates:
+        problems.append(f"relative URLs: {page.relative_alternates}")
+    own = {page.url, page.canonical_url or page.header_canonical_url or page.url}
+    if page.alternates and not any(href in own for _lang, href in page.alternates):
+        problems.append("no self-reference")
+    return problems
 
 
 def _ok_html(page: PageFacts) -> bool:
@@ -340,6 +439,105 @@ def find_missing_from_sitemap(pages: Iterable[PageFacts]) -> list[Issue]:
         and not page.in_sitemap
         and (page.canonical_url or page.header_canonical_url or page.url) == page.url
     ]
+
+
+def _effective_canonical(page: PageFacts) -> str:
+    return page.canonical_url or page.header_canonical_url or page.url
+
+
+def _unusable_reason(page: PageFacts) -> str | None:
+    """Why a fetched page cannot stand in for itself in search, or None."""
+    if page.status_code >= 400:
+        return "error"
+    if page.status_code >= 300:
+        return "redirect"
+    if page.is_html and not page.is_indexable:
+        return "noindex"
+    if page.is_html and _effective_canonical(page) != page.url:
+        return "canonicalized"
+    return None
+
+
+def find_canonical_problems(pages: dict[str, PageFacts]) -> list[Issue]:
+    """Canonicals naming a crawled page that errors, redirects, is noindex or points on."""
+    issues: list[Issue] = []
+    for url, page in pages.items():
+        target_url = _effective_canonical(page)
+        target = pages.get(target_url)
+        if target_url == url or not _ok_html(page) or target is None:
+            continue
+        if target.fetch_class != "ok":
+            continue
+        reason = _unusable_reason(target)
+        if reason is not None:
+            issues.append(
+                Issue(
+                    "canonical-target-invalid",
+                    url,
+                    {
+                        "canonical_url": target_url,
+                        # A canonical whose target names a third URL is a chain.
+                        "reason": "chain" if reason == "canonicalized" else reason,
+                        "target_status": target.status_code,
+                    },
+                )
+            )
+        if len(issues) >= CROSS_PAGE_ISSUE_CAP:
+            break
+    return issues
+
+
+def find_sitemap_problems(pages: Iterable[PageFacts]) -> list[Issue]:
+    """Sitemap URLs that redirect, fail, are noindex or name another canonical."""
+    issues: list[Issue] = []
+    for page in pages:
+        if not page.in_sitemap or page.fetch_class != "ok":
+            continue
+        reason = _unusable_reason(page)
+        if reason is None:
+            continue
+        details: dict[str, Any] = {"reason": reason, "status_code": page.status_code}
+        if reason == "redirect":
+            details["redirect_url"] = page.redirect_url
+        if reason == "canonicalized":
+            details["canonical_url"] = _effective_canonical(page)
+        issues.append(Issue("sitemap-url-not-indexable", page.url, details))
+        if len(issues) >= CROSS_PAGE_ISSUE_CAP:
+            break
+    return issues
+
+
+def find_hreflang_problems(pages: dict[str, PageFacts]) -> list[Issue]:
+    """Alternates pointing at unusable crawled pages, or crawled ones that do not link back."""
+    issues: list[Issue] = []
+    for url, page in pages.items():
+        if not _ok_html(page):
+            continue
+        for lang, href in page.alternates:
+            target = pages.get(href)
+            if href == url or target is None or target.fetch_class != "ok":
+                continue
+            reason = _unusable_reason(target)
+            if reason is not None:
+                issues.append(
+                    Issue(
+                        "hreflang-target-invalid",
+                        url,
+                        {
+                            "hreflang": lang,
+                            "target_url": href,
+                            "reason": reason,
+                            "target_status": target.status_code,
+                        },
+                    )
+                )
+            elif url not in {back for _lang, back in target.alternates}:
+                issues.append(
+                    Issue("hreflang-no-return-link", url, {"hreflang": lang, "target_url": href})
+                )
+            if len(issues) >= CROSS_PAGE_ISSUE_CAP:
+                return issues
+    return issues
 
 
 def sort_issues(issues: list[dict[str, Any]]) -> list[dict[str, Any]]:
