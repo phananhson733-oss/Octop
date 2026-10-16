@@ -15,6 +15,7 @@ are admin-only and limited to the project's own site, and service workers are bl
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections.abc import AsyncIterator, Callable, Collection
@@ -50,6 +51,8 @@ MAX_TRACE_STATES = 200
 MAX_RENDERED_ONLY = 100
 _SKIPPED_RESOURCES = frozenset({"image", "media", "font"})
 _VIEWPORT = {"width": 412, "height": 915}
+# One headless browser at a time in this process, for audits and inspections alike.
+_BROWSER_SLOT = asyncio.Lock()
 
 # Records every (title, robots) state from the first parsed byte on.
 _TRACE_SCRIPT = f"""
@@ -318,9 +321,27 @@ def _short(exc: BaseException) -> str:
 
 @asynccontextmanager
 async def open_chromium_renderer(
-    start_url: str, resolver: Resolver = resolve_host
+    start_url: str, resolver: Resolver = resolve_host, *, wait_s: float | None = None
 ) -> AsyncIterator[Renderer]:
-    """A Chromium renderer for one audit; ``OCTOP_SEO_AUDIT_CHROMIUM`` names the binary."""
+    """A Chromium renderer for one audit; ``OCTOP_SEO_AUDIT_CHROMIUM`` names the binary.
+
+    The process runs one browser at a time. A caller passing ``wait_s`` gives up after
+    that long while another holds it; without it, the caller waits its turn.
+    """
+    try:
+        async with asyncio.timeout(wait_s):
+            await _BROWSER_SLOT.acquire()
+    except TimeoutError as exc:
+        raise RenderUnavailable("the browser is busy with another render; try again later") from exc
+    try:
+        async with _started_renderer(start_url, resolver) as renderer:
+            yield renderer
+    finally:
+        _BROWSER_SLOT.release()
+
+
+@asynccontextmanager
+async def _started_renderer(start_url: str, resolver: Resolver) -> AsyncIterator[Renderer]:
     try:
         from playwright.async_api import async_playwright  # noqa: PLC0415
     except ImportError as exc:

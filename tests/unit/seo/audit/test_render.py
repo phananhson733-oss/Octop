@@ -1,16 +1,22 @@
 """Rendered pages compared with their HTML, and the guard on the browser's requests."""
 
+import asyncio
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
+from octop.infra.seo.audit import render as render_module
 from octop.infra.seo.audit.render import (
     MAX_REQUESTS_PER_PAGE,
     ChromiumRenderer,
     Rendered,
+    RenderUnavailable,
     _HostGuard,
+    open_chromium_renderer,
     render_record,
 )
 from octop.infra.seo.audit.rules import PageFacts, find_render_problems
@@ -384,3 +390,51 @@ async def test_a_page_cut_off_at_the_request_cap_is_not_compared() -> None:
     # The "not found" state it shows came from refused requests: a failed render, no more.
     issues = find_render_problems({URL: HTML}, {URL: render_record(rendered, URL, set())})
     assert [issue.issue_type for issue in issues] == ["render-failed"]
+
+
+async def test_the_process_runs_one_browser_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(render_module, "_BROWSER_SLOT", asyncio.Lock())
+    running = 0
+    most = 0
+    done = asyncio.Event()
+
+    @asynccontextmanager
+    async def started(_url: str, _resolver: Any) -> AsyncIterator[Any]:
+        nonlocal running, most
+        running += 1
+        most = max(most, running)
+        try:
+            yield SimpleNamespace()
+        finally:
+            running -= 1
+
+    monkeypatch.setattr(render_module, "_started_renderer", started)
+
+    async def audit() -> None:
+        async with open_chromium_renderer(URL):
+            await done.wait()
+
+    first = asyncio.create_task(audit())
+    await asyncio.sleep(0)
+    # An inspection does not wait out an audit's whole render phase.
+    with pytest.raises(RenderUnavailable, match="busy"):
+        async with open_chromium_renderer(URL, wait_s=0.01):
+            pass
+    # Another audit waits its turn.
+    second = asyncio.create_task(audit())
+    await asyncio.sleep(0.01)
+    done.set()
+    await asyncio.gather(first, second)
+    assert most == 1
+
+    @asynccontextmanager
+    async def missing(_url: str, _resolver: Any) -> AsyncIterator[Any]:
+        raise RenderUnavailable("Executable doesn't exist")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(render_module, "_started_renderer", missing)
+    with pytest.raises(RenderUnavailable, match="Executable"):
+        async with open_chromium_renderer(URL):
+            pass
+    # A browser that never started gives the slot back.
+    assert not render_module._BROWSER_SLOT.locked()

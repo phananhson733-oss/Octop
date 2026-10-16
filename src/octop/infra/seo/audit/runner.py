@@ -219,7 +219,6 @@ class AuditJob:
         token: str,
         client: httpx.AsyncClient,
         renderer_factory: RendererFactory | None = None,
-        render_lock: asyncio.Lock | None = None,
     ) -> None:
         self.repo = repos.seo_audit_repo
         self.audit = audit
@@ -228,7 +227,6 @@ class AuditJob:
         self.client = client
         self.phase = str(audit["phase"])
         self.renderer_factory = renderer_factory
-        self.render_lock = render_lock or asyncio.Lock()
 
     async def _fenced(self, ok: bool) -> None:
         if not ok:
@@ -374,16 +372,15 @@ class AuditJob:
             return
         by_url = {row["url"]: row for row in rows}
         checks = _LinkChecks(self.client, origin, robots, by_url)
-        # One browser at a time in this process, whatever the number of audits.
-        async with self.render_lock:
-            try:
-                async with self.renderer_factory(start_url) as renderer:
-                    for url in sample:
-                        rendered = await renderer.render(url)
-                        stored = await _stored_render(rendered, by_url[url], checks)
-                        await self._record_render(url, stored)
-            except RenderUnavailable as exc:
-                await self._record_render(sample[0], {"error": str(exc), "unavailable": True})
+        # The factory hands out the process's one browser, waiting while another holds it.
+        try:
+            async with self.renderer_factory(start_url) as renderer:
+                for url in sample:
+                    rendered = await renderer.render(url)
+                    stored = await _stored_render(rendered, by_url[url], checks)
+                    await self._record_render(url, stored)
+        except RenderUnavailable as exc:
+            await self._record_render(sample[0], {"error": str(exc), "unavailable": True})
 
     async def _record_render(self, url: str, render: dict[str, Any]) -> None:
         await self._fenced(
@@ -491,7 +488,6 @@ class SeoAuditRunner:
         self.token = new_ulid()
         self._client_factory = client_factory
         self._renderer_factory = renderer_factory
-        self._render_lock = asyncio.Lock()
         self._slots = asyncio.Semaphore(max_concurrent)
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._sweeper: asyncio.Task[None] | None = None
@@ -567,14 +563,7 @@ class SeoAuditRunner:
                         return
 
             async with self._client_factory() as client:
-                runner = AuditJob(
-                    self.repos,
-                    audit,
-                    self.token,
-                    client,
-                    self._renderer_factory,
-                    self._render_lock,
-                )
+                runner = AuditJob(self.repos, audit, self.token, client, self._renderer_factory)
                 job = asyncio.create_task(runner.run())
                 beater = asyncio.create_task(beat(job))
                 try:

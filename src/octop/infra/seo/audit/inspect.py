@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 import time
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 import httpx
@@ -46,6 +47,10 @@ MAX_SNIPPETS = 30
 SNIPPET_CONTEXT = 60
 # Typical adult reading speed for web copy, for checking "N min read" claims.
 WORDS_PER_MINUTE = 230
+# How long an inspection waits for the browser while an audit renders, before it
+# answers from the HTML alone.
+BROWSER_WAIT_S = 30.0
+_open_browser: RendererFactory = partial(open_chromium_renderer, wait_s=BROWSER_WAIT_S)
 
 _READING_TIME = re.compile(
     r"\b\d{1,3}\s*(?:-|–)?\s*min(?:ute)?s?\.?\s+read\b|\bread(?:ing)?\s+time\W{0,3}\d{1,3}\s*min",
@@ -191,7 +196,7 @@ async def inspect_page(
     *,
     render: bool = True,
     client_factory: Callable[[], httpx.AsyncClient] = crawler_client,
-    renderer_factory: RendererFactory = open_chromium_renderer,
+    renderer_factory: RendererFactory = _open_browser,
 ) -> dict[str, Any]:
     """Fetch ``url`` (already checked to be the project's site) and describe the page."""
     result: dict[str, Any] = {"notice": UNTRUSTED, "requested_url": url}
