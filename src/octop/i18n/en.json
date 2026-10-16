@@ -1159,7 +1159,7 @@
         },
         "render-failed": {
           "title": "Page could not be rendered",
-          "explanation": "Headless Chromium could not open this page, could not finish loading it (it made more requests than the audit allows), or got an error status for it, so the rendered-page checks were skipped for it. The details give the error.",
+          "explanation": "Headless Chromium could not open this page, could not finish loading it (it timed out, or made more requests than the audit allows), or got an error status for it, so the rendered-page checks were skipped for it. The details give the error.",
           "how_to_fix": "Usually nothing to fix on the site: check the error, and run the audit again if it was a timeout. If the site blocks the audit browser, admit it the same way as the crawler."
         },
         "render-unavailable": {

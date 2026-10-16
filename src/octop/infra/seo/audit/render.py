@@ -273,6 +273,12 @@ class ChromiumRenderer:
                     f"stopped after {MAX_REQUESTS_PER_PAGE} requests; the page did not "
                     "finish loading"
                 )
+            elif result.load_timed_out:
+                # The same goes for a page whose load event never came: its data may still
+                # be on the way.
+                result.error = (
+                    f"the page did not finish loading within {GOTO_TIMEOUT_MS // 1000} seconds"
+                )
         except Exception as exc:  # noqa: BLE001 - one page must not stop the render phase
             result.error = _short(exc)
         finally:

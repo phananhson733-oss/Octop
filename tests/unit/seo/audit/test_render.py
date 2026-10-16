@@ -397,6 +397,16 @@ async def test_a_page_cut_off_at_the_request_cap_is_not_compared() -> None:
     assert [issue.issue_type for issue in issues] == ["render-failed"]
 
 
+async def test_a_page_that_never_finished_loading_is_not_compared() -> None:
+    timeout = TimeoutError("Timeout 20000ms exceeded.")
+    rendered = await _renderer(_Context([], crash=timeout)).render(URL)
+    # What it showed was still read, but it is no verdict on the page.
+    assert (rendered.load_timed_out, rendered.title) == (True, "Product Not Found (404)")
+    assert rendered.error == "the page did not finish loading within 20 seconds"
+    issues = find_render_problems({URL: HTML}, {URL: render_record(rendered, URL, set())})
+    assert [issue.issue_type for issue in issues] == ["render-failed"]
+
+
 async def test_a_browser_crash_fails_the_page_not_the_audit() -> None:
     rendered = await _renderer(_Context([], crash=RuntimeError("Target crashed"))).render(URL)
     assert rendered.error == "Target crashed"
