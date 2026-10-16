@@ -116,11 +116,36 @@ BROKEN_LINK_ISSUE_CAP = 2000
 CROSS_PAGE_ISSUE_CAP = 2000
 # A 200 page whose title or H1 says "not found" is a soft 404 only when it is also short.
 SOFT_404_MAX_WORDS = 300
-NOT_FOUND = re.compile(
-    r"\b(?:404|not found|page (?:does not|doesn't) exist|no longer (?:available|exists))\b"
-    r"|找不到|未找到|不存在|已下架",
-    re.I,
+# What an error page calls itself. A title part must be nothing but this ("Page not found",
+# "Product Not Found (404)", "页面不存在"): a page about 404 errors, or a drama whose
+# title contains 不存在, only mentions the words.
+_THING = (
+    r"(?:page|product|post|article|item|content|file|resource|listing|series|show|episode|video)"
 )
+_NOT_FOUND_EN = (
+    r"(?:(?:oops|whoops|sorry|uh[- ]oh)\W*)?(?:"
+    rf"(?:error\s*)?404(?:\s*error)?(?:\W*(?:{_THING}\s+)?not\s+found)?"
+    rf"|(?:(?:the\s+)?{_THING}\s+)?(?:was\s+)?not\s+found(?:\W*(?:error\s*)?404)?"
+    rf"|(?:(?:this|that|the)\s+)?{_THING}\s+(?:"
+    r"(?:does\s+not|doesn't|did\s+not|didn't)\s+exist(?:\s+anymore)?"
+    r"|(?:can't|cannot|could\s+not|couldn't)\s+be\s+found"
+    r"|(?:is|was)\s+(?:missing|removed|deleted)"
+    r"|(?:is\s+)?no\s+longer\s+(?:available|exists))"
+    r"|nothing\s+(?:was\s+)?found"
+    rf"|we\s+(?:can't|cannot|couldn't|could\s+not)\s+find\s+(?:that|this|the)\s+{_THING}"
+    r")\W*"
+)
+_NOT_FOUND_ZH = (
+    r"(?:(?:很?抱歉|对不起|糟糕|哎呀)\W*)?(?:"
+    r"(?:(?:您|你)(?:要|所)?(?:访问|查找|找|请求|查看)的)?(?:该|此|这个)?"
+    r"(?:页面|网页|内容|商品|文章|剧集|资源|视频)?"
+    r"(?:不存在|未找到|找不到了?|已下架|已被?删除|已失效)了?"
+    r"|找不到(?:该|此|这个|您要的|你要的)?(?:页面|网页|内容|商品|文章|剧集)"
+    r")\W*"
+)
+NOT_FOUND = re.compile(rf"{_NOT_FOUND_EN}|{_NOT_FOUND_ZH}", re.I)
+# Separators between a title's parts: "Page not found | Shop", "404 - Not Found".
+_TITLE_PARTS = re.compile(r"\s+[-–—]\s+|\s*[|｜·•:：]\s*")
 # BCP 47 as hreflang allows it: language, optional script, optional region; or x-default.
 _HREFLANG_CODE = re.compile(
     r"^(?:x-default|[a-z]{2,3}(?:-[a-z]{4})?(?:-(?:[a-z]{2}|\d{3}))?)$", re.I
@@ -243,7 +268,7 @@ def page_issues(page: PageFacts) -> list[Issue]:
     if (
         page.status_code == 200
         and page.word_count < SOFT_404_MAX_WORDS
-        and any(NOT_FOUND.search(text) for text in [page.title, *page.h1s])
+        and _not_found([page.title, *page.h1s])
     ):
         report("soft-404", {"title": page.title, "word_count": page.word_count})
     if page.misplaced_head:
@@ -573,7 +598,14 @@ def _plain(text: str) -> str:
 
 
 def _not_found(texts: Iterable[str]) -> bool:
-    return any(NOT_FOUND.search(text) for text in texts if text)
+    """Whether a title or heading is an error page's own name for itself."""
+    return any(
+        NOT_FOUND.fullmatch(part.strip())
+        for text in texts
+        if text
+        for part in _TITLE_PARTS.split(text)
+        if part.strip()
+    )
 
 
 def _title_change(

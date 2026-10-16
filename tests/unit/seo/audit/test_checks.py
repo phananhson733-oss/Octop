@@ -134,6 +134,9 @@ def test_a_clean_head_and_a_noscript_pixel_do_not_break_it() -> None:
             {"title": "Product Not Found (404) | Shop", "word_count": 40},
         ),
         ({"h1s": ["页面不存在"], "word_count": 10}, "soft-404", None),
+        ({"title": "Oops! Page not found – Shop", "word_count": 80}, "soft-404", None),
+        ({"title": "404 - Not Found", "word_count": 5}, "soft-404", None),
+        ({"h1s": ["抱歉，您访问的页面不存在"], "word_count": 20}, "soft-404", None),
         (
             {"misplaced_head": ["canonical"], "head_broken_by": "img"},
             "head-elements-in-body",
@@ -183,6 +186,13 @@ def test_page_checks(overrides: dict[str, Any], issue_type: str, details: Any) -
     [
         # A long page about 404 errors is not a soft 404.
         {"title": "How to fix 404 not found errors", "word_count": 1500},
+        # Nor are short pages that only mention the words.
+        {"title": "What is a 404 error?", "word_count": 250},
+        {
+            "title": "Lost and Not Found | ShortsBinge",
+            "h1s": ["世界上不存在的恋人"],
+            "word_count": 250,
+        },
         {"alternates": [("en-GB", URL), ("zh-Hans", "https://example.com/zh/a")]},
         {"alternates": [("x-default", URL)]},
         # A body cut at the size limit may end inside a JSON-LD block.
