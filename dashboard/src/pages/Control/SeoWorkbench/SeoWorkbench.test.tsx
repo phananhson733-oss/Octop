@@ -14,6 +14,7 @@ import {
   type ProjectContext,
   type ResearchRun,
   type RunSummary,
+  type SeoAuditDetail,
 } from "../../../api/modules/seo";
 import { octopThreadsApi } from "../../../api/modules/octopThreads";
 import { staticReportHtml } from "./reportPreview";
@@ -45,6 +46,13 @@ vi.mock("../../../api/modules/seo", async (importOriginal) => ({
     saveKeywords: vi.fn(),
     reports: vi.fn(),
     report: vi.fn(),
+    startAudit: vi.fn(),
+    audits: vi.fn(),
+    audit: vi.fn(),
+    auditIssues: vi.fn(),
+    auditPages: vi.fn(),
+    cancelAudit: vi.fn(),
+    deleteAudit: vi.fn(),
   },
 }));
 vi.mock("../../../api/modules/octopThreads", () => ({
@@ -135,6 +143,7 @@ beforeEach(() => {
   vi.mocked(seoApi.runs).mockResolvedValue([]);
   vi.mocked(seoApi.keywords).mockResolvedValue({ rows: [], total_count: 0 });
   vi.mocked(seoApi.reports).mockResolvedValue([]);
+  vi.mocked(seoApi.audits).mockResolvedValue([]);
   vi.mocked(seoApi.research).mockResolvedValue(run);
   vi.mocked(seoApi.run).mockImplementation(async (_, runId) => {
     if (runId !== run.run_id) throw new Error(`unexpected run ${runId}`);
@@ -534,6 +543,114 @@ describe("SEO native workflow", () => {
     expect(
       screen.getByRole("button", { name: "seo.generateReport" }),
     ).toBeEnabled();
+  });
+});
+const audit: SeoAuditDetail = {
+  audit_id: "audit-one",
+  project_id: "p1",
+  requested_url: "https://example.com/",
+  start_url: "https://example.com/",
+  max_pages: 50,
+  status: "completed",
+  phase: "finalize",
+  pages_crawled: 50,
+  pages_total: 50,
+  discovered_count: 80,
+  sitemap_count: 60,
+  crawl_complete: false,
+  rate_limited: false,
+  error_code: null,
+  error_detail: null,
+  cancel_requested: false,
+  created_at: "2026-10-16T08:00:00Z",
+  started_at: "2026-10-16T08:00:01Z",
+  completed_at: "2026-10-16T08:02:00Z",
+  issue_counts: { critical: 1, warning: 0, info: 0 },
+};
+describe("site audit", () => {
+  beforeEach(() => {
+    vi.mocked(seoApi.startAudit).mockResolvedValue({
+      ...audit,
+      status: "queued",
+      phase: "discovery",
+    });
+    vi.mocked(seoApi.audit).mockResolvedValue(audit);
+    vi.mocked(seoApi.auditIssues).mockResolvedValue({
+      summary: [
+        {
+          issue_type: "broken-internal-link",
+          severity: "critical",
+          count: 1,
+          title: "Broken internal link",
+          explanation: "Links to an error page.",
+          how_to_fix: "Point the link at a live URL.",
+        },
+      ],
+      issues: [
+        {
+          issue_type: "broken-internal-link",
+          severity: "critical",
+          page_url: "https://example.com/a",
+          details: {
+            target_url: "https://example.com/gone",
+            target_status: 404,
+          },
+        },
+      ],
+    });
+    vi.mocked(seoApi.auditPages).mockResolvedValue({ pages: [] });
+  });
+  it("starts an audit for the project domain and explains partial results", async () => {
+    setup("/workbench/seo-workbench.main?project=p1&view=audit");
+    const start = await screen.findByRole("button", { name: "seo.auditStart" });
+    expect(screen.getByLabelText("seo.auditStartUrl")).toHaveValue(
+      "https://example.com/",
+    );
+    await act(async () => {
+      fireEvent.click(start);
+    });
+    expect(seoApi.startAudit).toHaveBeenCalledWith("p1", {
+      start_url: "https://example.com/",
+      max_pages: 50,
+      idempotency_key: expect.any(String),
+    });
+    expect(await screen.findByText("Broken internal link")).toBeVisible();
+    expect(screen.getByText("seo.auditPageLimit")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /expand row/i }));
+    expect(
+      await screen.findByText("Point the link at a live URL."),
+    ).toBeVisible();
+    expect(
+      screen.getByText(
+        "target_url: https://example.com/gone · target_status: 404",
+      ),
+    ).toBeVisible();
+  });
+  it("blocks a second audit while one runs and cancels it", async () => {
+    const running = {
+      ...audit,
+      status: "running" as const,
+      phase: "crawl" as const,
+    };
+    vi.mocked(seoApi.audits).mockResolvedValue([running]);
+    vi.mocked(seoApi.audit).mockResolvedValue(running);
+    vi.mocked(seoApi.cancelAudit).mockResolvedValue({
+      ...running,
+      cancel_requested: true,
+    });
+    setup("/workbench/seo-workbench.main?project=p1&view=audit");
+    expect(await screen.findByText("seo.auditBusy")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "seo.auditStart" }),
+    ).toBeDisabled();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "seo.auditCancel" }),
+    );
+    await waitFor(() =>
+      expect(seoApi.cancelAudit).toHaveBeenCalledWith("p1", "audit-one"),
+    );
+    expect(await screen.findByText("seo.auditCancelling")).toBeVisible();
+    expect(seoApi.startAudit).not.toHaveBeenCalled();
   });
 });
 describe("static private report preview", () => {

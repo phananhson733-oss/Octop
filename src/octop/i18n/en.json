@@ -888,6 +888,165 @@
     }
   },
   "seo": {
-    "report_instructions": "Write a complete HTML report using only the supplied research evidence. Cite observation dates, market, run IDs, missing metrics, partial failures and known versus unknown costs. Distinguish recommendations from measured facts. Never invent metrics. Saving a report does not call a model or purchase data."
+    "report_instructions": "Write a complete HTML report using only the supplied research evidence. Cite observation dates, market, run IDs, missing metrics, partial failures and known versus unknown costs. Distinguish recommendations from measured facts. Never invent metrics. Saving a report does not call a model or purchase data.",
+    "audit": {
+      "issues": {
+        "blocked-page": {
+          "title": "Crawler was blocked",
+          "explanation": "The site answered with a bot challenge or an access denial (for example a Cloudflare challenge or a 403) instead of the page. The page is not reported as broken, but it could not be audited, and search engine crawlers may meet the same friction.",
+          "how_to_fix": "If you own the site, allow the \"Octop-SEO-Audit\" user agent in your firewall or bot protection (on Cloudflare: a WAF custom rule that skips bot protection when the user agent contains \"Octop-SEO-Audit\"; some free plans need bot protection relaxed instead), then run the audit again."
+        },
+        "javascript-rendering-suspected": {
+          "title": "Content may require JavaScript",
+          "explanation": "The HTML holds a JavaScript app container with very little readable text and no headings, links or images. The page probably builds its content in the browser. This audit reads the HTML the server sends and does not run JavaScript, so content checks were skipped for this page.",
+          "how_to_fix": "Serve important content and navigation in the initial HTML with server-side rendering or prerendering. This warning does not prove that search engines cannot index the page; Google renders JavaScript, but later and less reliably than plain HTML."
+        },
+        "rate-limited-page": {
+          "title": "Rate limited (429)",
+          "explanation": "The server answered 429 Too Many Requests, so this page could not be audited. The crawler waits and retries when the site's requested pause is short enough.",
+          "how_to_fix": "Raise the rate limit for crawlers, or exempt the \"Octop-SEO-Audit\" user agent in your rate-limiting rules (on Cloudflare: a rate-limiting rule exception for that user agent), then run the audit again. A smaller page limit also helps when the limit is strict."
+        },
+        "crawl-rate-limited": {
+          "title": "Crawl stopped early: rate limit",
+          "explanation": "The site asked the crawler to wait longer than the audit allows, so it stopped requesting pages. This report is incomplete: URLs that were not fetched are not reported as broken or rate limited, and orphan pages were not checked.",
+          "how_to_fix": "Run the audit again after the site's rate limit resets, or ask the site owner to allow the \"Octop-SEO-Audit\" crawler."
+        },
+        "server-error": {
+          "title": "Server error (5xx)",
+          "explanation": "The page returned a 5xx server error. Search engines that keep seeing server errors crawl the site less and may drop the page from their index.",
+          "how_to_fix": "Check the server logs for this URL and fix the underlying error. If the page is gone, return 404 or 410, or redirect it to a relevant page, instead of an error."
+        },
+        "broken-internal-link": {
+          "title": "Broken internal link",
+          "explanation": "This page links to an internal URL that returns an error status (4xx or 5xx). Broken links waste crawl budget, lose link equity and frustrate visitors; they are among the most common and most damaging technical SEO issues.",
+          "how_to_fix": "Point the link at the correct live URL, or remove it. If the target moved, link to the new URL directly instead of relying on a redirect."
+        },
+        "missing-title": {
+          "title": "Missing title tag",
+          "explanation": "The page has no <title>. The title is the strongest on-page relevance signal and the headline shown in search results; without one, search engines write their own, usually badly.",
+          "how_to_fix": "Add a unique, descriptive <title> of roughly 50 to 60 characters that names the page's main topic."
+        },
+        "broken-page": {
+          "title": "Page returns an error (4xx)",
+          "explanation": "This crawled URL returned a client error (for example 404). While the sitemap or other pages still point to it, crawlers keep spending requests on it.",
+          "how_to_fix": "If the page should exist, restore it. If it is gone on purpose, remove it from the sitemap and internal links, and consider a 301 redirect to the closest live page."
+        },
+        "duplicate-title": {
+          "title": "Duplicate title",
+          "explanation": "Several pages share the same title. Search engines use titles to tell pages apart; duplicates make pages compete with each other and lower click-through rates.",
+          "how_to_fix": "Give each page a title that describes its own content. For templated pages, put the distinguishing attribute (name, category, location) into the template."
+        },
+        "duplicate-meta-description": {
+          "title": "Duplicate meta description",
+          "explanation": "Several pages share the same meta description, so search results show identical snippets and searchers cannot tell the pages apart.",
+          "how_to_fix": "Write a unique meta description for each page, or remove the duplicated one: a snippet search engines build from the page text beats a wrong duplicate."
+        },
+        "duplicate-content": {
+          "title": "Duplicate page content",
+          "explanation": "Two or more URLs serve identical visible text. Search engines index one version and ignore the rest, and ranking signals are split across the duplicates.",
+          "how_to_fix": "Consolidate the duplicates: choose the canonical URL, add rel=canonical on the others and 301-redirect duplicate URLs where you can. Common causes are trailing-slash variants, URL parameters, and http/https or www variants."
+        },
+        "missing-meta-description": {
+          "title": "Missing meta description",
+          "explanation": "The page has no meta description. Search engines then build a snippet from the page text, which is often less compelling and lowers click-through rate.",
+          "how_to_fix": "Add a meta description of roughly 70 to 160 characters that summarizes the page and gives a reason to click."
+        },
+        "missing-h1": {
+          "title": "Missing H1 heading",
+          "explanation": "The page has no H1. The H1 tells visitors and search engines what the page is about; pages without one tend to have a weaker topic signal.",
+          "how_to_fix": "Add one H1 that states the page's main topic, consistent with the title."
+        },
+        "multiple-h1": {
+          "title": "Multiple H1 headings",
+          "explanation": "The page has more than one H1. That dilutes the main-topic signal and usually points to a template mistake, such as a logo and a headline both marked up as H1.",
+          "how_to_fix": "Keep one H1 for the main heading and turn the others into H2 or H3, or into plain elements when they are not headings (logos, for example)."
+        },
+        "redirect-chain": {
+          "title": "Redirect chain",
+          "explanation": "Reaching the final page takes two or more redirects in a row. Each hop adds latency, loses link equity and spends crawl budget; long chains may not be followed at all.",
+          "how_to_fix": "Point the first URL, and any internal links to it, straight at the final destination so there is at most one redirect."
+        },
+        "redirect-loop": {
+          "title": "Redirect loop",
+          "explanation": "This redirect eventually leads back to itself, so the URL never resolves. Browsers and crawlers give up with an error.",
+          "how_to_fix": "Trace the redirect rules for this URL and break the cycle so the chain ends at a real page that answers 200."
+        },
+        "canonical-conflict": {
+          "title": "Conflicting canonical signals",
+          "explanation": "The page declares one canonical URL in its HTML <link rel=canonical> and a different one in its HTTP Link header. When the signals conflict, search engines ignore both and choose their own canonical.",
+          "how_to_fix": "Choose one canonical URL and declare it in exactly one place (the HTML head is the most common); remove the other declaration or make it match."
+        },
+        "thin-content": {
+          "title": "Thin content",
+          "explanation": "The page has very little visible text (under 150 words). Thin pages rarely rank, can drag down how the whole site is judged, and, if the site renders in the browser, may mean the content is invisible to crawlers that only read HTML.",
+          "how_to_fix": "Expand the page with genuinely useful content, mark it noindex, or merge it into a stronger page. If the content exists but is rendered by JavaScript, serve it in the initial HTML with server-side rendering or prerendering."
+        },
+        "images-missing-alt": {
+          "title": "Images missing alt text",
+          "explanation": "One or more images on the page have no alt attribute. Alt text is an accessibility requirement and the main way search engines understand images.",
+          "how_to_fix": "Add descriptive alt text to meaningful images; use an empty alt (alt=\"\") only for purely decorative ones."
+        },
+        "orphan-page": {
+          "title": "Orphan page",
+          "explanation": "No crawled page links to this URL; it was found only through the sitemap. Pages without internal links get little crawl attention and no internal link equity, and visitors cannot reach them by browsing.",
+          "how_to_fix": "Link to this page from relevant pages (navigation, related content, hub pages), or remove it from the sitemap if it should not be indexed."
+        },
+        "no-outgoing-links": {
+          "title": "Page has no outgoing links",
+          "explanation": "The page contains no links at all: a dead end. Link equity that reaches it stops there, crawlers have nowhere to go next, and visitors must use the back button.",
+          "how_to_fix": "Add links to related pages, the parent category or the homepage. If the navigation is rendered by JavaScript, make sure it is also in the HTML the server sends."
+        },
+        "title-too-long": {
+          "title": "Title too long",
+          "explanation": "The title is longer than about 60 characters, so search results truncate it and the end may be cut off mid-phrase.",
+          "how_to_fix": "Shorten the title to roughly 50 to 60 characters, with the most important words first."
+        },
+        "title-too-short": {
+          "title": "Title too short",
+          "explanation": "The title is shorter than about 10 characters, which is usually too generic to describe the page or attract clicks.",
+          "how_to_fix": "Expand the title into a descriptive phrase of roughly 30 to 60 characters that says what the page offers."
+        },
+        "meta-description-too-long": {
+          "title": "Meta description too long",
+          "explanation": "The meta description is longer than about 160 characters, so search engines truncate the snippet.",
+          "how_to_fix": "Trim the description to roughly 70 to 160 characters, keeping the core message and the call to action."
+        },
+        "meta-description-too-short": {
+          "title": "Meta description too short",
+          "explanation": "The meta description is shorter than about 70 characters. It wastes the snippet space search results offer, and search engines often replace it with text from the page.",
+          "how_to_fix": "Expand the description to roughly 70 to 160 characters that summarize the page and give a reason to click."
+        },
+        "heading-order-skip": {
+          "title": "Heading levels skip",
+          "explanation": "The heading hierarchy skips levels (for example an H4 straight after an H2). That weakens the document structure for assistive technology and content parsers.",
+          "how_to_fix": "Adjust heading levels so they go down one step at a time (H1, H2, H3) without skipping."
+        },
+        "slow-response": {
+          "title": "Slow server response",
+          "explanation": "The HTML response took longer than 1.5 seconds. A slow time to first byte drags down every later performance metric and lowers the crawl rate on large sites.",
+          "how_to_fix": "Look at server and database time and caching for this route; serving cached or statically generated HTML usually fixes it."
+        },
+        "noindex-page": {
+          "title": "Page is noindex",
+          "explanation": "The page asks search engines not to index it, through a robots meta tag or an X-Robots-Tag header. That is often intentional; this is a heads-up, not an error.",
+          "how_to_fix": "If the page should rank, remove the noindex directive. If it is intentional (admin, thank-you or filter pages), nothing needs to change."
+        },
+        "canonicalized-page": {
+          "title": "Canonicalized to another URL",
+          "explanation": "The page names a different URL as its canonical, telling search engines to index that URL instead. That is fine when intentional (parameter pages, syndicated copies) and a problem if this page was meant to rank.",
+          "how_to_fix": "If this page should rank on its own, make its canonical point to itself. Otherwise nothing needs to change."
+        },
+        "deep-page": {
+          "title": "Page is deep in the site structure",
+          "explanation": "The page is 5 or more clicks from the start page. Deep pages are crawled less often and receive less link equity.",
+          "how_to_fix": "Link to it from higher-level pages (hubs, category pages, navigation) to shorten the path to this page."
+        }
+      },
+      "errors": {
+        "not_public": "only public websites can be audited; this address is on a private or internal network",
+        "invalid_url": "enter a public http(s) website address without a username or password",
+        "busy": "an audit is already running for this project; wait for it or cancel it first"
+      }
+    }
   }
 }

@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from octop.api.deps import current_user, get_server, require_admin
+from octop.infra.seo.audit.service import SeoAuditService
 from octop.infra.seo.models import (
+    AuditCreate,
     ContextUpdate,
     KeywordsSave,
     ProjectCreate,
@@ -21,6 +23,7 @@ from octop.infra.seo.models import (
 from octop.infra.seo.service import SeoService
 from octop.infra.server import OctopServer
 from octop.infra.users.identity import User
+from octop.infra.utils.locale import resolve_request_locale
 
 router = APIRouter(dependencies=[Depends(require_admin())])
 
@@ -228,6 +231,108 @@ class Report(ReportMetadata):
     html: str
 
 
+class Audit(BaseModel):
+    audit_id: str
+    project_id: str
+    started_by: int
+    idempotency_key: str
+    requested_url: str
+    start_url: str | None = Field(description="Where the crawl began, after redirects.")
+    max_pages: int
+    status: str = Field(description="queued, running, completed, failed or cancelled.")
+    phase: str = Field(description="discovery, crawl or finalize.")
+    pages_crawled: int
+    pages_total: int = Field(description="Pages this audit expects to crawl, up to max_pages.")
+    discovered_count: int = Field(description="URLs found so far through links and sitemaps.")
+    sitemap_count: int
+    crawl_complete: bool | None = Field(
+        description="True when every discovered URL was crawled; null until the crawl ends."
+    )
+    rate_limited: bool = Field(description="The site kept answering 429 and the crawl stopped.")
+    error_code: str | None = Field(description="target_blocked, db_error or unknown.")
+    error_detail: str | None
+    failed_phase: str | None
+    cancel_requested: bool
+    created_at: str
+    started_at: str | None
+    completed_at: str | None
+
+
+class IssueCounts(BaseModel):
+    critical: int
+    warning: int
+    info: int
+
+
+class AuditDetail(Audit):
+    issue_counts: IssueCounts
+
+
+class AuditIssue(BaseModel):
+    issue_type: str
+    severity: str
+    page_url: str
+    details: dict[str, Any] | None
+
+
+class AuditIssueType(BaseModel):
+    issue_type: str
+    severity: str
+    count: int
+    title: str
+    explanation: str
+    how_to_fix: str
+
+
+class AuditIssues(BaseModel):
+    audit: Audit
+    summary: list[AuditIssueType] = Field(description="One entry per issue type, severity first.")
+    issues: list[AuditIssue]
+
+
+class AuditPage(BaseModel):
+    url: str
+    status_code: int = Field(description="0 when the request failed.")
+    fetch_class: str = Field(
+        description="ok (any status the site served itself), blocked (bot protection), "
+        "rate_limited or error (no response)."
+    )
+    redirect_url: str | None
+    title: str
+    meta_description: str
+    canonical_url: str | None
+    header_canonical_url: str | None
+    robots_meta: str | None
+    x_robots_tag: str | None
+    og_title: str | None
+    og_description: str | None
+    og_image: str | None
+    h1_count: int
+    heading_order: list[int]
+    word_count: int
+    content_hash: str | None
+    is_html: bool
+    javascript_shell: bool = Field(
+        description="The HTML is an empty app shell; the audit does not run JavaScript."
+    )
+    images_total: int
+    images_missing_alt: int
+    internal_link_count: int
+    external_link_count: int
+    has_structured_data: bool
+    hreflang: list[str] = Field(description="hreflang values of alternate links.")
+    is_indexable: bool
+    response_time_ms: int
+    crawl_depth: int | None
+    in_sitemap: bool
+    crawled_at: str
+
+
+class AuditPages(BaseModel):
+    audit: Audit
+    pages: list[AuditPage]
+
+
 class ReportContext(BaseModel):
     context_hash: str
     project: Project
@@ -240,6 +345,10 @@ class ReportContext(BaseModel):
 def seo_service(server: OctopServer = Depends(get_server)) -> SeoService:
     assert server.services is not None
     return SeoService(server.services.repos)
+
+
+def audit_service(service: SeoService = Depends(seo_service)) -> SeoAuditService:
+    return SeoAuditService(service)
 
 
 def _snapshot(serp: dict[str, Any]) -> dict[str, Any]:
@@ -512,3 +621,138 @@ async def report(
 ) -> Any:
     response.headers["Cache-Control"] = "no-store"
     return await service.get_report(user.id, project_id, report_id)
+
+
+@router.post(
+    "/projects/{project_id}/audits",
+    response_model=Audit,
+    summary="Start a technical site audit",
+    description="Queues a crawl of up to max_pages pages (10-200) of one public website, "
+    "starting at start_url or the project domain. Free: no paid provider is called. Follows "
+    "robots.txt and the sitemaps it lists, crawls one page at a time and does not run "
+    "JavaScript. One audit runs per project; reuse the idempotency key to read the same audit.",
+)
+async def start_audit(
+    project_id: str,
+    body: AuditCreate,
+    request: Request,
+    user: User = Depends(current_user),
+    service: SeoAuditService = Depends(audit_service),
+    server: OctopServer = Depends(get_server),
+) -> Any:
+    audit = await service.start(
+        user.id, project_id, locale=resolve_request_locale(request), **body.model_dump()
+    )
+    if server.app_runtime is not None and server.app_runtime.seo_audits is not None:
+        server.app_runtime.seo_audits.submit(audit["audit_id"])
+    return audit
+
+
+@router.get(
+    "/projects/{project_id}/audits",
+    response_model=list[Audit],
+    summary="List site audits",
+    description="Newest first, up to 100.",
+)
+async def audits(
+    project_id: str,
+    user: User = Depends(current_user),
+    service: SeoAuditService = Depends(audit_service),
+) -> Any:
+    return await service.list_audits(user.id, project_id)
+
+
+@router.get(
+    "/projects/{project_id}/audits/{audit_id}",
+    response_model=AuditDetail,
+    summary="Read a site audit's progress",
+)
+async def audit(
+    project_id: str,
+    audit_id: str,
+    user: User = Depends(current_user),
+    service: SeoAuditService = Depends(audit_service),
+) -> Any:
+    return await service.get(user.id, project_id, audit_id)
+
+
+@router.get(
+    "/projects/{project_id}/audits/{audit_id}/issues",
+    response_model=AuditIssues,
+    summary="Read a site audit's issues",
+    description="Issues found so far, with an explanation and fix per issue type in the "
+    "request language. A running audit adds cross-page issues (duplicates, redirects, broken "
+    "links, orphans) when its crawl ends.",
+)
+async def audit_issues(
+    project_id: str,
+    audit_id: str,
+    request: Request,
+    severity: str | None = Query(None, pattern="^(critical|warning|info)$"),
+    issue_type: str | None = None,
+    user: User = Depends(current_user),
+    service: SeoAuditService = Depends(audit_service),
+) -> Any:
+    return await service.issues(
+        user.id,
+        project_id,
+        audit_id,
+        severity=severity,
+        issue_type=issue_type,
+        locale=resolve_request_locale(request),
+    )
+
+
+@router.get(
+    "/projects/{project_id}/audits/{audit_id}/pages",
+    response_model=AuditPages,
+    summary="Read a site audit's crawled pages",
+)
+async def audit_pages(
+    project_id: str,
+    audit_id: str,
+    fetch_class: str | None = None,
+    status_code: int | None = None,
+    url_contains: str = "",
+    user: User = Depends(current_user),
+    service: SeoAuditService = Depends(audit_service),
+) -> Any:
+    return await service.pages(
+        user.id,
+        project_id,
+        audit_id,
+        fetch_class=fetch_class,
+        status_code=status_code,
+        url_contains=url_contains,
+    )
+
+
+@router.post(
+    "/projects/{project_id}/audits/{audit_id}/cancel",
+    response_model=Audit,
+    summary="Cancel a site audit",
+    description="A queued audit is cancelled at once; a running one stops after the page it is "
+    "fetching. Pages and issues found so far stay readable.",
+)
+async def cancel_audit(
+    project_id: str,
+    audit_id: str,
+    user: User = Depends(current_user),
+    service: SeoAuditService = Depends(audit_service),
+) -> Any:
+    return await service.cancel(user.id, project_id, audit_id)
+
+
+@router.delete(
+    "/projects/{project_id}/audits/{audit_id}",
+    status_code=204,
+    summary="Delete a site audit and its results",
+)
+async def delete_audit(
+    project_id: str,
+    audit_id: str,
+    user: User = Depends(current_user),
+    service: SeoAuditService = Depends(audit_service),
+) -> Response:
+    await service.delete(user.id, project_id, audit_id)
+    return Response(status_code=204)

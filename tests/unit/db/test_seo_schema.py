@@ -19,6 +19,10 @@ SEO_TABLES = {
     "seo_competitors",
     "seo_key_pages",
     "seo_research_log",
+    "seo_audits",
+    "seo_audit_frontier",
+    "seo_audit_pages",
+    "seo_audit_issues",
 }
 
 

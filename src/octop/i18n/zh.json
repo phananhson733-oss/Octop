@@ -888,6 +888,165 @@
     }
   },
   "seo": {
-    "report_instructions": "仅根据提供的研究证据撰写完整 HTML 报告。标注观察日期、市场、执行 ID、缺失指标、部分失败及已知和未知费用。区分建议与实测事实，不编造指标。保存报告不会调用模型或购买数据。"
+    "report_instructions": "仅根据提供的研究证据撰写完整 HTML 报告。标注观察日期、市场、执行 ID、缺失指标、部分失败及已知和未知费用。区分建议与实测事实，不编造指标。保存报告不会调用模型或购买数据。",
+    "audit": {
+      "issues": {
+        "blocked-page": {
+          "title": "爬虫被拦截",
+          "explanation": "网站返回的是机器人验证或拒绝访问（例如 Cloudflare 验证页或 403），而不是页面本身。这里不把它算作坏页，但这个页面没能审计，搜索引擎的爬虫也可能遇到同样的阻碍。",
+          "how_to_fix": "如果是你的网站，请在防火墙或机器人防护里放行 User-Agent「Octop-SEO-Audit」（Cloudflare：加一条 WAF 自定义规则，User-Agent 包含「Octop-SEO-Audit」时跳过机器人防护；部分免费套餐只能调低机器人防护），然后重新审计。"
+        },
+        "javascript-rendering-suspected": {
+          "title": "内容可能依赖 JavaScript",
+          "explanation": "页面 HTML 里是一个 JavaScript 应用容器，几乎没有可读文字，也没有标题、链接或图片，内容很可能是在浏览器里生成的。本审计只读服务器返回的 HTML，不执行 JavaScript，所以这个页面跳过了内容类检查。",
+          "how_to_fix": "用服务端渲染或预渲染，把重要内容和导航直接放进首屏 HTML。这条警告不代表搜索引擎一定无法收录：Google 会渲染 JavaScript，只是比纯 HTML 更晚、更不稳定。"
+        },
+        "rate-limited-page": {
+          "title": "请求被限流（429）",
+          "explanation": "服务器返回 429 Too Many Requests，这个页面没能审计。网站要求的等待时间不长时，爬虫会等待后重试。",
+          "how_to_fix": "调高对爬虫的限流阈值，或在限流规则里豁免 User-Agent「Octop-SEO-Audit」（Cloudflare：给限流规则加一条匹配该 User-Agent 的例外），然后重新审计。限流很严时，把页数上限调小也有帮助。"
+        },
+        "crawl-rate-limited": {
+          "title": "爬取提前停止：被限流",
+          "explanation": "网站要求爬虫等待的时间超过了审计允许的范围，爬虫已停止请求页面。这份报告不完整：没抓到的网址不会被记为坏页或限流，孤立页面也没有检查。",
+          "how_to_fix": "等网站的限流恢复后重新审计，或请网站负责人放行「Octop-SEO-Audit」爬虫。"
+        },
+        "server-error": {
+          "title": "服务器错误（5xx）",
+          "explanation": "页面返回 5xx 服务器错误。搜索引擎反复遇到服务器错误时会降低抓取频率，并可能把页面移出索引。",
+          "how_to_fix": "查看这个网址的服务器日志，修复根本原因。如果页面已经不存在，应返回 404 或 410，或跳转到相关页面，而不是报错。"
+        },
+        "broken-internal-link": {
+          "title": "站内死链",
+          "explanation": "这个页面链接到一个返回错误状态（4xx 或 5xx）的站内网址。死链浪费抓取预算、流失链接权重，也让访客受挫，是最常见、危害最大的技术 SEO 问题之一。",
+          "how_to_fix": "把链接改成正确的有效网址，或者删掉。如果目标页面迁移了，直接链接到新网址，不要依赖跳转。"
+        },
+        "missing-title": {
+          "title": "缺少 title 标签",
+          "explanation": "页面没有 <title>。标题是页面上最强的相关性信号，也是搜索结果里显示的标题；没有它，搜索引擎会自己拼一个，效果通常很差。",
+          "how_to_fix": "加一个独特、能说明内容的 <title>，约 50 到 60 个字符，写明页面的主要主题。"
+        },
+        "broken-page": {
+          "title": "页面返回错误（4xx）",
+          "explanation": "这个网址返回了客户端错误（例如 404）。只要站点地图或其他页面还指向它，爬虫就会继续在它上面浪费请求。",
+          "how_to_fix": "如果页面应该存在，就恢复它；如果是有意下线，就从站点地图和站内链接中移除，并考虑 301 跳转到最相近的有效页面。"
+        },
+        "duplicate-title": {
+          "title": "标题重复",
+          "explanation": "多个页面使用同一个标题。搜索引擎靠标题区分页面，重复会让页面互相竞争，并降低点击率。",
+          "how_to_fix": "给每个页面写描述自身内容的标题。模板生成的页面，把区分属性（名称、分类、地区）放进模板。"
+        },
+        "duplicate-meta-description": {
+          "title": "描述重复",
+          "explanation": "多个页面使用同一段 meta description，搜索结果里摘要完全一样，搜索者分不清这些页面。",
+          "how_to_fix": "给每个页面写独特的描述，或者干脆删掉重复的那段：搜索引擎从正文生成的摘要也比错的重复描述好。"
+        },
+        "duplicate-content": {
+          "title": "页面内容重复",
+          "explanation": "两个或更多网址的可见文字完全相同。搜索引擎只收录其中一个版本，排名信号也被分散到这些重复页面上。",
+          "how_to_fix": "合并重复页面：选定规范网址，其余页面加 rel=canonical，能跳转的用 301 跳转。常见原因有末尾斜杠差异、网址参数、http/https 或 www 差异。"
+        },
+        "missing-meta-description": {
+          "title": "缺少 meta description",
+          "explanation": "页面没有 meta description，搜索引擎会从正文里拼摘要，通常吸引力更弱，点击率更低。",
+          "how_to_fix": "加一段约 70 到 160 个字符的描述，概括页面内容，并给出点击的理由。"
+        },
+        "missing-h1": {
+          "title": "缺少 H1 标题",
+          "explanation": "页面没有 H1。H1 告诉访客和搜索引擎这个页面讲什么，没有它的页面主题信号通常更弱。",
+          "how_to_fix": "加一个说明页面主题的 H1，与 title 保持一致。"
+        },
+        "multiple-h1": {
+          "title": "有多个 H1",
+          "explanation": "页面有不止一个 H1，会稀释主题信号，通常是模板问题，例如 logo 和正文标题都标成了 H1。",
+          "how_to_fix": "只保留正文主标题为 H1，其余改成 H2、H3；不是标题的元素（例如 logo）改成普通元素。"
+        },
+        "redirect-chain": {
+          "title": "跳转链",
+          "explanation": "要连续跳转两次或更多才能到达最终页面。每一跳都增加延迟、流失链接权重、消耗抓取预算，跳转链太长时爬虫可能根本不跟。",
+          "how_to_fix": "让起始网址和指向它的站内链接直接指向最终页面，最多只跳一次。"
+        },
+        "redirect-loop": {
+          "title": "跳转循环",
+          "explanation": "这个跳转最终又回到自己，网址永远打不开，浏览器和爬虫都会报错放弃。",
+          "how_to_fix": "检查这个网址的跳转规则，打断循环，让跳转最终落到一个返回 200 的真实页面。"
+        },
+        "canonical-conflict": {
+          "title": "canonical 信号冲突",
+          "explanation": "页面在 HTML 的 <link rel=canonical> 和 HTTP Link 响应头里声明了不同的规范网址。信号冲突时，搜索引擎会两个都忽略，自己选规范网址。",
+          "how_to_fix": "选定一个规范网址，只在一个地方声明（最常见的是 HTML head），删掉另一处或改成一致。"
+        },
+        "thin-content": {
+          "title": "内容过少",
+          "explanation": "页面可见文字很少（不到 150 个词）。内容单薄的页面很难排名，可能拉低整站的质量评估；如果网站在浏览器端渲染，也可能说明内容对只读 HTML 的爬虫不可见。",
+          "how_to_fix": "补充真正有用的内容，或标记 noindex，或合并到更强的页面。如果内容其实存在但由 JavaScript 渲染，请用服务端渲染或预渲染把它放进首屏 HTML。"
+        },
+        "images-missing-alt": {
+          "title": "图片缺少 alt 文本",
+          "explanation": "页面上有图片没有 alt 属性。alt 文本是无障碍的基本要求，也是搜索引擎理解图片的主要方式。",
+          "how_to_fix": "给有意义的图片写描述性的 alt；纯装饰性的图片才用空 alt（alt=\"\"）。"
+        },
+        "orphan-page": {
+          "title": "孤立页面",
+          "explanation": "没有任何已爬页面链接到这个网址，它只能从站点地图里找到。没有站内链接的页面很少被抓取、得不到站内链接权重，访客也无法通过浏览到达。",
+          "how_to_fix": "从相关页面（导航、相关内容、聚合页）链接到它；如果它不该被收录，就从站点地图中移除。"
+        },
+        "no-outgoing-links": {
+          "title": "页面没有任何链接",
+          "explanation": "页面里一个链接都没有，是条死胡同：流入的链接权重到此为止，爬虫无处可去，访客只能点返回。",
+          "how_to_fix": "加上指向相关页面、上级分类或首页的链接。如果导航是 JavaScript 渲染的，确保服务器返回的 HTML 里也有。"
+        },
+        "title-too-long": {
+          "title": "标题过长",
+          "explanation": "标题超过约 60 个字符，搜索结果会截断，结尾可能断在半句话。",
+          "how_to_fix": "把标题缩短到约 50 到 60 个字符，最重要的词放在前面。"
+        },
+        "title-too-short": {
+          "title": "标题过短",
+          "explanation": "标题短于约 10 个字符，通常太笼统，既说明不了页面，也吸引不了点击。",
+          "how_to_fix": "把标题扩展成约 30 到 60 个字符的描述性短语，说明页面提供什么。"
+        },
+        "meta-description-too-long": {
+          "title": "描述过长",
+          "explanation": "meta description 超过约 160 个字符，搜索引擎会截断摘要。",
+          "how_to_fix": "把描述精简到约 70 到 160 个字符，保留核心信息和行动号召。"
+        },
+        "meta-description-too-short": {
+          "title": "描述过短",
+          "explanation": "meta description 短于约 70 个字符，浪费了搜索结果给的摘要空间，搜索引擎也常常改用正文里的文字。",
+          "how_to_fix": "把描述扩展到约 70 到 160 个字符，概括页面内容并给出点击的理由。"
+        },
+        "heading-order-skip": {
+          "title": "标题层级跳级",
+          "explanation": "标题层级出现跳级（例如 H2 后面直接是 H4），削弱了文档结构，对辅助技术和内容解析都不友好。",
+          "how_to_fix": "调整标题层级，逐级向下（H1、H2、H3），不要跳级。"
+        },
+        "slow-response": {
+          "title": "服务器响应慢",
+          "explanation": "HTML 响应超过 1.5 秒。首字节时间慢会拖累后续所有性能指标，大型网站的抓取频率也会下降。",
+          "how_to_fix": "排查这个路由的服务器和数据库耗时以及缓存；返回缓存或静态生成的 HTML 通常就能解决。"
+        },
+        "noindex-page": {
+          "title": "页面设置了 noindex",
+          "explanation": "页面通过 robots meta 标签或 X-Robots-Tag 响应头要求搜索引擎不收录。这往往是有意为之，这里只是提醒，不算错误。",
+          "how_to_fix": "如果这个页面需要排名，去掉 noindex；如果是有意的（后台、感谢页、筛选页），不用处理。"
+        },
+        "canonicalized-page": {
+          "title": "规范网址指向别处",
+          "explanation": "页面把另一个网址声明为规范网址，告诉搜索引擎去收录那个网址。有意为之时没问题（参数页、转载页），但如果这个页面本来想排名，就是问题。",
+          "how_to_fix": "如果这个页面要单独排名，把 canonical 指向它自己；否则不用处理。"
+        },
+        "deep-page": {
+          "title": "页面层级太深",
+          "explanation": "从起始页要点 5 次或更多才能到达这个页面。层级深的页面抓取频率更低，得到的链接权重也更少。",
+          "how_to_fix": "从更高层级的页面（聚合页、分类页、导航）链接到它，缩短到达路径。"
+        }
+      },
+      "errors": {
+        "not_public": "只能审计公开网站，这个地址在内网或私有网络里",
+        "invalid_url": "请填写公开网站的 http(s) 地址，不要带用户名或密码",
+        "busy": "这个项目已有一次审计在进行，请等它结束或先取消"
+      }
+    }
   }
 }

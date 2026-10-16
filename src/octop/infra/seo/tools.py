@@ -151,6 +151,27 @@ def _serp_summary(serp: dict[str, Any]) -> dict[str, Any]:
     return {key: serp.get(key) for key in keys} | {"item_count": count}
 
 
+def _audit_summary(audit: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "audit_id",
+        "status",
+        "phase",
+        "requested_url",
+        "start_url",
+        "max_pages",
+        "pages_crawled",
+        "discovered_count",
+        "sitemap_count",
+        "crawl_complete",
+        "rate_limited",
+        "error_code",
+        "error_detail",
+        "created_at",
+        "completed_at",
+    )
+    return {key: audit.get(key) for key in keys}
+
+
 def _fit(build: Callable[[int], dict[str, Any]], count: int) -> str:
     """Dump ``build(count)``, halving ``count`` until it fits ``MAX_RESULT_CHARS``."""
     while True:
@@ -179,6 +200,9 @@ def build_seo_tools(
     service: SeoService, bound_agent_id: str, thread_repo: ThreadRepo
 ) -> list[StructuredTool]:
     """Bind identity outside model arguments and revalidate it after every resume."""
+    from octop.infra.seo.audit.service import SeoAuditService  # noqa: PLC0415
+
+    audits = SeoAuditService(service)
 
     async def context() -> tuple[int, str, str]:
         try:
@@ -321,6 +345,39 @@ def build_seo_tools(
         user_id, project_id, _thread_id = await context()
         return _page(await service.list_reports(user_id, project_id), offset, "reports")
 
+    async def list_audits(offset: int = 0) -> str:
+        user_id, project_id, _thread_id = await context()
+        rows = await audits.list_audits(user_id, project_id)
+        return _page([_audit_summary(row) for row in rows], offset, "audits")
+
+    async def audit_issues(
+        audit_id: str = "", severity: str = "", issue_type: str = "", offset: int = 0
+    ) -> str:
+        user_id, project_id, _thread_id = await context()
+        data = await audits.issues(
+            user_id,
+            project_id,
+            audit_id or None,
+            severity=severity or None,
+            issue_type=issue_type or None,
+        )
+        head = {"audit": _audit_summary(data["audit"]), "summary": data["summary"]}
+        return _page(data["issues"], offset, "issues", head)
+
+    async def audit_pages(
+        audit_id: str = "", fetch_class: str = "", url_contains: str = "", offset: int = 0
+    ) -> str:
+        user_id, project_id, _thread_id = await context()
+        data = await audits.pages(
+            user_id,
+            project_id,
+            audit_id or None,
+            fetch_class=fetch_class or None,
+            url_contains=url_contains,
+        )
+        head = {"audit": _audit_summary(data["audit"])}
+        return _page(data["pages"], offset, "pages", head)
+
     definitions: list[tuple[str, Any, str]] = [
         (
             "seo_get_report_context",
@@ -394,6 +451,31 @@ def build_seo_tools(
             "seo_list_reports",
             reports,
             "List private report metadata for this agent's project without loading HTML.",
+        ),
+        (
+            "seo_list_audits",
+            list_audits,
+            "List technical site audits of this agent's project, newest first, with status and "
+            "progress. Free. Audits are started by the user in the SEO workbench; you cannot "
+            "start one.",
+        ),
+        (
+            "seo_get_audit_issues",
+            audit_issues,
+            "Read a site audit's issues; audit_id defaults to the newest audit. summary has one "
+            "entry per issue type with severity, count, explanation and how_to_fix; issues lists "
+            "every affected URL with details. Filter by severity (critical|warning|info) or "
+            "issue_type. The crawler does not run JavaScript. If status is not completed, "
+            "crawl_complete is false or rate_limited is true, the results are partial: say so. "
+            "Free. Pass next_offset as offset to read more.",
+        ),
+        (
+            "seo_get_audit_pages",
+            audit_pages,
+            "Read the pages a site audit crawled: status, title, meta description, canonical, "
+            "headings, word count, indexability, links and response time. audit_id defaults to "
+            "the newest audit; filter by fetch_class (ok|blocked|rate_limited|error) or a URL "
+            "substring. Free. Pass next_offset as offset to read more.",
         ),
     ]
     return [

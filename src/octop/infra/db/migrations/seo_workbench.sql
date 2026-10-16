@@ -91,3 +91,61 @@ CREATE TABLE IF NOT EXISTS seo_research_log (
  created_by TEXT NOT NULL, created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS seo_research_log_project ON seo_research_log(project_id,created_at);
+-- Site audits. The crawl frontier, pages, links and issues are written as the crawl
+-- runs, so an audit interrupted by a restart resumes where it stopped.
+CREATE TABLE IF NOT EXISTS seo_audits (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ audit_id TEXT NOT NULL UNIQUE,
+ project_id TEXT NOT NULL REFERENCES seo_projects(project_id) ON DELETE CASCADE,
+ started_by INTEGER NOT NULL, idempotency_key TEXT NOT NULL,
+ requested_url TEXT NOT NULL, start_url TEXT, max_pages INTEGER NOT NULL,
+ -- status: queued|running|completed|failed|cancelled; phase: discovery|crawl|finalize.
+ status TEXT NOT NULL, phase TEXT NOT NULL,
+ pages_crawled INTEGER NOT NULL DEFAULT 0, pages_total INTEGER NOT NULL DEFAULT 0,
+ discovered_count INTEGER NOT NULL DEFAULT 0, sitemap_count INTEGER NOT NULL DEFAULT 0,
+ -- robots.txt as fetched (NULL when missing), so a resumed crawl keeps the same rules.
+ robots_text TEXT,
+ crawl_complete INTEGER, rate_limited INTEGER NOT NULL DEFAULT 0,
+ error_code TEXT, error_detail TEXT, failed_phase TEXT,
+ cancel_requested INTEGER NOT NULL DEFAULT 0,
+ -- The claiming process. Every crawl write checks it, so two processes never interleave.
+ runner_token TEXT, heartbeat_at INTEGER,
+ created_at TEXT NOT NULL, started_at TEXT, completed_at TEXT,
+ UNIQUE(project_id,idempotency_key)
+);
+-- At most one queued or running audit per project.
+CREATE UNIQUE INDEX IF NOT EXISTS seo_audits_active
+ ON seo_audits(project_id) WHERE status IN ('queued','running');
+CREATE TABLE IF NOT EXISTS seo_audit_frontier (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ audit_id TEXT NOT NULL REFERENCES seo_audits(audit_id) ON DELETE CASCADE,
+ url TEXT NOT NULL, depth INTEGER, source TEXT NOT NULL,
+ in_sitemap INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'pending',
+ UNIQUE(audit_id,url)
+);
+CREATE INDEX IF NOT EXISTS seo_audit_frontier_next ON seo_audit_frontier(audit_id,state);
+CREATE TABLE IF NOT EXISTS seo_audit_pages (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ audit_id TEXT NOT NULL REFERENCES seo_audits(audit_id) ON DELETE CASCADE,
+ url TEXT NOT NULL, status_code INTEGER NOT NULL, fetch_class TEXT NOT NULL, redirect_url TEXT,
+ title TEXT NOT NULL DEFAULT '', meta_description TEXT NOT NULL DEFAULT '',
+ canonical_url TEXT, header_canonical_url TEXT, robots_meta TEXT, x_robots_tag TEXT,
+ og_title TEXT, og_description TEXT, og_image TEXT,
+ h1_count INTEGER NOT NULL DEFAULT 0, heading_order TEXT NOT NULL DEFAULT '[]',
+ word_count INTEGER NOT NULL DEFAULT 0, content_hash TEXT,
+ is_html INTEGER NOT NULL DEFAULT 0, javascript_shell INTEGER NOT NULL DEFAULT 0,
+ images_total INTEGER NOT NULL DEFAULT 0, images_missing_alt INTEGER NOT NULL DEFAULT 0,
+ internal_link_count INTEGER NOT NULL DEFAULT 0, external_link_count INTEGER NOT NULL DEFAULT 0,
+ has_structured_data INTEGER NOT NULL DEFAULT 0, hreflang TEXT NOT NULL DEFAULT '[]',
+ is_indexable INTEGER NOT NULL DEFAULT 0, response_time_ms INTEGER NOT NULL DEFAULT 0,
+ crawl_depth INTEGER, in_sitemap INTEGER NOT NULL DEFAULT 0, crawled_at TEXT NOT NULL,
+ -- Internal link targets as a JSON array (at most 500), for broken-link and orphan checks.
+ internal_links TEXT NOT NULL DEFAULT '[]',
+ UNIQUE(audit_id,url)
+);
+CREATE TABLE IF NOT EXISTS seo_audit_issues (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ audit_id TEXT NOT NULL REFERENCES seo_audits(audit_id) ON DELETE CASCADE,
+ issue_type TEXT NOT NULL, severity TEXT NOT NULL, page_url TEXT NOT NULL, details TEXT
+);
+CREATE INDEX IF NOT EXISTS seo_audit_issues_type ON seo_audit_issues(audit_id,issue_type);

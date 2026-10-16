@@ -40,6 +40,7 @@ import {
 } from "./groupSharedVolumeRows";
 import { staticReportHtml } from "./reportPreview";
 import { attemptKey } from "./attemptKey";
+import { AuditPanel } from "./AuditPanel";
 import { ProjectContextPanel } from "./ProjectContextPanel";
 import { SerpPanel } from "./SerpPanel";
 import { useSearchTabs } from "./searchTabs";
@@ -631,7 +632,7 @@ function ProjectWorkspace({
       {notice && <Alert type="info" showIcon message={notice} />}
       <Tabs
         activeKey={
-          ["research", "saved", "reports", "context"].includes(view)
+          ["research", "saved", "reports", "audit", "context"].includes(view)
             ? view
             : "research"
         }
@@ -958,6 +959,17 @@ function ProjectWorkspace({
                   ]}
                 />
               </div>
+            ),
+          },
+          {
+            key: "audit",
+            label: t("seo.audit"),
+            children: (
+              <AuditPanel
+                projectId={id}
+                domain={project.domain}
+                isVisible={isVisible && view === "audit"}
+              />
             ),
           },
           {

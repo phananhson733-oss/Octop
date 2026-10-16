@@ -266,3 +266,77 @@ async def test_serp_background_and_rebinding_over_http(env_with_agent, monkeypat
         ("/api/seo/projects/{project_id}/context", "patch"),
     ]:
         assert paths[path][method]["summary"], path
+
+
+async def test_site_audit_over_http(env_with_agent, monkeypatch):
+    from octop.infra.seo.audit import runner as runner_module
+    from octop.infra.seo.audit.throttle import CrawlThrottle
+    from tests.unit.seo.audit.fakesite import FakeSite, page
+
+    client, server, auth, agent_id = env_with_agent
+    clock = {"now": 0.0}
+
+    async def no_wait(seconds: float) -> None:
+        clock["now"] += seconds
+
+    monkeypatch.setattr(
+        runner_module, "CrawlThrottle", lambda: CrawlThrottle(lambda: clock["now"], no_wait)
+    )
+    site = FakeSite(
+        {
+            "https://example.com/": page("Home", "/a", "/missing"),
+            "https://example.com/a": page("Ay", "/"),
+        }
+    )
+    runner = server.app_runtime.seo_audits
+    monkeypatch.setattr(runner, "_client_factory", site.client)
+
+    created = await client.post(
+        "/api/seo/projects",
+        headers=auth,
+        json={"name": "Example", "domain": "example.com", "agent_id": agent_id},
+    )
+    base = f"/api/seo/projects/{created.json()['project_id']}/audits"
+    other = await create_user(client, auth, username="audit-other")
+    assert (await client.get(base, headers=other)).status_code == 403
+    bad = await client.post(
+        base,
+        headers=auth | {"Accept-Language": "en"},
+        json={"idempotency_key": "bad", "start_url": "http://10.0.0.1/"},
+    )
+    assert bad.status_code == 400
+    assert "private or internal network" in bad.json()["error"]["details"]["reason"]
+
+    started = await client.post(base, headers=auth, json={"idempotency_key": "one"})
+    assert started.status_code == 200, started.text
+    audit_id = started.json()["audit_id"]
+    assert started.json()["max_pages"] == 50
+    await runner.wait(audit_id)
+
+    listed = (await client.get(base, headers=auth)).json()
+    assert [row["audit_id"] for row in listed] == [audit_id]
+    detail = (await client.get(f"{base}/{audit_id}", headers=auth)).json()
+    assert (detail["status"], detail["pages_crawled"]) == ("completed", 3)
+    assert detail["issue_counts"]["critical"] == 1
+    issues = (
+        await client.get(
+            f"{base}/{audit_id}/issues",
+            headers=auth | {"Accept-Language": "zh-CN"},
+            params={"severity": "critical"},
+        )
+    ).json()
+    assert [row["issue_type"] for row in issues["issues"]] == ["broken-internal-link"]
+    assert issues["summary"][0]["title"] == "站内死链"
+    pages = (
+        await client.get(f"{base}/{audit_id}/pages", headers=auth, params={"status_code": 404})
+    ).json()["pages"]
+    assert [row["url"] for row in pages] == ["https://example.com/missing"]
+
+    queued = await client.post(base, headers=auth, json={"idempotency_key": "two"})
+    second = queued.json()["audit_id"]
+    cancelled = await client.post(f"{base}/{second}/cancel", headers=auth)
+    assert cancelled.status_code == 200
+    await runner.wait(second)
+    assert (await client.get(f"{base}/{second}", headers=auth)).json()["status"] == "cancelled"
+    assert (await client.delete(f"{base}/{audit_id}", headers=auth)).status_code == 204
+    assert (await client.get(f"{base}/{audit_id}", headers=auth)).status_code == 404

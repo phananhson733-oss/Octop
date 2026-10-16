@@ -3,7 +3,7 @@
 > 2026-10-14 实施更新：首个关键词流程已在Octop原生实现。当前接口、实际边界、有意差异和验收结果以 [keyword-workflow-spec.md](seo-replica/keyword-workflow-spec.md) 为准。本文后续完整平台设计仍是路线图，不表示已交付。首版只含国家Labs研究、选词与标签、私有报告和Octop对话；不包含Google授权、审计、排名、通用任务系统。报告采用有字节上限的数据库正文与不可变版本，替代此前首版工作区文件建议。实际付费与真实模型验证尚未执行。
 
 
-日期：2026-10-14。版本：v2，按用户最新澄清重写。状态：R1 已在分支 `seo-workbench-native` 实现，尚未上线；实现记录见 `seo-replica/keyword-workflow-spec.md`。
+日期：2026-10-14。版本：v2，按用户最新澄清重写。状态：R1 已上线（2026-10-16）；R2 技术审计已在分支 `seo-workbench-native` 实现，尚未上线，Google 搜索表现待做；实现记录见 `seo-replica/keyword-workflow-spec.md`。
 
 **目标是以 OpenSEO 为参考产品，通过 REA 还原页面、交互与业务规则，将自己的 SEO 工作台直接实现到 Octop 的前后端和数据库中。** OpenSEO 源码用于研究、移植和行为对照，最终产品由 Octop 独立运行。
 

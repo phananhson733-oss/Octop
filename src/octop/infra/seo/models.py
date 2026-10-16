@@ -144,3 +144,14 @@ ContextOp = (
 
 class ContextUpdate(Command):
     updates: list[ContextOp] = Field(min_length=1, max_length=50)
+
+
+# Site audits. OpenSEO's default crawl is 50 pages; 200 keeps one audit to minutes.
+AUDIT_MAX_PAGES = 200
+
+
+class AuditCreate(Command):
+    # Defaults to the project's domain.
+    start_url: str | None = Field(default=None, max_length=2048)
+    max_pages: int = Field(default=50, ge=10, le=AUDIT_MAX_PAGES)
+    idempotency_key: str = Field(min_length=1, max_length=100)

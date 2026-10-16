@@ -430,6 +430,19 @@ rebound.
 | `GET`    | `/seo/projects/{id}/report-context?run_id=` | admin | evidence and `context_hash` for an agent report |
 | `GET`/`POST` | `/seo/projects/{id}/reports` | admin | report metadata / save an immutable HTML report |
 | `GET`    | `/seo/projects/{id}/reports/{report_id}` | admin | report with HTML |
+| `POST`   | `/seo/projects/{id}/audits` | admin | body `{idempotency_key, start_url?, max_pages: 10–200 (default 50)}` — queue a free technical site audit; one active audit per project (`409`) |
+| `GET`    | `/seo/projects/{id}/audits` | admin | audits, newest first, with progress |
+| `GET`    | `/seo/projects/{id}/audits/{audit_id}` | admin | one audit with `issue_counts` by severity |
+| `GET`    | `/seo/projects/{id}/audits/{audit_id}/issues?severity=&issue_type=` | admin | per-type summary with explanation and fix (request language) and every affected URL |
+| `GET`    | `/seo/projects/{id}/audits/{audit_id}/pages?fetch_class=&status_code=&url_contains=` | admin | crawled pages |
+| `POST`   | `/seo/projects/{id}/audits/{audit_id}/cancel` | admin | queued: cancelled at once; running: stops after the current page, results so far kept |
+| `DELETE` | `/seo/projects/{id}/audits/{audit_id}` | admin | delete the audit and its results (`204`) |
+
+Site audits crawl on the server as `Octop-SEO-Audit/1.0`: robots.txt and its sitemaps are
+followed, one page at a time (1 s apart, backing off on `429`), without running JavaScript, and
+only to public addresses (every DNS answer is checked; redirects are not followed blindly). The
+crawl is stored as it runs, so an audit interrupted by a restart or deploy resumes where it
+stopped.
 
 ## Internal MCP (octop-harness agents)
 

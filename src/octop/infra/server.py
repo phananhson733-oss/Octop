@@ -221,6 +221,7 @@ class AppRuntime:
     trajectory_service: TrajectoryService | None = None
     history_archive: Any | None = None
     bridge_manager: Any | None = None
+    seo_audits: Any | None = None
 
     def replace_services(self, services: SharedServices, config: OctopConfig) -> None:
         """Retarget all runtime singletons onto a new SharedServices / config.
@@ -242,6 +243,8 @@ class AppRuntime:
             from octop.infra.history.trajectory.store import TrajectoryStore  # noqa: PLC0415
 
             self.trajectory_service.replace_store(TrajectoryStore(services.trajectory_event_repo))
+        if self.seo_audits is not None:
+            self.seo_audits.repos = services.repos
 
 
 class OctopServer:
@@ -565,6 +568,11 @@ class OctopServer:
             history_archive=history_archive,
             bridge_manager=bridge_mgr,
         )
+        from octop.infra.seo.audit.runner import SeoAuditRunner  # noqa: PLC0415
+
+        # Picks up queued audits and the ones a stopped process left running.
+        self.app_runtime.seo_audits = SeoAuditRunner(self.services.repos)
+        self.app_runtime.seo_audits.start()
         from octop.infra.knowledge.jobs import resume_pending_index_jobs  # noqa: PLC0415
 
         resume_pending_index_jobs(self.services)
@@ -615,6 +623,8 @@ class OctopServer:
             await agently_auth.close()
             if self.app_runtime is not None:
                 rt = self.app_runtime
+                if rt.seo_audits is not None:
+                    await rt.seo_audits.stop()
                 await rt.proactive_scheduler.shutdown()
                 await rt.cron_manager.shutdown()
                 await rt.gateway.shutdown()

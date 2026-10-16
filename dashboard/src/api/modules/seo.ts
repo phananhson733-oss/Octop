@@ -162,7 +162,64 @@ export interface SeoReport {
   content_hash: string;
   size_bytes: number;
 }
+export type AuditSeverity = "critical" | "warning" | "info";
+export interface SeoAudit {
+  audit_id: string;
+  project_id: string;
+  requested_url: string;
+  /** Where the crawl began, after redirects. */
+  start_url: string | null;
+  max_pages: number;
+  status: "queued" | "running" | "completed" | "failed" | "cancelled";
+  phase: "discovery" | "crawl" | "finalize";
+  pages_crawled: number;
+  pages_total: number;
+  discovered_count: number;
+  sitemap_count: number;
+  /** Every discovered URL was crawled; null until the crawl ends. */
+  crawl_complete: boolean | null;
+  rate_limited: boolean;
+  error_code: "target_blocked" | "db_error" | "unknown" | null;
+  error_detail: string | null;
+  cancel_requested: boolean;
+  created_at: string;
+  started_at: string | null;
+  completed_at: string | null;
+}
+export interface SeoAuditDetail extends SeoAudit {
+  issue_counts: Record<AuditSeverity, number>;
+}
+export interface AuditIssue {
+  issue_type: string;
+  severity: AuditSeverity;
+  page_url: string;
+  details: Record<string, unknown> | null;
+}
+export interface AuditIssueType {
+  issue_type: string;
+  severity: AuditSeverity;
+  count: number;
+  title: string;
+  explanation: string;
+  how_to_fix: string;
+}
+export interface AuditPage {
+  url: string;
+  status_code: number;
+  fetch_class: "ok" | "blocked" | "rate_limited" | "error";
+  redirect_url: string | null;
+  title: string;
+  word_count: number;
+  is_html: boolean;
+  javascript_shell: boolean;
+  is_indexable: boolean;
+  response_time_ms: number;
+  crawl_depth: number | null;
+  in_sitemap: boolean;
+}
 const projectPath = (id: string) => `/seo/projects/${encodeURIComponent(id)}`;
+const auditPath = (id: string, auditId: string) =>
+  `${projectPath(id)}/audits/${encodeURIComponent(auditId)}`;
 export const seoApi = {
   projects: () => request<SeoProject[]>("/seo/projects"),
   createProject: (data: Omit<SeoProject, "project_id" | "created_at">) =>
@@ -245,6 +302,27 @@ export const seoApi = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+  startAudit: (
+    id: string,
+    data: { start_url: string; max_pages: number; idempotency_key: string },
+  ) =>
+    request<SeoAudit>(`${projectPath(id)}/audits`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  audits: (id: string) => request<SeoAudit[]>(`${projectPath(id)}/audits`),
+  audit: (id: string, auditId: string) =>
+    request<SeoAuditDetail>(auditPath(id, auditId)),
+  auditIssues: (id: string, auditId: string) =>
+    request<{ summary: AuditIssueType[]; issues: AuditIssue[] }>(
+      `${auditPath(id, auditId)}/issues`,
+    ),
+  auditPages: (id: string, auditId: string) =>
+    request<{ pages: AuditPage[] }>(`${auditPath(id, auditId)}/pages`),
+  cancelAudit: (id: string, auditId: string) =>
+    request<SeoAudit>(`${auditPath(id, auditId)}/cancel`, { method: "POST" }),
+  deleteAudit: (id: string, auditId: string) =>
+    request<void>(auditPath(id, auditId), { method: "DELETE" }),
   reports: (id: string) => request<SeoReport[]>(`${projectPath(id)}/reports`),
   report: (id: string, reportId: string) =>
     request<SeoReport & { html: string }>(

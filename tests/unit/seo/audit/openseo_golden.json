@@ -1,0 +1,1089 @@
+{
+ "source": "open-seo d7ea785 page-analyzer.ts / url-utils.ts, htmlparser2 10.1.0, robots-parser 3.0.1",
+ "analyzer": [
+  {
+   "name": "full document",
+   "html": "<!DOCTYPE html>\n      <html><head>\n        <title> The  Title </title>\n        <meta name=\"description\" content=\"  A description.  \">\n        <meta name=\"robots\" content=\"index, follow\">\n        <meta property=\"og:title\" content=\"OG Title\">\n        <meta property=\"og:description\" content=\"OG Desc\">\n        <meta property=\"og:image\" content=\"/og.png\">\n        <link rel=\"canonical\" href=\"https://example.com/blog/post\">\n        <link rel=\"alternate\" hreflang=\"en\" href=\"/en\">\n        <link rel=\"alternate\" hreflang=\"de\" href=\"/de\">\n        <script type=\"application/ld+json\">{\"@type\":\"Article\"}</script>\n      </head><body>\n        <h1>Main <em>Heading</em></h1>\n        <h2>Sub</h2><h3>Deep</h3><h2>Sub 2</h2>\n        <p>Some visible body text with <strong>bold words</strong> here.</p>\n        <script>ignored();</script>\n        <style>.x{}</style>\n        <svg><title>icon</title><text>svg text</text></svg>\n        <noscript><img src=\"/ns.png\"><p>noscript text</p></noscript>\n        <img src=\"/a.png\" alt=\"A picture\">\n        <img src=\"/b.png\" alt=\"\">\n        <img src=\"/c.png\">\n        <img alt=\"no src\">\n        <a href=\"/relative\">Relative <span>link</span></a>\n        <a href=\"https://example.com/relative\">Duplicate target</a>\n        <a href=\"https://other.example/x\" rel=\"NoFollow sponsored\">External</a>\n        <a href=\"mailto:x@example.com\">Mail</a>\n        <a href=\"#frag\">Fragment</a>\n        <a href=\"javascript:void(0)\">JS</a>\n        <a href=\"/empty-anchor\"><img src=\"/img-link.png\" alt=\"\"></a>\n      </body></html>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "The  Title",
+    "metaDescription": "A description.",
+    "canonical": "https://example.com/blog/post",
+    "robotsMeta": "index, follow",
+    "ogTitle": "OG Title",
+    "ogDescription": "OG Desc",
+    "ogImage": "/og.png",
+    "h1s": [
+     "Main Heading"
+    ],
+    "headingOrder": [
+     1,
+     2,
+     3,
+     2
+    ],
+    "wordCount": 20,
+    "javascriptShell": false,
+    "images": [
+     {
+      "src": "/a.png",
+      "alt": "A picture"
+     },
+     {
+      "src": "/b.png",
+      "alt": ""
+     },
+     {
+      "src": "/c.png",
+      "alt": null
+     },
+     {
+      "src": null,
+      "alt": "no src"
+     },
+     {
+      "src": "/img-link.png",
+      "alt": ""
+     }
+    ],
+    "links": [
+     {
+      "targetUrl": "https://example.com/relative",
+      "anchor": "Relative link",
+      "isInternal": true,
+      "isNofollow": false
+     },
+     {
+      "targetUrl": "https://other.example/x",
+      "anchor": "External",
+      "isInternal": false,
+      "isNofollow": true
+     },
+     {
+      "targetUrl": "https://example.com/empty-anchor",
+      "anchor": null,
+      "isInternal": true,
+      "isNofollow": false
+     }
+    ],
+    "hasStructuredData": true,
+    "hreflangTags": [
+     "en",
+     "de"
+    ]
+   }
+  },
+  {
+   "name": "bare fragment",
+   "html": "<h1>Bare fragment</h1><p>Just text and a <a href=\"/x\">link</a>.</p>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "",
+    "metaDescription": "",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [
+     "Bare fragment"
+    ],
+    "headingOrder": [
+     1
+    ],
+    "wordCount": 6,
+    "javascriptShell": false,
+    "images": [],
+    "links": [
+     {
+      "targetUrl": "https://example.com/x",
+      "anchor": "link",
+      "isInternal": true,
+      "isNofollow": false
+     }
+    ],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "empty",
+   "html": "",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "",
+    "metaDescription": "",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [],
+    "headingOrder": [],
+    "wordCount": 0,
+    "javascriptShell": false,
+    "images": [],
+    "links": [],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "head only",
+   "html": "<html><head><title>Head only</title><meta name=\"description\" content=\"d\"></head></html>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "Head only",
+    "metaDescription": "d",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [],
+    "headingOrder": [],
+    "wordCount": 0,
+    "javascriptShell": false,
+    "images": [],
+    "links": [],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "duplicates first wins",
+   "html": "<html><head>\n      <title>First</title><title>Second</title>\n      <meta name=\"description\" content=\"first desc\">\n      <meta name=\"description\" content=\"second desc\">\n      <link rel=\"canonical\" href=\"/first\"><link rel=\"canonical\" href=\"/second\">\n      </head><body><p>text</p></body></html>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "First",
+    "metaDescription": "first desc",
+    "canonical": "/first",
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [],
+    "headingOrder": [],
+    "wordCount": 1,
+    "javascriptShell": false,
+    "images": [],
+    "links": [],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "unclosed and misnested",
+   "html": "<html><body>\n      <h1>Unclosed heading\n      <p>Paragraph <b>bold <i>both</b> italic?</i>\n      <a href=\"/one\">first <a href=\"/two\">second</a>\n      <div>trailing text",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "",
+    "metaDescription": "",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [
+     "Unclosed heading\n      Paragraph bold both italic?\n      first second\n      trailing text"
+    ],
+    "headingOrder": [
+     1
+    ],
+    "wordCount": 10,
+    "javascriptShell": false,
+    "images": [],
+    "links": [
+     {
+      "targetUrl": "https://example.com/one",
+      "anchor": "first",
+      "isInternal": true,
+      "isNofollow": false
+     },
+     {
+      "targetUrl": "https://example.com/two",
+      "anchor": "second",
+      "isInternal": true,
+      "isNofollow": false
+     }
+    ],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "entities",
+   "html": "<html><head><title>A &amp; B &lt;C&gt;</title></head>\n      <body><h1>Caf&eacute; &quot;menu&quot;</h1>\n      <p>1 &lt; 2 &amp;&amp; 3 &gt; 2</p>\n      <a href=\"/x?a=1&amp;b=2\">Query &amp; anchor</a></body></html>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "A & B <C>",
+    "metaDescription": "",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [
+     "Café \"menu\""
+    ],
+    "headingOrder": [
+     1
+    ],
+    "wordCount": 12,
+    "javascriptShell": false,
+    "images": [],
+    "links": [
+     {
+      "targetUrl": "https://example.com/x?a=1&b=2",
+      "anchor": "Query & anchor",
+      "isInternal": true,
+      "isNofollow": false
+     }
+    ],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "heading order",
+   "html": "<body><h3>three</h3><div><h1>one</h1><section><h2>two</h2>\n      <h6>six</h6></section></div><h4>four</h4></body>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "",
+    "metaDescription": "",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [
+     "one"
+    ],
+    "headingOrder": [
+     3,
+     1,
+     2,
+     6,
+     4
+    ],
+    "wordCount": 2,
+    "javascriptShell": false,
+    "images": [],
+    "links": [],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "whitespace words",
+   "html": "<body>\n      <p>\n        one\n        two    three\n      </p>\n      <ul><li>four</li><li>five</li></ul>\n    </body>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "",
+    "metaDescription": "",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [],
+    "headingOrder": [],
+    "wordCount": 4,
+    "javascriptShell": false,
+    "images": [],
+    "links": [],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "meta name case",
+   "html": "<head><meta name=\"Description\" content=\"first\"><meta name=\"description\" content=\"second\"><meta name=\"ROBOTS\" content=\"noindex\"></head>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "",
+    "metaDescription": "first",
+    "canonical": null,
+    "robotsMeta": "noindex",
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [],
+    "headingOrder": [],
+    "wordCount": 0,
+    "javascriptShell": false,
+    "images": [],
+    "links": [],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "head without close, then body",
+   "html": "<html><head><title>T</title><meta name=\"description\" content=\"d\"><body><p>after head</p><a href=\"/b\">b</a></body></html>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "T",
+    "metaDescription": "d",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [],
+    "headingOrder": [],
+    "wordCount": 2,
+    "javascriptShell": false,
+    "images": [],
+    "links": [
+     {
+      "targetUrl": "https://example.com/b",
+      "anchor": "b",
+      "isInternal": true,
+      "isNofollow": false
+     }
+    ],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "anchor closed by parent",
+   "html": "<body><div><a href=\"/inside\">inside <b>bold</div><p>outside text</p></body>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "",
+    "metaDescription": "",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [],
+    "headingOrder": [],
+    "wordCount": 3,
+    "javascriptShell": false,
+    "images": [],
+    "links": [
+     {
+      "targetUrl": "https://example.com/inside",
+      "anchor": "inside bold",
+      "isInternal": true,
+      "isNofollow": false
+     }
+    ],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "attributes without values",
+   "html": "<body><img src=\"/x.png\" alt><a href=\"/y\" rel>why</a><script async src=\"/s.js\"></script></body>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "",
+    "metaDescription": "",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [],
+    "headingOrder": [],
+    "wordCount": 1,
+    "javascriptShell": false,
+    "images": [
+     {
+      "src": "/x.png",
+      "alt": ""
+     }
+    ],
+    "links": [
+     {
+      "targetUrl": "https://example.com/y",
+      "anchor": "why",
+      "isInternal": true,
+      "isNofollow": false
+     }
+    ],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "uppercase tags",
+   "html": "<HTML><HEAD><TITLE>Upper</TITLE><LINK REL=\"canonical\" HREF=\"/c\"></HEAD><BODY><H1>Big</H1><A HREF=\"/z\">Z</A></BODY></HTML>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "Upper",
+    "metaDescription": "",
+    "canonical": "/c",
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [
+     "Big"
+    ],
+    "headingOrder": [
+     1
+    ],
+    "wordCount": 1,
+    "javascriptShell": false,
+    "images": [],
+    "links": [
+     {
+      "targetUrl": "https://example.com/z",
+      "anchor": "Z",
+      "isInternal": true,
+      "isNofollow": false
+     }
+    ],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "noscript inside head",
+   "html": "<html><head><noscript><title>ns title</title></noscript><title>Real</title></head><body><p>x</p></body></html>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "Real",
+    "metaDescription": "",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [],
+    "headingOrder": [],
+    "wordCount": 1,
+    "javascriptShell": false,
+    "images": [],
+    "links": [],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "nested h1",
+   "html": "<body><h1>Outer <span>in</span></h1><h1>  </h1><h1>Second</h1></body>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "",
+    "metaDescription": "",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [
+     "Outer in",
+     "",
+     "Second"
+    ],
+    "headingOrder": [
+     1,
+     1,
+     1
+    ],
+    "wordCount": 3,
+    "javascriptShell": false,
+    "images": [],
+    "links": [],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "relative resolution and query sort",
+   "html": "<body><a href=\"../up?b=2&a=1#x\">up</a><a href=\"//cdn.example.com/a\">cdn</a><a href=\"https://www.example.com/w\">www</a><a href=\"http://example.com/insecure\">insecure</a><a href=\"ftp://example.com/f\">ftp</a><a href=\"  /spaced  \">spaced</a></body>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "",
+    "metaDescription": "",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [],
+    "headingOrder": [],
+    "wordCount": 1,
+    "javascriptShell": false,
+    "images": [],
+    "links": [
+     {
+      "targetUrl": "https://example.com/up?a=1&b=2",
+      "anchor": "up",
+      "isInternal": true,
+      "isNofollow": false
+     },
+     {
+      "targetUrl": "https://cdn.example.com/a",
+      "anchor": "cdn",
+      "isInternal": false,
+      "isNofollow": false
+     },
+     {
+      "targetUrl": "https://www.example.com/w",
+      "anchor": "www",
+      "isInternal": true,
+      "isNofollow": false
+     },
+     {
+      "targetUrl": "http://example.com/insecure",
+      "anchor": "insecure",
+      "isInternal": false,
+      "isNofollow": false
+     },
+     {
+      "targetUrl": "https://example.com/spaced",
+      "anchor": "spaced",
+      "isInternal": true,
+      "isNofollow": false
+     }
+    ],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "app shell root",
+   "html": "<body><div id=\"root\">Loading...</div><script src=\"/app.js\"></script></body>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "",
+    "metaDescription": "",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [],
+    "headingOrder": [],
+    "wordCount": 1,
+    "javascriptShell": true,
+    "images": [],
+    "links": [],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "app shell angular",
+   "html": "<app-root></app-root><script type=\"module\" src=\"/main.js\"></script>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "",
+    "metaDescription": "",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [],
+    "headingOrder": [],
+    "wordCount": 0,
+    "javascriptShell": true,
+    "images": [],
+    "links": [],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "not shell with heading",
+   "html": "<div id=\"root\"><h2>A server-rendered heading</h2></div><script src=\"/app.js\"></script>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "",
+    "metaDescription": "",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [],
+    "headingOrder": [
+     2
+    ],
+    "wordCount": 3,
+    "javascriptShell": false,
+    "images": [],
+    "links": [],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "not shell ld json",
+   "html": "<div id=\"root\"></div><script type=\"application/ld+json\">{}</script>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "",
+    "metaDescription": "",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [],
+    "headingOrder": [],
+    "wordCount": 0,
+    "javascriptShell": false,
+    "images": [],
+    "links": [],
+    "hasStructuredData": true,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "not shell no script",
+   "html": "<div id=\"root\"></div>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "",
+    "metaDescription": "",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [],
+    "headingOrder": [],
+    "wordCount": 0,
+    "javascriptShell": false,
+    "images": [],
+    "links": [],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "not shell long content",
+   "html": "<div id=\"root\">Readable server-rendered content Readable server-rendered content Readable server-rendered content Readable server-rendered content Readable server-rendered content Readable server-rendered content Readable server-rendered content Readable server-rendered content Readable server-rendered content Readable server-rendered content </div><script src=\"/app.js\"></script>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "",
+    "metaDescription": "",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [],
+    "headingOrder": [],
+    "wordCount": 30,
+    "javascriptShell": false,
+    "images": [],
+    "links": [],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  },
+  {
+   "name": "app root inside head is ignored",
+   "html": "<html><head><div id=\"root\"></div><script src=\"/a.js\"></script></head><body></body></html>",
+   "page_url": "https://example.com/blog/post",
+   "expected": {
+    "url": "https://example.com/blog/post",
+    "statusCode": 200,
+    "redirectUrl": null,
+    "responseTimeMs": 0,
+    "title": "",
+    "metaDescription": "",
+    "canonical": null,
+    "robotsMeta": null,
+    "ogTitle": null,
+    "ogDescription": null,
+    "ogImage": null,
+    "h1s": [],
+    "headingOrder": [],
+    "wordCount": 0,
+    "javascriptShell": false,
+    "images": [],
+    "links": [],
+    "hasStructuredData": false,
+    "hreflangTags": []
+   }
+  }
+ ],
+ "normalize_url": [
+  {
+   "url": "https://Example.COM/path/?b=2&a=1#section",
+   "base": "https://fallback.com",
+   "expected": "https://example.com/path/?a=1&b=2"
+  },
+  {
+   "url": "https://example.com/services/",
+   "base": null,
+   "expected": "https://example.com/services/"
+  },
+  {
+   "url": "mailto:test@example.com",
+   "base": null,
+   "expected": null
+  },
+  {
+   "url": "https://example.com",
+   "base": null,
+   "expected": "https://example.com/"
+  },
+  {
+   "url": "https://example.com:443/a",
+   "base": null,
+   "expected": "https://example.com/a"
+  },
+  {
+   "url": "http://example.com:80/a",
+   "base": null,
+   "expected": "http://example.com/a"
+  },
+  {
+   "url": "https://example.com:8443/a",
+   "base": null,
+   "expected": "https://example.com:8443/a"
+  },
+  {
+   "url": "/a/./b/../c",
+   "base": "https://example.com/x/y",
+   "expected": "https://example.com/a/c"
+  },
+  {
+   "url": "https://example.com/a b",
+   "base": null,
+   "expected": "https://example.com/a%20b"
+  },
+  {
+   "url": "https://example.com/?q=a%20b&z=",
+   "base": null,
+   "expected": "https://example.com/?q=a+b&z="
+  },
+  {
+   "url": "https://example.com/?",
+   "base": null,
+   "expected": "https://example.com/"
+  },
+  {
+   "url": "https://example.com/?b=1&a=2&a=1",
+   "base": null,
+   "expected": "https://example.com/?a=2&a=1&b=1"
+  },
+  {
+   "url": "https://example.com/café",
+   "base": null,
+   "expected": "https://example.com/caf%C3%A9"
+  },
+  {
+   "url": "https://example.com/%7Euser",
+   "base": null,
+   "expected": "https://example.com/%7Euser"
+  },
+  {
+   "url": "HTTPS://EXAMPLE.com/Path",
+   "base": null,
+   "expected": "https://example.com/Path"
+  },
+  {
+   "url": "https://example.com/?q=a+b",
+   "base": null,
+   "expected": "https://example.com/?q=a+b"
+  },
+  {
+   "url": "https://example.com/?q=%2F",
+   "base": null,
+   "expected": "https://example.com/?q=%2F"
+  },
+  {
+   "url": "https://example.com/?q=café",
+   "base": null,
+   "expected": "https://example.com/?q=caf%C3%A9"
+  },
+  {
+   "url": "https://example.com/?flag",
+   "base": null,
+   "expected": "https://example.com/?flag="
+  }
+ ],
+ "same_origin": [
+  {
+   "url": "https://www.example.com/products",
+   "origin": "https://example.com",
+   "expected": true
+  },
+  {
+   "url": "https://example.com/page",
+   "origin": "http://example.com",
+   "expected": true
+  },
+  {
+   "url": "https://example.org",
+   "origin": "https://example.com",
+   "expected": false
+  },
+  {
+   "url": "http://example.com/page",
+   "origin": "https://example.com",
+   "expected": false
+  },
+  {
+   "url": "https://example.com:8443/page",
+   "origin": "https://example.com",
+   "expected": false
+  },
+  {
+   "url": "https://sub.example.com/",
+   "origin": "https://example.com",
+   "expected": false
+  },
+  {
+   "url": "https://example.com/",
+   "origin": "https://www.example.com/",
+   "expected": true
+  }
+ ],
+ "robots": [
+  {
+   "text": "User-agent: *\nDisallow: /private\nAllow: /private/ok\nDisallow: /*.pdf$\nSitemap: https://example.com/sm.xml\nSitemap: /relative.xml",
+   "sitemaps": [
+    "https://example.com/sm.xml",
+    "/relative.xml"
+   ],
+   "allowed": [
+    [
+     "https://example.com/",
+     true
+    ],
+    [
+     "https://example.com/private",
+     false
+    ],
+    [
+     "https://example.com/private/x",
+     false
+    ],
+    [
+     "https://example.com/private/ok",
+     true
+    ],
+    [
+     "https://example.com/private/ok/x",
+     true
+    ],
+    [
+     "https://example.com/a.pdf",
+     false
+    ],
+    [
+     "https://example.com/a.pdf?x=1",
+     true
+    ],
+    [
+     "https://example.com/privateer",
+     false
+    ]
+   ]
+  },
+  {
+   "text": "User-agent: Octop-SEO-Audit\nDisallow: /\n\nUser-agent: *\nAllow: /",
+   "sitemaps": [],
+   "allowed": [
+    [
+     "https://example.com/",
+     false
+    ],
+    [
+     "https://example.com/x",
+     false
+    ]
+   ]
+  },
+  {
+   "text": "User-agent: googlebot\nDisallow: /\n\nUser-agent: *\nDisallow: /tmp/",
+   "sitemaps": [],
+   "allowed": [
+    [
+     "https://example.com/",
+     true
+    ],
+    [
+     "https://example.com/tmp/a",
+     false
+    ]
+   ]
+  },
+  {
+   "text": "User-agent: *\nDisallow: /a\nAllow: /a\n",
+   "sitemaps": [],
+   "allowed": [
+    [
+     "https://example.com/a",
+     true
+    ]
+   ]
+  },
+  {
+   "text": "User-agent: *\nDisallow:\n",
+   "sitemaps": [],
+   "allowed": [
+    [
+     "https://example.com/anything",
+     true
+    ]
+   ]
+  },
+  {
+   "text": "User-agent: *\nDisallow: /%7Euser\nDisallow: /caf%C3%A9\n",
+   "sitemaps": [],
+   "allowed": [
+    [
+     "https://example.com/~user/a",
+     true
+    ],
+    [
+     "https://example.com/caf%C3%A9/x",
+     false
+    ]
+   ]
+  },
+  {
+   "text": "# comment\nUser-agent: a\nUser-agent: *\nDisallow: /both # trailing\n",
+   "sitemaps": [],
+   "allowed": [
+    [
+     "https://example.com/both",
+     false
+    ],
+    [
+     "https://example.com/other",
+     true
+    ]
+   ]
+  },
+  {
+   "text": "User-agent: *\nDisallow: /search?\nDisallow: /*?sort=\n",
+   "sitemaps": [],
+   "allowed": [
+    [
+     "https://example.com/search?q=1",
+     false
+    ],
+    [
+     "https://example.com/search",
+     true
+    ],
+    [
+     "https://example.com/list?sort=asc",
+     false
+    ],
+    [
+     "https://example.com/list?page=2",
+     true
+    ]
+   ]
+  },
+  {
+   "text": "<html><body>Not a robots file</body></html>",
+   "sitemaps": [],
+   "allowed": [
+    [
+     "https://example.com/",
+     true
+    ]
+   ]
+  }
+ ]
+}
