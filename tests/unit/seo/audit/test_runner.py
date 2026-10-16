@@ -389,25 +389,28 @@ def test_the_render_sample_takes_page_templates_in_turns() -> None:
         }
 
     rows = [
+        row("/about"),
+        row("/guides/sizing"),
         row("/products/bikes/a"),
         row("/products/bikes/b"),
         row("/products/bikes/c"),
-        row("/guides/sizing"),
         row("/gone", status_code=404),
         row("/feed.xml", is_html=False),
         row("/"),
         row("/guides/fit"),
     ]
-    sample = render_sample(rows, f"{ORIGIN}/", max_pages=10)
+    # The crawl saw these templates in turns; the site has far more product pages.
+    sizes = {"/": 1, "/about": 1, "/guides/*": 3, "/products/*/*": 174}
+    sample = render_sample(rows, f"{ORIGIN}/", 10, sizes)
     assert [url.removeprefix(ORIGIN) for url in sample] == [
         "/",
         "/products/bikes/a",
         "/guides/sizing",
+        "/about",
         "/products/bikes/b",
-        "/guides/fit",
     ]
     # The budget's fifth, between five and twenty pages.
-    assert len(render_sample(rows, f"{ORIGIN}/", max_pages=200)) == 6
+    assert len(render_sample(rows, f"{ORIGIN}/", 200, sizes)) == 7
 
 
 async def test_a_restarted_process_resumes_without_repeating_work(project: Any) -> None:

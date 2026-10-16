@@ -305,6 +305,16 @@ class SeoAuditRepo:
             ).fetchone()
         return {**dict(row), "in_sitemap": bool(row["in_sitemap"])} if row else None
 
+    def cluster_sizes(self, audit_id: str) -> dict[str, int]:
+        """How many URLs of each page template the audit found, crawled or not."""
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                "SELECT cluster,COUNT(*) AS n FROM seo_audit_frontier WHERE audit_id=? "
+                "AND cluster IS NOT NULL GROUP BY cluster",
+                (audit_id,),
+            ).fetchall()
+        return {str(row["cluster"]): int(row["n"]) for row in rows}
+
     def pending_count(self, audit_id: str) -> int:
         with self._db.connect() as conn:
             row = conn.execute(

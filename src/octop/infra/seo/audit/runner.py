@@ -173,16 +173,30 @@ def facts_from_row(row: dict[str, Any]) -> PageFacts:
     )
 
 
-def render_sample(rows: list[dict[str, Any]], start_url: str, max_pages: int) -> list[str]:
-    """The pages to render: the start page, then one page per template in turns."""
+def render_sample(
+    rows: list[dict[str, Any]], start_url: str, max_pages: int, cluster_sizes: dict[str, int]
+) -> list[str]:
+    """The pages to render: the start page, then the page templates in turns, largest first.
+
+    A template's size is how many URLs of its shape the audit found, not how many it
+    crawled (the crawl takes templates in turns): 174 product pages go before an about page.
+    """
     limit = max(MIN_RENDERED_PAGES, min(MAX_RENDERED_PAGES, max_pages // 5))
+    eligible = [
+        row["url"]
+        for row in rows
+        if row["fetch_class"] == "ok" and row["status_code"] == 200 and row["is_html"]
+    ]
+    sample = [start_url] if start_url in eligible else []
     clusters: dict[str, list[str]] = defaultdict(list)
-    for row in sorted(rows, key=lambda row: row["url"] != start_url):
-        if row["fetch_class"] == "ok" and row["status_code"] == 200 and row["is_html"]:
-            clusters[path_cluster(row["url"])].append(row["url"])
-    sample: list[str] = []
+    for url in eligible:
+        if url != start_url:
+            clusters[path_cluster(url)].append(url)
+    largest_first = sorted(
+        clusters.items(), key=lambda item: -cluster_sizes.get(item[0], len(item[1]))
+    )
     for turn in range(limit):
-        for urls in clusters.values():
+        for _cluster, urls in largest_first:
             if turn < len(urls) and len(sample) < limit:
                 sample.append(urls[turn])
     return sample
@@ -342,7 +356,12 @@ class AuditJob:
         done = await _db(self.repo.renders, self.id)
         sample = [
             url
-            for url in render_sample(rows, start_url, int(self.audit["max_pages"]))
+            for url in render_sample(
+                rows,
+                start_url,
+                int(self.audit["max_pages"]),
+                await _db(self.repo.cluster_sizes, self.id),
+            )
             if url not in done
         ]
         if not sample:
