@@ -1041,6 +1041,11 @@
           "title": "Page is deep in the site structure",
           "explanation": "The page is 5 or more clicks from the start page. Deep pages are crawled less often and receive less link equity.",
           "how_to_fix": "Link to it from higher-level pages (hubs, category pages, navigation) to shorten the path to this page."
+        },
+        "not-in-sitemap": {
+          "title": "Indexable page missing from the sitemap",
+          "explanation": "The page is indexable, is its own canonical and is linked from the site, but none of the site's sitemaps lists it. Search engines can still find it through links, yet the sitemap is how the site tells them which pages it wants indexed, so a missing page is discovered and refreshed later.",
+          "how_to_fix": "Add the page's final canonical URL to the sitemap the site generates. If the page should not be indexed, make it noindex or canonicalize it instead of leaving it out silently."
         }
       },
       "errors": {

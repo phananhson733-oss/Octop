@@ -37,6 +37,7 @@ from octop.infra.seo.audit.rules import (
     PageFacts,
     find_broken_links,
     find_duplicates,
+    find_missing_from_sitemap,
     find_orphans,
     find_redirect_chains_and_loops,
     page_issues,
@@ -138,6 +139,7 @@ def facts_from_row(row: dict[str, Any]) -> PageFacts:
         is_indexable=row["is_indexable"],
         response_time_ms=row["response_time_ms"],
         crawl_depth=row["crawl_depth"],
+        in_sitemap=row["in_sitemap"],
     )
 
 
@@ -191,7 +193,7 @@ class AuditJob:
                 seeds=seeds,
             )
         )
-        self.audit.update(start_url=start_url, robots_text=robots_text)
+        self.audit.update(start_url=start_url, robots_text=robots_text, sitemap_count=len(seeds))
         self.phase = "crawl"
 
     async def _crawl(self, origin: str, robots: Robots) -> tuple[bool, bool]:
@@ -266,6 +268,8 @@ class AuditJob:
         # Orphans need the whole frontier and every page's real links.
         if complete and len(readable) == len(pages):
             issues += find_orphans(pages, links, start_url)
+        if self.audit["sitemap_count"]:
+            issues += find_missing_from_sitemap(pages.values())
         if rate_limited:
             issues.append(Issue("crawl-rate-limited", start_url))
         await self._fenced(

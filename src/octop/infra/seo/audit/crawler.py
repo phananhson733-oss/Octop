@@ -142,6 +142,7 @@ class CrawledPage:
             is_indexable=self.is_indexable,
             response_time_ms=self.response_time_ms,
             crawl_depth=self.crawl_depth,
+            in_sitemap=self.in_sitemap,
         )
 
 

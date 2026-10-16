@@ -276,12 +276,16 @@ class SeoAuditRepo:
         )
 
     def next_url(self, audit_id: str) -> dict[str, Any] | None:
-        """Link-discovered URLs before sitemap-only ones, first in first out."""
+        """Link-discovered URLs before sitemap-only ones, shallowest first.
+
+        Ordering by depth is what keeps the crawl breadth-first: a sitemap seed reached
+        by a link keeps its seeding id, so ``id`` alone replays the sitemap's order.
+        """
         with self._db.connect() as conn:
             row = conn.execute(
                 "SELECT url,depth,in_sitemap FROM seo_audit_frontier WHERE audit_id=? "
-                "AND state='pending' ORDER BY CASE source WHEN 'link' THEN 0 ELSE 1 END, id "
-                "LIMIT 1",
+                "AND state='pending' ORDER BY CASE source WHEN 'link' THEN 0 ELSE 1 END, "
+                "depth IS NULL, depth, id LIMIT 1",
                 (audit_id,),
             ).fetchone()
         return {**dict(row), "in_sitemap": bool(row["in_sitemap"])} if row else None

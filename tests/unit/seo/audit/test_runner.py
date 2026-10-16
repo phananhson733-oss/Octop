@@ -120,6 +120,43 @@ async def test_audit_crawls_the_site_and_reports_issues(project: Any) -> None:
     assert done["issue_counts"]["critical"] == 1
 
 
+async def test_the_crawl_goes_breadth_first_whatever_the_sitemap_order(project: Any) -> None:
+    audits, repos, user, project_id = project
+    sections = ["/bikes", "/guides", "/reviews"]
+    products = {section: [f"{section}/item-{i}" for i in range(5)] for section in sections}
+    # The sitemap lists every deep page before the sections, as many generators do.
+    listed = [path for section in sections for path in products[section]] + sections
+    sitemap = "".join(f"<url><loc>{ORIGIN}{path}</loc></url>" for path in listed)
+    routes: dict[str, Any] = {
+        f"{ORIGIN}/robots.txt": httpx.Response(200, text=f"Sitemap: {ORIGIN}/sitemap.xml"),
+        f"{ORIGIN}/sitemap.xml": httpx.Response(
+            200, headers={"content-type": "application/xml"}, text=f"<urlset>{sitemap}</urlset>"
+        ),
+        f"{ORIGIN}/": page("Home", *sections),
+    }
+    for section in sections:
+        routes[f"{ORIGIN}{section}"] = page(section, "/", *products[section])
+        for path in products[section]:
+            routes[f"{ORIGIN}{path}"] = page(path, section)
+    site = FakeSite(routes)
+    audit = await _start(project, max_pages=10)
+    runner = SeoAuditRunner(repos, client_factory=site.client)
+    runner.submit(audit["audit_id"])
+    await runner.wait(audit["audit_id"])
+
+    crawled = [
+        request.removeprefix(f"GET {ORIGIN}")
+        for request in site.requests
+        if request.startswith("GET") and "robots" not in request and "sitemap" not in request
+    ]
+    assert crawled[:4] == ["/", *sections]
+    assert len(crawled) == 10
+    # The home page is linked and crawled but missing from the sitemap.
+    issues = (await audits.issues(user, project_id))["issues"]
+    missing = {row["page_url"] for row in issues if row["issue_type"] == "not-in-sitemap"}
+    assert missing == {f"{ORIGIN}/"}
+
+
 async def test_a_restarted_process_resumes_without_repeating_work(project: Any) -> None:
     audits, repos, user, project_id = project
     gate = asyncio.Event()

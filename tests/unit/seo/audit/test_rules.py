@@ -10,6 +10,7 @@ from octop.infra.seo.audit.rules import (
     PageFacts,
     find_broken_links,
     find_duplicates,
+    find_missing_from_sitemap,
     find_orphans,
     find_redirect_chains_and_loops,
     page_issues,
@@ -331,4 +332,20 @@ def test_orphans_skip_the_start_page_linked_pages_and_redirect_targets() -> None
     assert [issue.page_url for issue in orphans] == [
         "https://example.com/self-linked",
         "https://example.com/orphan",
+    ]
+
+
+def test_missing_from_sitemap_means_indexable_self_canonical_and_unlisted() -> None:
+    listed = _page(url="https://example.com/listed", in_sitemap=True)
+    missing = _page(url="https://example.com/missing")
+    skipped = [
+        _page(url="https://example.com/noindex", is_indexable=False),
+        _page(url="https://example.com/canon", canonical_url="https://example.com/listed"),
+        _page(url="https://example.com/gone", status_code=404),
+        _page(url="https://example.com/old", status_code=301, redirect_url="https://example.com/"),
+        _page(url="https://example.com/file.pdf", is_html=False),
+    ]
+    issues = find_missing_from_sitemap([listed, missing, *skipped])
+    assert [(issue.issue_type, issue.page_url) for issue in issues] == [
+        ("not-in-sitemap", "https://example.com/missing")
     ]

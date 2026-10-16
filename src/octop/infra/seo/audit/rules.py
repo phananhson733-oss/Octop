@@ -45,6 +45,8 @@ ISSUE_SEVERITY: dict[str, Severity] = {
     "noindex-page": "info",
     "canonicalized-page": "info",
     "deep-page": "info",
+    # Octop additions, not in upstream's registry.
+    "not-in-sitemap": "warning",
 }
 SEVERITY_ORDER: dict[str, int] = {"critical": 0, "warning": 1, "info": 2}
 FINALIZE_TYPES = frozenset(
@@ -57,6 +59,7 @@ FINALIZE_TYPES = frozenset(
         "broken-internal-link",
         "orphan-page",
         "crawl-rate-limited",
+        "not-in-sitemap",
     }
 )
 
@@ -108,6 +111,7 @@ class PageFacts:
     is_indexable: bool = False
     response_time_ms: int = 0
     crawl_depth: int | None = None
+    in_sitemap: bool = False
 
 
 def _heading_skip(order: list[int]) -> bool:
@@ -319,6 +323,22 @@ def find_orphans(
         Issue("orphan-page", url)
         for url, page in pages.items()
         if url != start_url and _ok_html(page) and url not in inbound and url not in redirected
+    ]
+
+
+def find_missing_from_sitemap(pages: Iterable[PageFacts]) -> list[Issue]:
+    """Indexable pages that are their own canonical yet no sitemap lists.
+
+    Callers run it only when the site has a sitemap: without one, nothing is missing from it.
+    """
+    return [
+        Issue("not-in-sitemap", page.url)
+        for page in pages
+        if _ok_html(page)
+        and page.is_html
+        and page.is_indexable
+        and not page.in_sitemap
+        and (page.canonical_url or page.header_canonical_url or page.url) == page.url
     ]
 
 
