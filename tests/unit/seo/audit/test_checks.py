@@ -90,6 +90,16 @@ def test_structured_data_requirements() -> None:
     assert missing_required(documents) == ["Product: offers | review | aggregateRating"]
 
 
+def test_a_large_valid_block_is_valid() -> None:
+    offers = ",".join(
+        f'{{"@type": "Offer", "price": "{i}", "sku": "{"x" * 40}"}}' for i in range(5000)
+    )
+    block = f'{{"@type": "Product", "name": "Catalog", "offers": [{offers}]}}'
+    assert len(block) > 250_000
+    documents, invalid = parse_blocks([block])
+    assert (invalid, missing_required(documents)) == (0, [])
+
+
 def test_faq_questions_must_be_visible() -> None:
     documents, _ = parse_blocks(
         [

@@ -14,7 +14,6 @@ from collections.abc import Iterator
 from typing import Any
 
 MAX_BLOCKS = 20
-MAX_BLOCK_CHARS = 200_000
 MAX_REPORTED = 10
 
 # Each inner tuple is one requirement; several names mean any one of them will do.
@@ -48,7 +47,8 @@ def parse_blocks(blocks: list[str]) -> tuple[list[Any], int]:
         if not text:
             continue
         try:
-            documents.append(json.loads(text[:MAX_BLOCK_CHARS]))
+            # Parsed whole: a cut block never parses, and the page is at most 1 MiB anyway.
+            documents.append(json.loads(text))
         except ValueError:
             invalid += 1
     return documents, invalid
