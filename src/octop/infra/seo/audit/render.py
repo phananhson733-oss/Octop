@@ -276,7 +276,9 @@ class ChromiumRenderer:
         except Exception as exc:  # noqa: BLE001 - one page must not stop the render phase
             result.error = _short(exc)
         finally:
-            await context.close()
+            # After a browser crash closing fails too; the page is already marked failed.
+            with suppress(Exception):
+                await context.close()
         return result
 
 

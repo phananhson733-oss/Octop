@@ -323,8 +323,9 @@ class _Route:
 class _Context:
     """A Playwright context whose page load sends ``routes`` through the route handler."""
 
-    def __init__(self, routes: list[_Route]) -> None:
+    def __init__(self, routes: list[_Route], crash: Exception | None = None) -> None:
         self.routes = routes
+        self.crash = crash
         self.handler: Any = None
         self.closed = False
 
@@ -343,6 +344,8 @@ class _Context:
             async def goto(self, _url: str, **_kwargs: Any) -> Any:
                 for route in context.routes:
                     await context.handler(route)
+                if context.crash is not None:
+                    raise context.crash
                 return SimpleNamespace(status=200)
 
             async def wait_for_load_state(self, *_args: Any, **_kwargs: Any) -> None:
@@ -357,6 +360,8 @@ class _Context:
         return _Page()
 
     async def close(self) -> None:
+        if self.crash is not None:
+            raise RuntimeError("Target page, context or browser has been closed")
         self.closed = True
 
 
@@ -390,6 +395,11 @@ async def test_a_page_cut_off_at_the_request_cap_is_not_compared() -> None:
     # The "not found" state it shows came from refused requests: a failed render, no more.
     issues = find_render_problems({URL: HTML}, {URL: render_record(rendered, URL, set())})
     assert [issue.issue_type for issue in issues] == ["render-failed"]
+
+
+async def test_a_browser_crash_fails_the_page_not_the_audit() -> None:
+    rendered = await _renderer(_Context([], crash=RuntimeError("Target crashed"))).render(URL)
+    assert rendered.error == "Target crashed"
 
 
 async def test_the_process_runs_one_browser_at_a_time(monkeypatch: pytest.MonkeyPatch) -> None:
