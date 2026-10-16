@@ -201,19 +201,25 @@ class ChromiumRenderer:
             )
         except Exception as exc:  # noqa: BLE001 - a crashed browser fails the page, not the audit
             return Rendered(error=_short(exc))
+        result = Rendered()
         requests = 0
+        capped = False
 
         async def guard(route: Any) -> None:
-            nonlocal requests
+            nonlocal requests, capped
             request = route.request
             parts = urlsplit(request.url)
-            requests += 1
             if (
                 request.resource_type in _SKIPPED_RESOURCES
                 or parts.scheme not in {"http", "https"}
-                or requests > MAX_REQUESTS_PER_PAGE
                 or not await self._guard.allows(parts.hostname or "")
             ):
+                await route.abort()
+                return
+            # Only requests the page really makes count toward the cap.
+            requests += 1
+            if requests > MAX_REQUESTS_PER_PAGE:
+                capped = True
                 await route.abort()
                 return
             # The site's secret audit header goes to the site alone, never to third parties.
@@ -222,7 +228,6 @@ class ChromiumRenderer:
             else:
                 await route.continue_()
 
-        result = Rendered()
         try:
             await context.route("**/*", guard)
             await context.add_init_script(_TRACE_SCRIPT)
@@ -255,6 +260,13 @@ class ChromiumRenderer:
                 "main_text",
             ):
                 setattr(result, key, data.get(key, getattr(result, key)))
+            if capped:
+                # Requests past the cap were refused, so the page may show a state it
+                # only reached because its own data never arrived: nothing to compare.
+                result.error = (
+                    f"stopped after {MAX_REQUESTS_PER_PAGE} requests; the page did not "
+                    "finish loading"
+                )
         except Exception as exc:  # noqa: BLE001 - one page must not stop the render phase
             result.error = _short(exc)
         finally:

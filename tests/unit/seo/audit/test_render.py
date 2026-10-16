@@ -1,11 +1,17 @@
 """Rendered pages compared with their HTML, and the guard on the browser's requests."""
 
 from dataclasses import replace
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
 
-from octop.infra.seo.audit.render import _HostGuard
+from octop.infra.seo.audit.render import (
+    MAX_REQUESTS_PER_PAGE,
+    ChromiumRenderer,
+    _HostGuard,
+    render_record,
+)
 from octop.infra.seo.audit.rules import PageFacts, find_render_problems
 
 URL = "https://example.com/products/bikes/strider"
@@ -278,3 +284,87 @@ async def test_the_browser_may_only_reach_public_addresses() -> None:
     }
     # One lookup per host, and none for IP literals or internal names.
     assert lookups == ["example.com", "mixed.example", "cdn.example", "missing.example"]
+
+
+class _Route:
+    def __init__(self, url: str, resource_type: str = "fetch") -> None:
+        self.request = SimpleNamespace(url=url, resource_type=resource_type, headers={})
+        self.outcome: str | None = None
+
+    async def abort(self) -> None:
+        self.outcome = "aborted"
+
+    async def continue_(self, headers: dict[str, str] | None = None) -> None:
+        self.outcome = "continued"
+
+
+class _Context:
+    """A Playwright context whose page load sends ``routes`` through the route handler."""
+
+    def __init__(self, routes: list[_Route]) -> None:
+        self.routes = routes
+        self.handler: Any = None
+        self.closed = False
+
+    async def route(self, _pattern: str, handler: Any) -> None:
+        self.handler = handler
+
+    async def add_init_script(self, _script: str) -> None:
+        pass
+
+    async def new_page(self) -> Any:
+        context = self
+
+        class _Page:
+            url = URL
+
+            async def goto(self, _url: str, **_kwargs: Any) -> Any:
+                for route in context.routes:
+                    await context.handler(route)
+                return SimpleNamespace(status=200)
+
+            async def wait_for_load_state(self, *_args: Any, **_kwargs: Any) -> None:
+                pass
+
+            async def wait_for_timeout(self, _ms: int) -> None:
+                pass
+
+            async def evaluate(self, _script: str, _details: bool) -> dict[str, Any]:
+                return {"title": "Product Not Found (404)", "robots": "noindex", "h1s": []}
+
+        return _Page()
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def _renderer(context: _Context) -> ChromiumRenderer:
+    async def new_context(**_kwargs: Any) -> _Context:
+        return context
+
+    async def resolve(_host: str, _port: int) -> list[str]:
+        return ["93.184.216.34"]
+
+    browser = SimpleNamespace(version="130.0", new_context=new_context)
+    return ChromiumRenderer(browser, "example.com", resolve)
+
+
+async def test_requests_the_browser_skips_do_not_count_toward_the_cap() -> None:
+    images = [
+        _Route(f"https://example.com/i/{i}.jpg", "image") for i in range(MAX_REQUESTS_PER_PAGE)
+    ]
+    data = _Route("https://example.com/api/product")
+    rendered = await _renderer(_Context([*images, data])).render(URL)
+    assert rendered.error is None
+    assert data.outcome == "continued"
+    assert {route.outcome for route in images} == {"aborted"}
+
+
+async def test_a_page_cut_off_at_the_request_cap_is_not_compared() -> None:
+    routes = [_Route(f"https://example.com/api/{i}") for i in range(MAX_REQUESTS_PER_PAGE + 1)]
+    rendered = await _renderer(_Context(routes)).render(URL)
+    assert (routes[-2].outcome, routes[-1].outcome) == ("continued", "aborted")
+    assert rendered.error is not None and f"{MAX_REQUESTS_PER_PAGE} requests" in rendered.error
+    # The "not found" state it shows came from refused requests: a failed render, no more.
+    issues = find_render_problems({URL: HTML}, {URL: render_record(rendered, URL, set())})
+    assert [issue.issue_type for issue in issues] == ["render-failed"]
