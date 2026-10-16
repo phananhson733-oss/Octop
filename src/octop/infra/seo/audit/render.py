@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Collection
 from contextlib import AbstractAsyncContextManager, asynccontextmanager, suppress
 from dataclasses import asdict, dataclass, field
 from typing import Any, Protocol
@@ -30,7 +30,13 @@ from octop.infra.seo.audit.net import (
     resolve_host,
     site_headers,
 )
-from octop.infra.seo.audit.urls import is_blocked_host, is_public_ip, normalize_host
+from octop.infra.seo.audit.urls import (
+    is_blocked_host,
+    is_public_ip,
+    is_same_origin,
+    normalize_host,
+    normalize_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -41,6 +47,7 @@ NETWORK_IDLE_MS = 5_000
 SETTLE_MS = 1_500
 MAX_REQUESTS_PER_PAGE = 300
 MAX_TRACE_STATES = 200
+MAX_RENDERED_ONLY = 100
 _SKIPPED_RESOURCES = frozenset({"image", "media", "font"})
 _VIEWPORT = {"width": 412, "height": 915}
 
@@ -70,9 +77,13 @@ _TRACE_SCRIPT = f"""
 }})();
 """
 
+# ``details`` adds the heading outline and the main region's visible text (inspection).
 _EXTRACT_SCRIPT = """
-() => {
+(details) => {
   const text = document.body ? document.body.innerText : '';
+  const clean = (value) => (value || '').replace(/\\s+/g, ' ').trim();
+  const main = document.querySelector('main') || document.querySelector('[role="main"]')
+    || document.querySelector('article') || document.body;
   const canonical = document.querySelector('link[rel~="canonical" i][href]');
   return {
     title: document.title,
@@ -90,6 +101,12 @@ _EXTRACT_SCRIPT = """
     unlinked: document.querySelectorAll('a:not([href]), [role="link"]:not([href])').length,
     json_ld_blocks: document.querySelectorAll('script[type="application/ld+json" i]').length,
     trace: window.__octopSeoTrace || [],
+    outline: details
+      ? Array.from(document.querySelectorAll('h1, h2, h3, h4, h5, h6'),
+          (h) => [Number(h.tagName[1]), clean(h.textContent).slice(0, 150)])
+          .filter((entry) => entry[1]).slice(0, 60)
+      : [],
+    main_text: details && main ? main.innerText.slice(0, 40000) : '',
   };
 }
 """
@@ -113,13 +130,17 @@ class Rendered:
     trace: list[dict[str, Any]] = field(default_factory=list)
     load_timed_out: bool = False
     error: str | None = None
+    # Only with ``details``: [level, text] per heading, and the main region's visible
+    # text (innerText: collapsed accordions and other hidden text are left out).
+    outline: list[list[Any]] = field(default_factory=list)
+    main_text: str = ""
 
     def to_json(self) -> dict[str, Any]:
         return asdict(self)
 
 
 class Renderer(Protocol):
-    async def render(self, url: str) -> Rendered: ...
+    async def render(self, url: str, *, details: bool = False) -> Rendered: ...
 
 
 class RenderUnavailable(Exception):
@@ -165,7 +186,7 @@ class ChromiumRenderer:
     def _own_site(self, host: str) -> bool:
         return normalize_host(host).removeprefix("www.") == self._site
 
-    async def render(self, url: str) -> Rendered:
+    async def render(self, url: str, *, details: bool = False) -> Rendered:
         try:
             context = await self._browser.new_context(
                 user_agent=(
@@ -218,7 +239,7 @@ class ChromiumRenderer:
             with suppress(Exception):
                 await page.wait_for_load_state("networkidle", timeout=NETWORK_IDLE_MS)
             await page.wait_for_timeout(SETTLE_MS)
-            data = await page.evaluate(_EXTRACT_SCRIPT)
+            data = await page.evaluate(_EXTRACT_SCRIPT, details)
             result.final_url = page.url
             for key in (
                 "title",
@@ -230,6 +251,8 @@ class ChromiumRenderer:
                 "unlinked",
                 "json_ld_blocks",
                 "trace",
+                "outline",
+                "main_text",
             ):
                 setattr(result, key, data.get(key, getattr(result, key)))
         except Exception as exc:  # noqa: BLE001 - one page must not stop the render phase
@@ -237,6 +260,37 @@ class ChromiumRenderer:
         finally:
             await context.close()
         return result
+
+
+def render_record(
+    rendered: Rendered, page_url: str, html_links: Collection[str] | None
+) -> dict[str, Any]:
+    """A render as the comparison rules read it: canonical normalized, links reduced.
+
+    ``html_links`` are the internal links of the page's HTML, or None when that list is
+    incomplete (a cut-off body); then no link is called rendered-only.
+    """
+    record = rendered.to_json()
+    links = record.pop("links")
+    if rendered.canonical:
+        record["canonical"] = normalize_url(rendered.canonical) or rendered.canonical
+    if rendered.error is not None:
+        return record
+    internal = list(
+        dict.fromkeys(
+            target
+            for target in (normalize_url(link) for link in links)
+            if target and is_same_origin(target, page_url)
+        )
+    )
+    record["internal_links"] = len(internal)
+    record["rendered_only"] = None
+    if html_links is not None:
+        only = [link for link in internal if link not in html_links and link != page_url]
+        record["rendered_only_count"] = len(only)
+        record["rendered_only"] = only[:MAX_RENDERED_ONLY]
+        record["link_status"] = {}
+    return record
 
 
 def _short(exc: BaseException) -> str:

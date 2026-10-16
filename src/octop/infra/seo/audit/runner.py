@@ -34,7 +34,12 @@ from octop.infra.seo.audit.crawler import (
     seeds_for,
 )
 from octop.infra.seo.audit.net import USER_AGENT, crawler_client
-from octop.infra.seo.audit.render import Rendered, RendererFactory, RenderUnavailable
+from octop.infra.seo.audit.render import (
+    Rendered,
+    RendererFactory,
+    RenderUnavailable,
+    render_record,
+)
 from octop.infra.seo.audit.robots import Robots, parse_robots
 from octop.infra.seo.audit.rules import (
     FINALIZE_TYPES,
@@ -54,8 +59,6 @@ from octop.infra.seo.audit.rules import (
 from octop.infra.seo.audit.throttle import CrawlThrottle
 from octop.infra.seo.audit.urls import (
     TargetBlocked,
-    is_same_origin,
-    normalize_url,
     origin_of,
     path_cluster,
 )
@@ -76,7 +79,6 @@ MIN_RENDERED_PAGES = 5
 MAX_RENDERED_PAGES = 20
 # Internal links only the rendered DOM has, which the crawl never fetched, get a status check.
 MAX_RENDERED_LINK_CHECKS = 30
-MAX_STORED_RENDERED_ONLY = 100
 
 
 class Fenced(Exception):
@@ -434,26 +436,9 @@ async def _stored_render(
     rendered: Rendered, row: dict[str, Any], checks: _LinkChecks
 ) -> dict[str, Any]:
     """What finalize needs from one render: the page state, and links the HTML lacks."""
-    stored = rendered.to_json()
-    links = stored.pop("links")
-    canonical = rendered.canonical
-    stored["canonical"] = (normalize_url(canonical) or canonical) if canonical else None
-    if rendered.error is not None:
-        return stored
-    internal = list(
-        dict.fromkeys(
-            target
-            for target in (normalize_url(link) for link in links)
-            if target and is_same_origin(target, row["url"])
-        )
-    )
-    stored["internal_links"] = len(internal)
-    stored["rendered_only"] = None
-    if _links_complete(row):
-        html_links = set(row["internal_links"])
-        only = [link for link in internal if link not in html_links and link != row["url"]]
-        stored["rendered_only_count"] = len(only)
-        stored["rendered_only"] = only[:MAX_STORED_RENDERED_ONLY]
+    html_links = set(row["internal_links"]) if _links_complete(row) else None
+    stored = render_record(rendered, row["url"], html_links)
+    if stored.get("rendered_only"):
         stored["link_status"] = await checks.statuses(stored["rendered_only"])
     return stored
 

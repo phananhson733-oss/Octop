@@ -142,6 +142,8 @@ class CrawledPage:
     head_broken_by: str | None = None
     misplaced_head: list[str] = field(default_factory=list)
     body_truncated: bool = False
+    # The full analysis (body text, JSON-LD) for a caller that shows the page; not stored.
+    analysis: PageAnalysis | None = field(default=None, repr=False, compare=False)
 
     def facts(self) -> PageFacts:
         return PageFacts(
@@ -328,6 +330,7 @@ async def _page_from_response(
         logger.warning("SEO audit could not parse %s", url, exc_info=True)
         return page
     analysis = analyzed.analysis
+    page.analysis = analysis
     directives = ",".join(v for v in (analysis.robots_meta, page.x_robots_tag) if v).lower()
     page.is_html = True
     page.is_indexable = "noindex" not in directives

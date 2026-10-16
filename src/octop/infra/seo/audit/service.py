@@ -14,6 +14,7 @@ from pydantic import ValidationError
 from octop.i18n import tr
 from octop.infra.db.repos.seo_audit import SeoAuditRepo
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.seo.audit.inspect import inspect_page
 from octop.infra.seo.audit.rules import ISSUE_SEVERITY, SEVERITY_ORDER, sort_issues
 from octop.infra.seo.audit.urls import TargetBlocked, validate_start_url
 from octop.infra.seo.models import AuditCreate
@@ -35,6 +36,19 @@ def _rejected(code: ErrorCode, reason: str, locale: str) -> OctopError:
 
 def _bare_host(host: str | None) -> str:
     return (host or "").lower().removeprefix("www.")
+
+
+def _checked_url(value: str, own_domain: str | None, locale: str) -> str:
+    """A public http(s) URL, on ``own_domain`` (with or without www) when one is given."""
+    try:
+        url = validate_start_url(value)
+    except TargetBlocked as exc:
+        raise _rejected(ErrorCode.SEO_INVALID_INPUT, "not_public", locale) from exc
+    except ValueError as exc:
+        raise _rejected(ErrorCode.SEO_INVALID_INPUT, "invalid_url", locale) from exc
+    if own_domain is not None and _bare_host(urlsplit(url).hostname) != _bare_host(own_domain):
+        raise _rejected(ErrorCode.SEO_INVALID_INPUT, "other_site", locale)
+    return url
 
 
 def issue_descriptor(issue_type: str, locale: str) -> dict[str, str]:
@@ -88,14 +102,11 @@ class SeoAuditService:
             command = AuditCreate.model_validate(kwargs)
         except ValidationError as exc:
             raise OctopError.localized(ErrorCode.SEO_INVALID_INPUT) from exc
-        try:
-            url = validate_start_url(command.start_url or project["domain"])
-        except TargetBlocked as exc:
-            raise _rejected(ErrorCode.SEO_INVALID_INPUT, "not_public", locale) from exc
-        except ValueError as exc:
-            raise _rejected(ErrorCode.SEO_INVALID_INPUT, "invalid_url", locale) from exc
-        if own_site_only and _bare_host(urlsplit(url).hostname) != _bare_host(project["domain"]):
-            raise _rejected(ErrorCode.SEO_INVALID_INPUT, "other_site", locale)
+        url = _checked_url(
+            command.start_url or project["domain"],
+            project["domain"] if own_site_only else None,
+            locale,
+        )
         status, audit = await _db(
             self.repo.create,
             {
@@ -182,6 +193,13 @@ class SeoAuditService:
             and url_contains in page["url"]
         ]
         return {"audit": audit, "pages": pages}
+
+    async def inspect(
+        self, user_id: int, project_id: str, url: str, *, render: bool = True, locale: str = "en"
+    ) -> dict[str, Any]:
+        """Fetch one page of the project's own site live (and render it); nothing is stored."""
+        project = await self.seo._project(user_id, project_id)
+        return await inspect_page(_checked_url(url, project["domain"], locale), render=render)
 
     async def cancel(self, user_id: int, project_id: str, audit_id: str) -> dict[str, Any]:
         """Stop an audit; pages already crawled stay readable."""
