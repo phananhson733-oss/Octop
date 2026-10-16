@@ -893,8 +893,8 @@
       "issues": {
         "blocked-page": {
           "title": "Crawler was blocked",
-          "explanation": "The site answered with a bot challenge or an access denial (for example a Cloudflare challenge or a 403) instead of the page. The page is not reported as broken, but it could not be audited, and search engine crawlers may meet the same friction.",
-          "how_to_fix": "If you own the site, allow the \"Octop-SEO-Audit\" user agent in your firewall or bot protection (on Cloudflare: a WAF custom rule that skips bot protection when the user agent contains \"Octop-SEO-Audit\"; some free plans need bot protection relaxed instead), then run the audit again."
+          "explanation": "The site answered with a bot challenge or an access denial (for example a Cloudflare challenge, a Vercel bot protection 429 challenge or a 403) instead of the page. The page is not reported as broken, but it could not be audited. Verified search engine crawlers are usually let through; check with URL Inspection in Search Console that Google can fetch it.",
+          "how_to_fix": "If you own the site, let the crawler through your firewall or bot protection, then run the audit again. The safest way is a secret header: an Octop admin sets a header only Octop knows for this site in the OCTOP_SEO_AUDIT_HEADERS environment variable, and a firewall rule skips bot protection when it is present (Vercel: a firewall custom rule with the Bypass action; Cloudflare: a WAF custom rule with the Skip action). Allowing the \"Octop-SEO-Audit\" user agent also works, but anyone can send that user agent."
         },
         "javascript-rendering-suspected": {
           "title": "Content may require JavaScript",

@@ -248,6 +248,24 @@ async def test_a_blocked_start_url_fails_the_audit(project: Any) -> None:
     )
 
 
+async def test_a_site_behind_vercel_bot_protection_is_blocked_not_rate_limited(
+    project: Any,
+) -> None:
+    audits, repos, user, project_id = project
+    challenge = httpx.Response(429, headers={"x-vercel-mitigated": "challenge"})
+    site = FakeSite({f"{ORIGIN}/{path}": challenge for path in ("", "robots.txt", "sitemap.xml")})
+    audit = await _start(project)
+    runner = SeoAuditRunner(repos, client_factory=site.client)
+    runner.submit(audit["audit_id"])
+    await runner.wait(audit["audit_id"])
+    done = await audits.get(user, project_id, audit["audit_id"])
+    assert (done["status"], done["pages_crawled"], done["rate_limited"]) == ("completed", 1, 0)
+    issues = await audits.issues(user, project_id, audit["audit_id"])
+    assert [row["issue_type"] for row in issues["summary"]] == ["blocked-page"]
+    # One request for the page itself: a challenge is not retried.
+    assert site.requests.count(f"GET {ORIGIN}/") == 1
+
+
 async def test_start_rules(project: Any, context: Any) -> None:
     audits, repos, user, project_id = project
     _service, _repos, _user, other = context

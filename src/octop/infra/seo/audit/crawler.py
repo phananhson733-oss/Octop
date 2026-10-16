@@ -62,6 +62,11 @@ _CHALLENGE_MARKERS = (
 )
 
 
+def _vercel_challenge(response: httpx.Response) -> bool:
+    """Vercel answers its bot challenge with 429 and ``x-vercel-mitigated: challenge``."""
+    return str(response.headers.get("x-vercel-mitigated", "")).lower() == "challenge"
+
+
 def classify_fetch(status_code: int, mitigated: bool, body_snippet: str) -> str:
     if status_code == 0:
         return "error"
@@ -184,6 +189,18 @@ async def crawl_page(
             async with client.stream("GET", url, headers={"Accept": ACCEPT_HTML}) as response:
                 # Measured to the headers of the last attempt, so backoff never looks slow.
                 elapsed = int((time.monotonic() - sent) * 1000)
+                if response.status_code == 429 and _vercel_challenge(response):
+                    # Vercel's bot protection: retrying cannot pass it, so it is a block.
+                    throttle.recovered()
+                    return CrawledPage(
+                        url,
+                        429,
+                        "blocked",
+                        elapsed,
+                        depth,
+                        in_sitemap,
+                        x_robots_tag=response.headers.get("x-robots-tag"),
+                    )
                 if response.status_code == 429:
                     rate_limited = attempt > 1
                     if throttle.backoff(attempt, response.headers.get("retry-after")):

@@ -546,6 +546,13 @@ function auditNotices(
       type: "warning",
       message: t("seo.auditRateLimited"),
     });
+  const blocked = pages.filter((page) => page.fetch_class === "blocked").length;
+  if (blocked)
+    notices.push({
+      key: "blocked",
+      type: "warning",
+      message: t("seo.auditBlocked", { count: blocked }),
+    });
   if (audit.status === "completed" && audit.pages_crawled === 0)
     notices.push({
       key: "nothing",

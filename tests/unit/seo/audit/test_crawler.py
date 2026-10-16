@@ -136,6 +136,23 @@ async def test_crawl_page_retries_a_429() -> None:
     assert (crawled.status_code, crawled.rate_limited) == (200, True)
 
 
+async def test_crawl_page_treats_a_vercel_challenge_as_blocked() -> None:
+    site = FakeSite(
+        {f"{ORIGIN}/": httpx.Response(429, headers={"x-vercel-mitigated": "challenge"})}
+    )
+    throttle = _throttle()
+    async with site.client() as client:
+        crawled = await crawl_page(client, f"{ORIGIN}/", 0, False, throttle)
+    assert crawled is not None
+    assert (crawled.status_code, crawled.fetch_class, crawled.rate_limited) == (
+        429,
+        "blocked",
+        False,
+    )
+    assert site.requests == [f"GET {ORIGIN}/"]
+    assert (throttle.consecutive_rate_limits, throttle.cooldown) == (0, 0.0)
+
+
 async def test_crawl_page_classifies_blocks_and_failures() -> None:
     def fail(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("refused", request=request)

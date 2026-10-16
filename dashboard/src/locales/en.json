@@ -6707,6 +6707,7 @@
     "auditCancelledPartial": "This audit was cancelled. Results cover only the pages crawled before that, and the cross-page checks (duplicates, broken links, orphans) did not run.",
     "auditCancelling": "Cancelling: the audit stops after the page it is fetching.",
     "auditRateLimited": "The site kept answering 429 Too Many Requests, so the crawl stopped early. Results are incomplete and orphan pages were not checked.",
+    "auditBlocked": "{{count}} pages were stopped by the site's bot protection or firewall (not rate limiting) and could not be audited. See the issue \"Crawler was blocked\" for how to let the crawler through.",
     "auditNothingCrawled": "No page was crawled. robots.txt may disallow the start URL for every crawler, or the start URL is outside the site.",
     "auditPageLimit": "The crawl reached its {{max}}-page limit with {{discovered}} URLs found, so some pages were not checked and orphan pages were not reported. Run again with a higher limit for fuller coverage.",
     "auditJsShells": "Some pages look like JavaScript app shells. This audit reads the HTML the server sends and does not run JavaScript, so their content checks were skipped."

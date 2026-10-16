@@ -6707,6 +6707,7 @@
     "auditCancelledPartial": "这次审计已取消，结果只覆盖取消前爬到的页面，跨页面检查（重复、死链、孤立页面）没有执行。",
     "auditCancelling": "正在取消：抓完当前这一页后停止。",
     "auditRateLimited": "网站持续返回 429 请求过多，爬取提前停止。结果不完整，也没有检查孤立页面。",
+    "auditBlocked": "有 {{count}} 个页面被网站的机器人防护或防火墙拦下（不是限流），没能审计。放行办法见问题「爬虫被拦截」。",
     "auditNothingCrawled": "一个页面都没爬到：可能 robots.txt 禁止所有爬虫访问起始网址，或起始网址不在该网站内。",
     "auditPageLimit": "爬取达到 {{max}} 页上限，共发现 {{discovered}} 个网址，部分页面没有检查，也没有报告孤立页面。想覆盖更全，可调高上限再跑一次。",
     "auditJsShells": "有些页面像是 JavaScript 应用外壳。本审计只读服务器返回的 HTML，不执行 JavaScript，这些页面跳过了内容类检查。"

@@ -100,3 +100,13 @@ OpenSEO登录后界面现场取证、真实DataForSEO费用与供应商响应质
 - **表。** 新增 `seo_audits`、`seo_audit_frontier`、`seo_audit_pages`、`seo_audit_issues`，都是新表，写在 `seo_workbench.sql` / `.pg.sql` 里，版本号仍是 20。
 
 验证：`make all` 中格式、Ruff、mypy（580 个文件）通过，pytest 4497 通过、17 跳过、3 失败，失败的仍是本机缺 Linux `/proc` 的飞牛 NAS 测试；审计单元测试 154 项（含上游样本对照、SSRF、限流、规则、爬虫、断点续跑、取消、删除、认领失效）和 HTTP 集成测试通过；同一批 SEO 单元测试在本机临时 PostgreSQL 17 上跑，审计部分全部通过（R1 的 `test_reference_fallback_threshold` 在 PG 上失败，原因是三个供应商请求并发发出、测试却断言了顺序，与审计无关）；前端 `tsc -b`、eslint、`npm run build` 通过，SEO 相关 vitest 17 项通过。真实爬取：对 example.com 跑通一次，1 页、4 条警告，与页面实际内容相符。
+
+### 2026-10-16 补：被机器人防护拦下，以及按密钥请求头放行
+
+线上第一次审计（shortsbinge.com）只抓到首页：网站开着 Vercel 的机器人防护，对首页、`robots.txt`、`sitemap.xml` 一律回 429 加 `x-vercel-mitigated: challenge`。照上游的做法，429 一律算限流，爬虫退避了约 3.5 分钟才停，页面写的是「被限流」。用户定了两件事：
+
+- **Vercel 质询算被拦下。** 429 带 `x-vercel-mitigated: challenge` 时不再退避重试，这一页记为 blocked（问题「爬虫被拦截」），审计不标限流；结果上方写明有几页被机器人防护或防火墙拦下。Cloudflare 那边照上游不变（上游注释：Cloudflare 的限流规则也会带 `cf-mitigated`）。这是与上游的第 ⑥ 处差异。
+- **按密钥请求头放行。** 环境变量 `OCTOP_SEO_AUDIT_HEADERS`（JSON，网站 → 请求头）给指定网站的每个请求加上请求头，只发给这个网站和它的 www 形式，跳到别的主机时不带；网站的防火墙按这个头跳过机器人防护。值只在环境变量里，不进库、不进日志；写错的 JSON 记一条不含值的警告后忽略。每次审计开始时读一次。「爬虫被拦截」的修法也改成先推荐这种做法，按 User-Agent 放行留作备选（别人能冒充）。
+
+验证：审计单元测试 161 项通过（新增 Vercel 质询判为拦下、整站被质询的审计不标限流且不重试、请求头只发给本站和 www、从环境变量读取、写错的配置被忽略且日志里没有值）。
+

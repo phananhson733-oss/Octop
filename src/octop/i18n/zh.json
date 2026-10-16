@@ -893,8 +893,8 @@
       "issues": {
         "blocked-page": {
           "title": "爬虫被拦截",
-          "explanation": "网站返回的是机器人验证或拒绝访问（例如 Cloudflare 验证页或 403），而不是页面本身。这里不把它算作坏页，但这个页面没能审计，搜索引擎的爬虫也可能遇到同样的阻碍。",
-          "how_to_fix": "如果是你的网站，请在防火墙或机器人防护里放行 User-Agent「Octop-SEO-Audit」（Cloudflare：加一条 WAF 自定义规则，User-Agent 包含「Octop-SEO-Audit」时跳过机器人防护；部分免费套餐只能调低机器人防护），然后重新审计。"
+          "explanation": "网站返回的是机器人验证或拒绝访问（例如 Cloudflare 验证页、Vercel 机器人防护的 429 质询或 403），而不是页面本身。这里不把它算作坏页，但这个页面没能审计。经过验证的搜索引擎爬虫一般会被放行，最好在 Search Console 用网址检查确认 Google 能正常抓取。",
+          "how_to_fix": "如果是你的网站，在防火墙或机器人防护里给爬虫放行，然后重新审计。最稳妥的是按密钥请求头放行：Octop 管理员在环境变量 OCTOP_SEO_AUDIT_HEADERS 里给这个网站配一个只有 Octop 知道的请求头，防火墙加一条「带这个头就跳过机器人防护」的规则（Vercel：防火墙自定义规则，动作 Bypass；Cloudflare：WAF 自定义规则，动作 Skip）。也可以按 User-Agent「Octop-SEO-Audit」放行，但别人能冒充这个 User-Agent。"
         },
         "javascript-rendering-suspected": {
           "title": "内容可能依赖 JavaScript",

@@ -1,11 +1,19 @@
 """The crawler connects only to public addresses, whatever a hostname resolves to."""
 
+import json
+import logging
 from typing import Any
 
 import httpcore
+import httpx
 import pytest
 
-from octop.infra.seo.audit.net import USER_AGENT, GuardedBackend, crawler_client
+from octop.infra.seo.audit.net import (
+    SITE_HEADERS_ENV,
+    USER_AGENT,
+    GuardedBackend,
+    crawler_client,
+)
 from octop.infra.seo.audit.urls import TargetBlocked, is_public_ip, validate_start_url
 
 
@@ -108,3 +116,50 @@ async def test_client_sends_its_user_agent_and_never_follows_redirects() -> None
         assert client.headers["User-Agent"] == USER_AGENT
         assert client.follow_redirects is False
         assert client.trust_env is False
+
+
+def _header_seen(seen: dict[str, str | None]) -> httpx.MockTransport:
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen[request.url.host] = request.headers.get("x-audit-key")
+        return httpx.Response(200)
+
+    return httpx.MockTransport(handle)
+
+
+async def test_site_headers_go_only_to_their_own_site() -> None:
+    seen: dict[str, str | None] = {}
+    config = json.dumps({"Example.com": {"x-audit-key": "s3cret"}})
+    async with crawler_client(_header_seen(seen), headers_json=config) as client:
+        for url in (
+            "https://example.com/",
+            "https://www.example.com/a",
+            "https://sub.example.com/",
+            "https://other.example/",
+        ):
+            await client.get(url)
+    assert seen == {
+        "example.com": "s3cret",
+        "www.example.com": "s3cret",
+        "sub.example.com": None,
+        "other.example": None,
+    }
+
+
+async def test_site_headers_come_from_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict[str, str | None] = {}
+    monkeypatch.setenv(SITE_HEADERS_ENV, json.dumps({"www.example.com": {"x-audit-key": "k"}}))
+    async with crawler_client(_header_seen(seen)) as client:
+        await client.get("https://example.com/")
+    assert seen == {"example.com": "k"}
+
+
+@pytest.mark.parametrize("config", ["not json", '["example.com"]', '{"example.com": "k"}'])
+async def test_malformed_site_headers_are_ignored_without_logging_them(
+    config: str, caplog: pytest.LogCaptureFixture
+) -> None:
+    seen: dict[str, str | None] = {}
+    with caplog.at_level(logging.WARNING):
+        async with crawler_client(_header_seen(seen), headers_json=config) as client:
+            await client.get("https://example.com/")
+    assert seen == {"example.com": None}
+    assert SITE_HEADERS_ENV in caplog.text and config not in caplog.text
