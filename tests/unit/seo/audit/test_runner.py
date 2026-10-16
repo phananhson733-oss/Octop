@@ -215,7 +215,6 @@ async def test_cross_page_checks_follow_canonicals_hreflang_and_the_sitemap(
     audits, repos, user, project_id = project
     sitemap = "".join(f"<url><loc>{ORIGIN}{path}</loc></url>" for path in ("/", "/en/a", "/moved"))
     head = (
-        '<link rel="canonical" href="/gone">'
         '<link rel="alternate" hreflang="en" href="https://example.com/en/a">'
         '<link rel="alternate" hreflang="fr" href="https://example.com/fr/a">'
     )
@@ -225,8 +224,12 @@ async def test_cross_page_checks_follow_canonicals_hreflang_and_the_sitemap(
             f"{ORIGIN}/sitemap.xml": httpx.Response(
                 200, headers={"content-type": "application/xml"}, text=f"<urlset>{sitemap}</urlset>"
             ),
-            f"{ORIGIN}/": page("Home", "/en/a"),
+            f"{ORIGIN}/": page("Home", "/en/a", "/c"),
             # Neither /gone nor /fr/a is linked: the crawler queues them for these checks.
+            f"{ORIGIN}/c": html(
+                '<html><head><title>Canonical to a gone page</title><link rel="canonical" '
+                f'href="/gone"></head><body><h1>C</h1><p>{"word " * 200}</p></body></html>'
+            ),
             f"{ORIGIN}/en/a": html(
                 f"<html><head><title>English A page</title>{head}</head>"
                 f"<body><h1>A</h1><p>{'word ' * 200}</p><a href='/'>home</a></body></html>"
@@ -242,7 +245,7 @@ async def test_cross_page_checks_follow_canonicals_hreflang_and_the_sitemap(
     issues = (await audits.issues(user, project_id))["issues"]
     found = {(row["issue_type"], row["page_url"]): row["details"] for row in issues}
     a = f"{ORIGIN}/en/a"
-    assert found[("canonical-target-invalid", a)] == {
+    assert found[("canonical-target-invalid", f"{ORIGIN}/c")] == {
         "canonical_url": f"{ORIGIN}/gone",
         "reason": "error",
         "target_status": 404,

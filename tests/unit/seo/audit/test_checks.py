@@ -268,6 +268,8 @@ def test_hreflang_pairs_must_be_reciprocal_and_usable() -> None:
         _page(url=en, alternates=[("en", en), ("fr", fr), ("de", de)]),
         _page(url=fr, alternates=[("fr", fr)]),
         _page(url=de, is_indexable=False),
+        # A paginated variant carries page 1's alternates; its canonical is page 1.
+        _page(url=f"{fr}?page=2", canonical_url=fr, alternates=[("en", en), ("fr", fr)]),
     )
     found = [
         (issue.issue_type, issue.page_url, issue.details) for issue in find_hreflang_problems(pages)

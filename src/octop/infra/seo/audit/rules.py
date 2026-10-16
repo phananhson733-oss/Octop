@@ -565,7 +565,9 @@ def find_hreflang_problems(pages: dict[str, PageFacts]) -> list[Issue]:
     """Alternates pointing at unusable crawled pages, or crawled ones that do not link back."""
     issues: list[Issue] = []
     for url, page in pages.items():
-        if not _ok_html(page):
+        # Search engines read hreflang only on canonical pages; a variant such as
+        # ?page=2 that canonicalizes elsewhere is never the URL alternates link back to.
+        if not _ok_html(page) or _effective_canonical(page) != url:
             continue
         for lang, href in page.alternates:
             target = pages.get(href)
