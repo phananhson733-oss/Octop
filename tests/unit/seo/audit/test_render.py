@@ -320,17 +320,39 @@ class _Route:
         self.outcome = "continued"
 
 
-class _Context:
-    """A Playwright context whose page load sends ``routes`` through the route handler."""
+class _Socket:
+    def __init__(self, url: str) -> None:
+        self.url = url
+        self.outcome: str | None = None
 
-    def __init__(self, routes: list[_Route], crash: Exception | None = None) -> None:
+    def connect_to_server(self) -> None:
+        self.outcome = "connected"
+
+    async def close(self) -> None:
+        self.outcome = "closed"
+
+
+class _Context:
+    """A Playwright context whose page load sends ``routes`` and ``sockets`` to its guards."""
+
+    def __init__(
+        self,
+        routes: list[_Route],
+        crash: Exception | None = None,
+        sockets: list[_Socket] | None = None,
+    ) -> None:
         self.routes = routes
+        self.sockets = sockets or []
         self.crash = crash
         self.handler: Any = None
+        self.socket_handler: Any = None
         self.closed = False
 
     async def route(self, _pattern: str, handler: Any) -> None:
         self.handler = handler
+
+    async def route_web_socket(self, _pattern: Any, handler: Any) -> None:
+        self.socket_handler = handler
 
     async def add_init_script(self, _script: str) -> None:
         pass
@@ -344,6 +366,8 @@ class _Context:
             async def goto(self, _url: str, **_kwargs: Any) -> Any:
                 for route in context.routes:
                     await context.handler(route)
+                for socket in context.sockets:
+                    await context.socket_handler(socket)
                 if context.crash is not None:
                     raise context.crash
                 return SimpleNamespace(status=200)
@@ -395,6 +419,25 @@ async def test_a_page_cut_off_at_the_request_cap_is_not_compared() -> None:
     # The "not found" state it shows came from refused requests: a failed render, no more.
     issues = find_render_problems({URL: HTML}, {URL: render_record(rendered, URL, set())})
     assert [issue.issue_type for issue in issues] == ["render-failed"]
+
+
+async def test_websockets_reach_public_hosts_only() -> None:
+    sockets = {
+        url: _Socket(url)
+        for url in (
+            "wss://example.com/live",
+            "ws://169.254.169.254/latest",
+            "ws://localhost:8000/",
+            "ws://web.railway.internal:8000/",
+        )
+    }
+    await _renderer(_Context([], sockets=list(sockets.values()))).render(URL)
+    assert {url: socket.outcome for url, socket in sockets.items()} == {
+        "wss://example.com/live": "connected",
+        "ws://169.254.169.254/latest": "closed",
+        "ws://localhost:8000/": "closed",
+        "ws://web.railway.internal:8000/": "closed",
+    }
 
 
 async def test_a_page_that_never_finished_loading_is_not_compared() -> None:

@@ -6,11 +6,13 @@ that writes ``noindex`` and a "not found" title while its data loads, an H1 repl
 after hydration, links that exist only in the rendered DOM. An init script records
 every title and robots state the page passes through, not just the final one.
 
-Chromium resolves hosts itself, outside ``net.GuardedBackend``. Every request is
-routed through a guard that resolves the host and aborts it unless all addresses are
-public, before Chromium connects. Chromium resolves again when it connects, so a DNS
-answer that changes between the two lookups (rebinding) is a residual risk; audits
-are admin-only and limited to the project's own site, and service workers are blocked.
+Chromium resolves hosts itself, outside ``net.GuardedBackend``. Every request and
+every WebSocket a page opens is routed through a guard that resolves the host and
+refuses it unless all addresses are public, before Chromium connects. WebRTC may not
+send UDP outside a proxy, and there is none. What remains unchecked: a DNS answer that
+changes between the guard's lookup and Chromium's (rebinding), WebSockets opened inside
+web workers, and WebRTC relays over TCP. Audits are admin-only and limited to the
+project's own site, and service workers are blocked.
 """
 
 from __future__ import annotations
@@ -234,8 +236,17 @@ class ChromiumRenderer:
             else:
                 await route.continue_()
 
+        async def guard_socket(socket: Any) -> None:
+            parts = urlsplit(socket.url)
+            if parts.scheme in {"ws", "wss"} and await self._guard.allows(parts.hostname or ""):
+                socket.connect_to_server()
+            else:
+                await socket.close()
+
         try:
             await context.route("**/*", guard)
+            # context.route does not see WebSockets.
+            await context.route_web_socket(lambda _url: True, guard_socket)
             await context.add_init_script(_TRACE_SCRIPT)
             page = await context.new_page()
             try:
@@ -366,7 +377,10 @@ async def _started_renderer(start_url: str, resolver: Resolver) -> AsyncIterator
             browser = await playwright.chromium.launch(
                 headless=True,
                 executable_path=executable,
-                args=["--disable-dev-shm-usage"],
+                args=[
+                    "--disable-dev-shm-usage",
+                    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+                ],
             )
         except Exception as exc:
             logger.warning("SEO audit could not start Chromium: %s", exc)
