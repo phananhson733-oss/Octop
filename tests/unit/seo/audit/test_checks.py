@@ -57,6 +57,16 @@ def _found(page: PageFacts) -> dict[str, Any]:
         ("https://example.com/balance-bike-size-chart/", "/balance-bike-size-chart"),
         ("https://example.com/products/bikes/strider-12", "/products/*/*"),
         ("https://example.com/zh-cn/products/bikes/x", "/products/*/*"),
+        ("https://example.com/pt_BR/guides/x", "/guides/*"),
+        ("https://example.com/zh-Hant-TW/guides/x", "/guides/*"),
+        ("https://example.com/es-419/guides/x", "/guides/*"),
+        ("https://example.com/jp/products/x", "/products/*"),
+        # Two letters are not always a locale: these are sections.
+        ("https://example.com/tv", "/tv"),
+        ("https://example.com/tv/show-1", "/tv/*"),
+        ("https://example.com/my/account", "/my/*"),
+        ("https://example.com/my-blog/post-1", "/my-blog/*"),
+        ("https://example.com/on-sale/x", "/on-sale/*"),
         ("https://example.com/blog/post?page=2", "/blog/*?"),
     ],
 )

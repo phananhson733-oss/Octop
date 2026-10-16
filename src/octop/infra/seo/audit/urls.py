@@ -232,8 +232,29 @@ def parse_link_header_canonical(header: str | None, page_url: str) -> str | None
     return None
 
 
-# A leading path segment that names a locale ("en", "zh-cn", "pt_BR"), not a section.
-_LOCALE_SEGMENT = re.compile(r"^[a-z]{2}(?:[-_][a-z0-9]{2,4})?$", re.I)
+# ISO 639-1 languages, and countries sites often use as a locale ("/us/", "/jp/"). "my"
+# (Burmese) is left out: "/my/account" is far more common than a Burmese section.
+_LOCALE_CODE_LIST = (
+    "aa ab ae af ak am an ar as av ay az ba be bg bi bm bn bo br bs ca ce ch co cr cs cu cv "
+    "cy da de dv dz ee el en eo es et eu fa ff fi fj fo fr fy ga gd gl gn gu gv ha he hi ho "
+    "hr ht hu hy hz ia id ie ig ii ik io is it iu ja jv ka kg ki kj kk kl km kn ko kr ks ku "
+    "kv kw ky la lb lg li ln lo lt lu lv mg mh mi mk ml mn mr ms mt na nb nd ne ng nl nn no "
+    "nr nv ny oc oj om or os pa pi pl ps pt qu rm rn ro ru rw sa sc sd se sg si sk sl sm sn "
+    "so sq sr ss st su sv sw ta te tg th ti tk tl tn to tr ts tt tw ty ug uk ur uz ve vi vo "
+    "wa wo xh yi yo za zh zu "
+    "at au cn cz dk gr hk jp mx nz ua us vn"
+)
+_LOCALE_CODES = frozenset(_LOCALE_CODE_LIST.split())
+# A leading path segment that names a locale ("en", "zh-cn", "pt_BR", "zh-Hant", "es-419"),
+# not a section ("/tv/", "/my-blog/"): a known code, an optional script, an optional region.
+_LOCALE_SEGMENT = re.compile(
+    r"(?P<code>[a-z]{2})(?:[-_](?:hans|hant|latn|cyrl|arab))?(?:[-_](?:[a-z]{2}|\d{3}))?", re.I
+)
+
+
+def _is_locale(segment: str) -> bool:
+    match = _LOCALE_SEGMENT.fullmatch(segment)
+    return match is not None and match["code"].lower() in _LOCALE_CODES
 
 
 def path_cluster(url: str) -> str:
@@ -246,7 +267,7 @@ def path_cluster(url: str) -> str:
     """
     parts = urlsplit(url)
     segments = [segment for segment in parts.path.split("/") if segment]
-    if segments and _LOCALE_SEGMENT.match(segments[0]):
+    if segments and _is_locale(segments[0]):
         segments = segments[1:]
     if len(segments) <= 1:
         key = "/" + "".join(segments)
