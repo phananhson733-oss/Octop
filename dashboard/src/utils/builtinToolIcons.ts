@@ -62,6 +62,7 @@ export const BUILTIN_TOOL_ICONS: Record<string, LucideIcon> = {
   kimi_search: Globe,
   searchfree_search: Globe,
   generate_image: Image,
+  chatgpt_image: Image,
   generate_video: Video,
   memory_search: Brain,
   memory_get: BookOpen,

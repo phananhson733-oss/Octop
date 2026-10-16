@@ -8,6 +8,8 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from octop.api.deps import get_server, require_permission
+from octop.infra.agents.providers.codex_image_tool import QuotaStatus, read_quota_status
+from octop.infra.agents.settings.chatgpt_image import ChatgptImageSettings
 from octop.infra.agents.settings.media_generation import (
     MEDIA_PROVIDER_PRESETS,
     MediaGenerationSettings,
@@ -87,6 +89,85 @@ class MediaGenerationTestBody(BaseModel):
 class MediaGenerationTestResponse(BaseModel):
     ok: bool
     error: str | None = None
+
+
+class ChatgptImageSettingsBody(BaseModel):
+    enabled: bool = Field(default=False, description="Mount the chatgpt_image tool.")
+    admin_only: bool = Field(
+        default=True,
+        description="Only agents owned by admins get the tool, and only admins may call it.",
+    )
+    allow_credits: bool = Field(
+        default=False,
+        description=(
+            "Keep generating after the plan's Codex allowance is used up, which bills "
+            "purchased ChatGPT credits. When false, each call checks the allowance first "
+            "and stops if it is exhausted or cannot be read."
+        ),
+    )
+
+
+class ChatgptQuotaWindowResponse(BaseModel):
+    used_percent: float
+    window_minutes: int | None
+    reset_at: int | None = Field(description="Unix seconds.")
+
+
+class ChatgptQuotaResponse(BaseModel):
+    plan_type: str | None
+    plan_exhausted: bool
+    resets_at: int | None = Field(description="Unix seconds when every used-up window resets.")
+    windows: list[ChatgptQuotaWindowResponse]
+    has_credits: bool
+    unlimited_credits: bool
+    credits_balance: str | None
+
+
+class ChatgptImageStatusResponse(BaseModel):
+    enabled: bool
+    admin_only: bool
+    allow_credits: bool
+    logged_in: bool = Field(description="A ChatGPT login is stored on this instance.")
+    quota: ChatgptQuotaResponse | None = Field(
+        description="Live allowance from ChatGPT; null when not logged in or unreadable."
+    )
+    quota_error: str | None
+
+
+async def _chatgpt_image_response(
+    server: Any, settings: ChatgptImageSettings
+) -> ChatgptImageStatusResponse:
+    status: QuotaStatus = await read_quota_status(
+        server.services.paths, server.services.provider_repo
+    )
+    quota = status.quota
+    return ChatgptImageStatusResponse(
+        enabled=settings.enabled,
+        admin_only=settings.admin_only,
+        allow_credits=settings.allow_credits,
+        logged_in=status.logged_in,
+        quota=(
+            ChatgptQuotaResponse(
+                plan_type=quota.plan_type,
+                plan_exhausted=quota.plan_exhausted,
+                resets_at=quota.resets_at,
+                windows=[
+                    ChatgptQuotaWindowResponse(
+                        used_percent=w.used_percent,
+                        window_minutes=w.window_minutes,
+                        reset_at=w.reset_at,
+                    )
+                    for w in quota.windows
+                ],
+                has_credits=quota.has_credits,
+                unlimited_credits=quota.unlimited_credits,
+                credits_balance=quota.credits_balance,
+            )
+            if quota is not None
+            else None
+        ),
+        quota_error=status.error,
+    )
 
 
 def _provider_response(view: MediaProviderSettings) -> MediaProviderResponse:
@@ -199,6 +280,43 @@ async def test_media_generation_provider(
         ok=bool(result.get("ok")),
         error=str(result["error"]) if result.get("error") else None,
     )
+
+
+@router.get(
+    "/chatgpt-image",
+    summary="Get ChatGPT-subscription image settings",
+    description=(
+        "Return the chatgpt_image switches, whether a ChatGPT login is stored, and the "
+        "live Codex allowance read from ChatGPT (no image is generated)."
+    ),
+    response_model=ChatgptImageStatusResponse,
+)
+async def get_chatgpt_image_settings(
+    _: Any = Depends(require_permission("providers")),
+    server: Any = Depends(get_server),
+) -> ChatgptImageStatusResponse:
+    settings = server.app_runtime.agent_registry.chatgpt_image.load()
+    return await _chatgpt_image_response(server, settings)
+
+
+@router.put(
+    "/chatgpt-image",
+    summary="Update ChatGPT-subscription image settings",
+    description=(
+        "Persist the chatgpt_image switches and reload running agents so the tool is "
+        "mounted or removed."
+    ),
+    response_model=ChatgptImageStatusResponse,
+)
+async def put_chatgpt_image_settings(
+    body: ChatgptImageSettingsBody,
+    _: Any = Depends(require_permission("providers")),
+    server: Any = Depends(get_server),
+) -> ChatgptImageStatusResponse:
+    settings = await server.app_runtime.agent_registry.save_chatgpt_image(
+        ChatgptImageSettings(**body.model_dump())
+    )
+    return await _chatgpt_image_response(server, settings)
 
 
 __all__ = ["router"]

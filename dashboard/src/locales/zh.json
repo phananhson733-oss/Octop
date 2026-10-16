@@ -1725,6 +1725,7 @@
     "ask_user_question": "向你提问",
     "generate_image": "生成图片",
     "generate_video": "生成视频",
+    "chatgpt_image": "生成图片（ChatGPT）",
     "bilibili_search_anime": "搜索番剧",
     "seo_get_report_context": "读取 SEO 报告证据",
     "seo_list_saved_keywords": "列出已保存 SEO 关键词",
@@ -1773,7 +1774,8 @@
       "plugin": "插件工具"
     },
     "generate_image": "生成图片",
-    "generate_video": "生成视频"
+    "generate_video": "生成视频",
+    "chatgpt_image": "生成图片（ChatGPT）"
   },
   "chatUsage": {
     "latestRun": "最近一次请求",
@@ -2929,7 +2931,31 @@
     "testVideoModel": "提交并取消视频测试任务",
     "imageTestSuccess": "图片模型调用成功",
     "videoTestSuccess": "视频模型已接受测试任务并已请求取消",
-    "modelTestBillingHint": "模型测试会向所选服务商提交真实请求，可能产生少量费用；异步任务被接受后会尽力立即取消。"
+    "modelTestBillingHint": "模型测试会向所选服务商提交真实请求，可能产生少量费用；异步任务被接受后会尽力立即取消。",
+    "chatgpt": {
+      "title": "ChatGPT 订阅生图",
+      "description": "用已登录的 ChatGPT 订阅（gpt-image-2）给智能体加一个 chatgpt_image 工具，每张图都走订阅的 Codex 额度。",
+      "enable": "启用",
+      "adminOnly": "只给管理员的智能体用",
+      "adminOnlyHint": "关闭后，所有账号的智能体都会用这一个订阅。",
+      "allowCredits": "额度用完后允许扣 credits",
+      "allowCreditsHint": "关闭时，每次生图前先查额度，额度用完或查不到就不生成。打开后，图片会扣你购买的 credits。",
+      "notLoggedIn": "还没有用 ChatGPT 登录。请先在「模型」设置里登录。",
+      "window": "{{period}}额度已用 {{percent}}%，{{reset}} 重置",
+      "periodWeek": "本周",
+      "periodHours": "{{hours}} 小时",
+      "plan": "计划：{{plan}}",
+      "credits": "credits 余额：{{balance}}",
+      "creditsUnlimited": "credits 不限",
+      "exhausted": "订阅额度已用完，{{reset}} 之前生图会被拒绝。",
+      "exhaustedCredits": "订阅额度已用完，现在生图会扣 credits。",
+      "quotaError": "读不到额度：{{error}}",
+      "unknownTime": "未知时间",
+      "save": "保存",
+      "saved": "已保存，运行中的智能体会重新加载。",
+      "saveFailed": "保存失败",
+      "loadFailed": "加载 ChatGPT 生图设置失败"
+    }
   },
   "toolFeedback": {
     "failed": "调用失败",

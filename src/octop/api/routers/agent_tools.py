@@ -177,6 +177,7 @@ async def get_tool_settings(
     disabled = set(normalize_tools_disabled(agent_cfg.get("tools_disabled")))
     mobile_enabled = bool(server.config is not None and server.config.capabilities.mobile.enabled)
     team_host = is_team_agent(row)
+    chatgpt_image_mounted = server.app_runtime.agent_registry.chatgpt_image_mounted(row)
 
     tools: list[ToolSettingsItem] = []
     catalog = (
@@ -201,6 +202,7 @@ async def get_tool_settings(
                     entry.name,
                     agent_cfg=agent_cfg,
                     mobile_enabled=mobile_enabled,
+                    chatgpt_image_mounted=chatgpt_image_mounted,
                 ),
                 plugin_id=None,
             )

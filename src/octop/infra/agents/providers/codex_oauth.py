@@ -20,6 +20,7 @@ import http.client
 import json
 import logging
 import os
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -179,17 +180,23 @@ def refresh_codex_token(paths: PathLayout, cred: CodexOAuthCredentials) -> Codex
     return new_cred
 
 
+# A refresh can rotate the refresh token, so two concurrent refreshes in this
+# process could leave the stored login unusable. Callers run in worker threads.
+_REFRESH_LOCK = threading.Lock()
+
+
 def get_valid_access_token(paths: PathLayout) -> str | None:
-    cred = load_codex_token(paths)
-    if cred is None:
-        return None
-    if not is_token_valid(cred):
-        try:
-            cred = refresh_codex_token(paths, cred)
-        except CodexOAuthRefreshError as exc:
-            logger.warning("Codex OAuth refresh failed: %s", exc)
+    with _REFRESH_LOCK:
+        cred = load_codex_token(paths)
+        if cred is None:
             return None
-    return cred["access"]
+        if not is_token_valid(cred):
+            try:
+                cred = refresh_codex_token(paths, cred)
+            except CodexOAuthRefreshError as exc:
+                logger.warning("Codex OAuth refresh failed: %s", exc)
+                return None
+        return cred["access"]
 
 
 def build_codex_headers(account_id: str) -> dict[str, str]:

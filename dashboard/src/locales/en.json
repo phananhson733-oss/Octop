@@ -1725,6 +1725,7 @@
     "ask_user_question": "Ask the user",
     "generate_image": "Generate image",
     "generate_video": "Generate video",
+    "chatgpt_image": "Generate image (ChatGPT)",
     "bilibili_search_anime": "Search Bilibili anime",
     "seo_get_report_context": "Read SEO report evidence",
     "seo_list_saved_keywords": "List saved SEO keywords",
@@ -1773,7 +1774,8 @@
       "plugin": "Plugin tools"
     },
     "generate_image": "Generate image",
-    "generate_video": "Generate video"
+    "generate_video": "Generate video",
+    "chatgpt_image": "Generate image (ChatGPT)"
   },
   "chatUsage": {
     "latestRun": "Latest run",
@@ -2929,7 +2931,31 @@
     "testVideoModel": "Submit and cancel video test",
     "imageTestSuccess": "Image model call succeeded",
     "videoTestSuccess": "The video model accepted the test task and cancellation was requested",
-    "modelTestBillingHint": "Model tests submit real requests to the selected provider and may incur a small charge. Async tasks are cancelled on a best-effort basis after acceptance."
+    "modelTestBillingHint": "Model tests submit real requests to the selected provider and may incur a small charge. Async tasks are cancelled on a best-effort basis after acceptance.",
+    "chatgpt": {
+      "title": "Images on the ChatGPT subscription",
+      "description": "Gives agents a chatgpt_image tool that uses the signed-in ChatGPT subscription (gpt-image-2). Each image uses the plan's Codex allowance.",
+      "enable": "Enable",
+      "adminOnly": "Admin agents only",
+      "adminOnlyHint": "When off, every account's agents draw on this one subscription.",
+      "allowCredits": "Spend credits after the allowance is used up",
+      "allowCreditsHint": "When off, each image checks the allowance first and is not generated if the allowance is used up or cannot be read. When on, images are billed to purchased credits.",
+      "notLoggedIn": "No ChatGPT login is stored. Sign in with ChatGPT under Models first.",
+      "window": "{{period}} allowance {{percent}}% used, resets {{reset}}",
+      "periodWeek": "Weekly",
+      "periodHours": "{{hours}}-hour",
+      "plan": "Plan: {{plan}}",
+      "credits": "Credit balance: {{balance}}",
+      "creditsUnlimited": "Unlimited credits",
+      "exhausted": "The allowance is used up. Image requests are refused until {{reset}}.",
+      "exhaustedCredits": "The allowance is used up, so images are now billed to credits.",
+      "quotaError": "Could not read the allowance: {{error}}",
+      "unknownTime": "an unknown time",
+      "save": "Save",
+      "saved": "Saved. Running agents reload.",
+      "saveFailed": "Save failed",
+      "loadFailed": "Could not load ChatGPT image settings"
+    }
   },
   "toolFeedback": {
     "failed": "Failed",

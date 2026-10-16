@@ -35,6 +35,10 @@ from octop.infra.agents.security.hitl_session import (
     thread_id_from_request,
 )
 from octop.infra.agents.settings.acp import ACPSettingsStore
+from octop.infra.agents.settings.chatgpt_image import (
+    ChatgptImageSettings,
+    ChatgptImageSettingsStore,
+)
 from octop.infra.agents.settings.langfuse import LangfuseSettings, LangfuseSettingsStore
 from octop.infra.agents.settings.media_generation import (
     MediaGenerationSettings,
@@ -420,6 +424,7 @@ class AgentManager:
             settings_repo=repos.settings_repo,
             secret_repo=repos.secret_repo,
         )
+        self._chatgpt_image = ChatgptImageSettingsStore(repos.settings_repo)
         self._security = SecuritySettingsStore(settings_repo=repos.settings_repo)
         self._acp_settings = ACPSettingsStore(
             settings_repo=repos.settings_repo,
@@ -454,6 +459,7 @@ class AgentManager:
             settings_repo=repos.settings_repo,
             secret_repo=repos.secret_repo,
         )
+        self._chatgpt_image = ChatgptImageSettingsStore(repos.settings_repo)
         self._security = SecuritySettingsStore(settings_repo=repos.settings_repo)
         self._acp_settings = ACPSettingsStore(
             settings_repo=repos.settings_repo,
@@ -576,6 +582,10 @@ class AgentManager:
     @property
     def media_generation(self) -> MediaGenerationSettingsStore:
         return self._media_generation
+
+    @property
+    def chatgpt_image(self) -> ChatgptImageSettingsStore:
+        return self._chatgpt_image
 
     @property
     def paths(self) -> PathLayout:
@@ -1933,6 +1943,25 @@ class AgentManager:
         await self.reload_all()
         return view
 
+    async def save_chatgpt_image(self, value: ChatgptImageSettings) -> ChatgptImageSettings:
+        """Persist the ChatGPT image switches and rebuild agents so the tool mounts or unmounts."""
+        saved = self._chatgpt_image.save(value)
+        await self.reload_all()
+        return saved
+
+    def chatgpt_image_mounted(self, row: AgentRow) -> bool:
+        """Whether ``chatgpt_image`` is built for this agent (admin owners unless opened up)."""
+        from octop.infra.agents.teams import is_team_agent  # noqa: PLC0415
+        from octop.infra.users.identity import Role  # noqa: PLC0415
+
+        settings = self._chatgpt_image.load()
+        if not settings.enabled or is_team_agent(row):
+            return False
+        if not settings.admin_only:
+            return True
+        owner = self._repos.user_repo.get(row.user_id) if row.user_id is not None else None
+        return owner is not None and owner.role == Role.ADMIN
+
     def save_security(self, policy: SecurityPolicy | dict[str, Any]) -> SecurityPolicy:
         """Persist security policy and push it into harness agents."""
         resolved = self._security.save(policy)
@@ -3248,6 +3277,19 @@ class AgentManager:
         merged_tools.extend(knowledge_tools)
         merged_tools.extend(mobile_tools)
         merged_tools.extend(plugin_tools)
+        if self.chatgpt_image_mounted(row):
+            from octop.infra.agents.providers.codex_image_tool import (  # noqa: PLC0415
+                build_chatgpt_image_tools,
+            )
+
+            merged_tools.extend(
+                build_chatgpt_image_tools(
+                    workspace=ws,
+                    paths=self.paths,
+                    provider_repo=self._repos.provider_repo,
+                    settings_store=self._chatgpt_image,
+                )
+            )
         if not team_host and row.user_id is not None:
             from octop.infra.seo.service import SeoService  # noqa: PLC0415
             from octop.infra.seo.tools import build_seo_tools  # noqa: PLC0415

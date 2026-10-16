@@ -79,3 +79,43 @@ export const mediaGenerationApi = {
       },
     ),
 };
+
+export interface ChatgptQuotaWindow {
+  used_percent: number;
+  window_minutes: number | null;
+  reset_at: number | null;
+}
+
+export interface ChatgptImageStatus {
+  enabled: boolean;
+  admin_only: boolean;
+  allow_credits: boolean;
+  logged_in: boolean;
+  quota: {
+    plan_type: string | null;
+    plan_exhausted: boolean;
+    resets_at: number | null;
+    windows: ChatgptQuotaWindow[];
+    has_credits: boolean;
+    unlimited_credits: boolean;
+    credits_balance: string | null;
+  } | null;
+  quota_error: string | null;
+}
+
+export interface ChatgptImageSettingsInput {
+  enabled: boolean;
+  admin_only: boolean;
+  allow_credits: boolean;
+}
+
+export const chatgptImageApi = {
+  get: () =>
+    request<ChatgptImageStatus>("/admin/media-generation/chatgpt-image"),
+
+  save: (body: ChatgptImageSettingsInput) =>
+    request<ChatgptImageStatus>("/admin/media-generation/chatgpt-image", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+};

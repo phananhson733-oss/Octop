@@ -38,6 +38,7 @@ import {
 } from "../../../api/modules/mediaGeneration";
 import { customProviderLogo, getProviderLogo } from "../../../assets/providers";
 import { message } from "@/utils/antdMessage";
+import { ChatgptImageCard } from "./ChatgptImageCard";
 import styles from "./index.module.less";
 
 const { Text } = Typography;
@@ -500,6 +501,8 @@ export function MediaGenerationSettingsPanel() {
           </Button>
         </div>
       </Card>
+
+      <ChatgptImageCard />
 
       <div className={styles.providerSectionHeader}>
         <div>

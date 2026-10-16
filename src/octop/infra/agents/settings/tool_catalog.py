@@ -76,6 +76,7 @@ BUILTIN_TOOL_CATALOG: tuple[BuiltinToolEntry, ...] = (
     BuiltinToolEntry("searchfree_search", "web"),
     BuiltinToolEntry("generate_image", "media"),
     BuiltinToolEntry("generate_video", "media"),
+    BuiltinToolEntry("chatgpt_image", "media"),
     BuiltinToolEntry("memory_search", "memory"),
     BuiltinToolEntry("memory_get", "memory"),
     BuiltinToolEntry("acp_runner", "misc"),
@@ -187,10 +188,13 @@ def builtin_tool_available(
     *,
     agent_cfg: Mapping[str, Any],
     mobile_enabled: bool = False,
+    chatgpt_image_mounted: bool = False,
 ) -> bool:
     """Whether a catalog builtin is expected to be mounted for this agent."""
     if name in _MOBILE_TOOLS:
         return mobile_enabled
+    if name == "chatgpt_image":
+        return chatgpt_image_mounted
     if name in _MEMORY_TOOLS:
         mem = agent_cfg.get("memory")
         if isinstance(mem, dict) and isinstance(mem.get("memory_enabled"), bool):

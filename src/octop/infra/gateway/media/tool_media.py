@@ -55,6 +55,7 @@ MEDIA_PUSH_TOOL_BASES = frozenset(
         "mobile_screenshot",
         "generate_image",
         "generate_video",
+        "chatgpt_image",
     }
 )
 # browser_use / write_file / read_file may embed media-shaped payloads or

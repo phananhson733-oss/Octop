@@ -268,6 +268,8 @@ reloads running agents so the image and video tools receive the new configuratio
 | `GET` | `/admin/media-generation` | providers | Return Volcengine Ark image/video settings; never returns the API key |
 | `PUT` | `/admin/media-generation` | providers | Save enabled tools and Seedream/Seedance model IDs; an included API key is verified before saving |
 | `POST` | `/admin/media-generation/test` | providers | Test credentials or a selected image/video model; model tests submit real, potentially billable requests |
+| `GET` | `/admin/media-generation/chatgpt-image` | providers | Return the `chatgpt_image` switches (`enabled`, `admin_only`, `allow_credits`), whether a ChatGPT login is stored, and the live Codex allowance; generates nothing |
+| `PUT` | `/admin/media-generation/chatgpt-image` | providers | Save those switches and reload running agents so the tool is mounted or removed |
 
 ## Voice
 

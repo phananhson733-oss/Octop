@@ -617,6 +617,7 @@
     "ask_user_question": "向你提问",
     "generate_image": "生成图片",
     "generate_video": "生成视频",
+    "chatgpt_image": "生成图片（ChatGPT）",
     "bilibili_search_anime": "搜索番剧",
     "seo_get_report_context": "读取 SEO 报告证据",
     "seo_list_saved_keywords": "列出已保存 SEO 关键词",

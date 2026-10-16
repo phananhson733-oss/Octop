@@ -100,3 +100,32 @@ async def test_media_provider_presets_include_all_p0_adapters(
     assert "qwen-image-3.0-pro" in presets["dashscope"]["image_models"]
     assert "wan3.0-video-prime" in presets["dashscope"]["video_models"]
     assert "image-01-live" in presets["minimax"]["image_models"]
+
+
+@pytest.mark.asyncio
+async def test_chatgpt_image_settings_default_off_and_persist(
+    env_admin_client: tuple[httpx.AsyncClient, dict[str, str]],
+) -> None:
+    client, auth = env_admin_client
+
+    initial = await client.get("/api/admin/media-generation/chatgpt-image", headers=auth)
+    assert initial.status_code == 200, initial.text
+    assert initial.json() == {
+        "enabled": False,
+        "admin_only": True,
+        "allow_credits": False,
+        "logged_in": False,
+        "quota": None,
+        "quota_error": None,
+    }
+
+    saved = await client.put(
+        "/api/admin/media-generation/chatgpt-image",
+        headers=auth,
+        json={"enabled": True, "admin_only": True, "allow_credits": False},
+    )
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["enabled"] is True
+
+    again = await client.get("/api/admin/media-generation/chatgpt-image", headers=auth)
+    assert again.json()["enabled"] is True

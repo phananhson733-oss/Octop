@@ -617,6 +617,7 @@
     "ask_user_question": "Ask the user",
     "generate_image": "Generate image",
     "generate_video": "Generate video",
+    "chatgpt_image": "Generate image (ChatGPT)",
     "bilibili_search_anime": "Search Bilibili anime",
     "seo_get_report_context": "Read SEO report evidence",
     "seo_list_saved_keywords": "List saved SEO keywords",
