@@ -1,5 +1,6 @@
-import { lazy, useEffect, useSyncExternalStore } from "react";
+import { lazy, useEffect, useMemo, useSyncExternalStore } from "react";
 import { pluginsApi } from "../../api/modules/plugins";
+import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { loadInstalledPluginUis } from "../toolRenderers/loader";
 import { updateToolPluginIndex } from "../toolRenderers/toolPluginIndex";
 import {
@@ -11,12 +12,20 @@ import {
   type WorkbenchPluginPage,
 } from "./registry";
 
-/** Pages plugins added to the Workbench; re-renders when plugin UIs load or unload. */
+/**
+ * Workbench pages the current account may see; re-renders when plugin UIs load
+ * or unload. ``adminOnly`` pages are left out until an admin is signed in.
+ */
 export function useWorkbenchPages(): WorkbenchPluginPage[] {
-  return useSyncExternalStore(
+  const pages = useSyncExternalStore(
     subscribeWorkbenchPages,
     getWorkbenchPages,
     getWorkbenchPages,
+  );
+  const isAdmin = useCurrentUser()?.role === "admin";
+  return useMemo(
+    () => (isAdmin ? pages : pages.filter((page) => !page.adminOnly)),
+    [pages, isAdmin],
   );
 }
 
@@ -48,6 +57,7 @@ export function useInstalledPluginUis(enabled: boolean): void {
         zh: "关键词研究、保存关键词与私有报告",
       },
       component: lazy(() => import("../../pages/Control/SeoWorkbench")),
+      adminOnly: true,
     });
     (async () => {
       try {

@@ -60,3 +60,13 @@ OpenSEO登录后界面现场取证、真实DataForSEO费用与供应商响应质
 - REA私有报告列表/静态预览：ev_5b839530f36b77e571877ab3a45a58d1a7513b34826650525566b6c23a73db23，截图可读，最终无page-error。REA存储注入在sandbox iframe遇到protocol_error，最终改用仅本地测试实例的登录入口，空storage及service_workers=allow成功，应用sandbox未放宽。
 
 真实供应商、真实模型质量和真实PostgreSQL为后续验收项。未提交、未推送、未部署；没有迁移用户正在使用的数据库。
+
+## 2026-10-14 部署前修订
+
+审计后修了三个阻塞部署的问题，代码改为基于已部署的 fork 分支 `role-visible-pages`（e5918582）。上面「本地验收结果」里的 20→21 迁移已不再适用。
+
+- **只给管理员。** `/api/seo/*` 全部要求管理员角色；服务层在访问项目时再查一次，Agent 工具只经过这一处；只有管理员拥有的 Agent 才会挂上 SEO 工具。工作台页面登记为 `adminOnly`：非管理员看不到这个标签，直接打开链接会被拒绝，也不会因为这个页面在侧栏多出「工作台」。
+- **不占迁移编号。** 表结构放在 `migrations/seo_workbench.sql` 和 `.pg.sql`，由 `run_migrations()` 在编号迁移之后每次启动幂等执行（`_ensure_seo_schema`），版本号保持 20。原因是迁移程序只记一个版本号：fork 占用 021，上游将来的 021 在已升级的库上就会被跳过。被旧版标成 21 的库会被收回到 20。
+- **Agent 工具结果有大小上限。** 每个结果不超过 60,000 字符（框架会把超过约 80,000 字符的结果转存成文件，模型只能看到前 1000 个字符）。`seo_get_report_context` 先给 `context_hash` 和写作要求，再给运行摘要、前 50 个已保存词和按搜索量排序的前 50 行研究结果；其余用 `seo_list_saved_keywords` 和新增的 `seo_list_research_rows` 按 `offset` / `next_offset` 读取。`seo_list_research_runs` 只返回摘要，`seo_list_reports` 也分页。趋势写成 `[年, 月, 搜索量]`。`context_hash` 仍覆盖完整证据。
+
+验证：`make all` 中格式、Ruff、mypy（569 个文件）通过，pytest 4330 通过、18 跳过、3 失败，失败的仍是本机缺 Linux `/proc` 的飞牛 NAS 测试 `test_fnos_native_stop.py`；前端 `tsc -b`、`npm run build` 通过，工作台与 SEO 相关 vitest 通过；本机临时 PostgreSQL 17 上建表、重复启动、研究、并发保存、报告保存均通过，版本号保持 20。真实模型生成报告仍未验证。

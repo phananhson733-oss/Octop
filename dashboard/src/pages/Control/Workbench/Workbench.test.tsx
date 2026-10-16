@@ -68,6 +68,16 @@ function addBoard() {
   });
 }
 
+function addAdminPage() {
+  registerWorkbenchPage({
+    id: "main",
+    pluginId: "seo-workbench",
+    title: "SEO",
+    component: () => <div>seo page</div>,
+    adminOnly: true,
+  });
+}
+
 const member = { role: "01ROLE", permissions: [] };
 const admin = { role: "admin", permissions: [] };
 
@@ -146,5 +156,48 @@ describe("Workbench with plugin pages", () => {
       ),
     );
     expect(screen.getByText("browser panel")).toBeInTheDocument();
+  });
+});
+
+describe("Workbench with an admin-only page", () => {
+  it("refuses its URL to a non-admin account", () => {
+    addBoard();
+    addAdminPage();
+    setPluginUisSettled(true);
+    renderAt("/workbench/seo-workbench.main", member);
+
+    expect(screen.getByText("forbidden")).toBeInTheDocument();
+    expect(screen.queryByText("seo page")).not.toBeInTheDocument();
+  });
+
+  it("does not open the workbench to a non-admin account on its own", () => {
+    addAdminPage();
+    setPluginUisSettled(true);
+    renderAt("/workbench", member);
+
+    expect(screen.getByText("forbidden")).toBeInTheDocument();
+  });
+
+  it("leaves it out of a non-admin account's tabs", async () => {
+    addBoard();
+    addAdminPage();
+    setPluginUisSettled(true);
+    renderAt("/workbench", { role: "01ROLE", permissions: ["terminal"] });
+
+    expect(await screen.findByText("terminal panel")).toBeInTheDocument();
+    expect(screen.getByRole("navigation")).toHaveTextContent(
+      "terminal,pick.board",
+    );
+  });
+
+  it("shows it to an admin", async () => {
+    addAdminPage();
+    setPluginUisSettled(true);
+    renderAt("/workbench/seo-workbench.main", admin);
+
+    expect(await screen.findByText("seo page")).toBeInTheDocument();
+    expect(screen.getByRole("navigation")).toHaveTextContent(
+      "browser,terminal,seo-workbench.main",
+    );
   });
 });

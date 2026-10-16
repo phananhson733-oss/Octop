@@ -621,6 +621,7 @@
     "seo_get_report_context": "读取 SEO 报告证据",
     "seo_list_saved_keywords": "列出已保存 SEO 关键词",
     "seo_list_research_runs": "列出 SEO 研究记录",
+    "seo_list_research_rows": "读取 SEO 研究结果行",
     "seo_save_report": "保存 SEO 报告",
     "seo_list_reports": "列出 SEO 报告"
   },

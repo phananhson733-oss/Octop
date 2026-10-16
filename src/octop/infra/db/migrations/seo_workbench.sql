@@ -1,4 +1,5 @@
--- Native SEO projects and immutable research/report evidence.
+-- Fork-only SEO tables. Not a numbered migration: run_migrations() applies this file
+-- idempotently on every start through _ensure_seo_schema(), see migrate.py.
 CREATE TABLE IF NOT EXISTS seo_projects (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  project_id TEXT NOT NULL UNIQUE,
@@ -45,4 +46,3 @@ CREATE TABLE IF NOT EXISTS seo_reports (
  run_id TEXT NOT NULL REFERENCES seo_runs(run_id) ON DELETE CASCADE,
  metadata TEXT NOT NULL, html TEXT NOT NULL, context_json TEXT NOT NULL
 );
-UPDATE _schema_version SET version = 21;

@@ -73,6 +73,8 @@ export interface WorkbenchPageRegistration {
   /** Shown under the page title while this tab is active. */
   description?: WorkbenchPageTitle;
   component: ComponentType<WorkbenchPageProps>;
+  /** Hide the tab, its URL and the sidebar entry it adds from non-admin accounts. UI only. */
+  adminOnly?: boolean;
 }
 
 export interface OpenSidePanelOptions {

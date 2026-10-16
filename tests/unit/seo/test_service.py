@@ -14,7 +14,7 @@ def context(tmp_path: Path):
     pool = SqlitePool(tmp_path / "seo.db")
     run_migrations(pool)
     repos = RepoBundle.from_pool(pool)
-    user = repos.user_repo.create(username="alice", role="user")
+    user = repos.user_repo.create(username="alice", role="admin")
     other = repos.user_repo.create(username="bob", role="user")
     repos.agent_repo.create(agent_id="seo", user_id=user, name="SEO")
     yield SeoService(repos), repos, user, other
@@ -34,6 +34,20 @@ async def test_project_owner_and_agent_unique(context):
         await service.create_project(other, name="Stolen", domain="example.org", agent_id="seo")
     with pytest.raises(OctopError):
         await service.create_project(user, name="Duplicate", domain="example.org", agent_id="seo")
+
+
+async def test_seo_data_is_admin_only(context):
+    service, repos, user, other = context
+    project = await service.create_project(
+        user, name="Example", domain="example.com", agent_id="seo"
+    )
+    repos.user_repo.set_role(user, "user")
+    # Agent tools reach projects only through project_for_agent; a demoted owner is refused.
+    with pytest.raises(OctopError) as denied:
+        await service.project_for_agent(user, "seo")
+    assert denied.value.code == "FORBIDDEN"
+    with pytest.raises(OctopError):
+        await service.keyword_rows(user, project["project_id"])
 
 
 async def test_provider_encrypted_and_status_only(context):

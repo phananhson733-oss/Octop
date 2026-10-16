@@ -3251,10 +3251,17 @@ class AgentManager:
         if not team_host and row.user_id is not None:
             from octop.infra.seo.service import SeoService  # noqa: PLC0415
             from octop.infra.seo.tools import build_seo_tools  # noqa: PLC0415
+            from octop.infra.users.identity import Role  # noqa: PLC0415
 
-            if any(
-                project["agent_id"] == row.agent_id
-                for project in self._repos.seo_repo.projects(row.user_id)
+            # SEO is admin-only; an owner who is no longer admin loses the tools.
+            owner = self._repos.user_repo.get(row.user_id)
+            if (
+                owner is not None
+                and owner.role == Role.ADMIN
+                and any(
+                    project["agent_id"] == row.agent_id
+                    for project in self._repos.seo_repo.projects(row.user_id)
+                )
             ):
                 seo_service = SeoService(self._repos)
                 merged_tools.extend(

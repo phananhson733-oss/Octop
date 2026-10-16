@@ -57,8 +57,16 @@ async def test_private_keyword_and_report_workflow(env_with_agent, monkeypatch):
     project_id = created.json()["project_id"]
     base = f"/api/seo/projects/{project_id}"
     other = await create_user(client, auth, username="seo-other")
-    assert (await client.get("/api/seo/projects", headers=other)).json() == []
-    assert (await client.get(base + "/keywords", headers=other)).status_code == 404
+    # SEO is admin-only: an ordinary account is refused before any project lookup.
+    assert (await client.get("/api/seo/projects", headers=other)).status_code == 403
+    assert (await client.get(base + "/keywords", headers=other)).status_code == 403
+    assert (
+        await client.post(
+            "/api/seo/projects",
+            headers=other,
+            json={"name": "Other", "domain": "example.org", "agent_id": agent_id},
+        )
+    ).status_code == 403
     request = {
         "keywords": ["example"],
         "mode": "ideas",
@@ -72,7 +80,7 @@ async def test_private_keyword_and_report_workflow(env_with_agent, monkeypatch):
         )
     ).json() == {"configured": True}
     assert (await client.get("/api/seo/provider", headers=auth)).json() == {"configured": True}
-    assert (await client.get("/api/seo/provider", headers=other)).json() == {"configured": False}
+    assert (await client.get("/api/seo/provider", headers=other)).status_code == 403
     assert (
         await client.post(base + "/research", headers=auth, json=request | {"confirm_paid": False})
     ).status_code == 422
@@ -125,7 +133,7 @@ async def test_private_keyword_and_report_workflow(env_with_agent, monkeypatch):
     readback = await client.get(url, headers=auth)
     assert readback.json()["html"] == html
     assert readback.headers["cache-control"] == "no-store"
-    assert (await client.get(url, headers=other)).status_code == 404
+    assert (await client.get(url, headers=other)).status_code == 403
     assert len(calls) == 1
     # The standard test server disables public API docs; validate its generated schema.
     from octop.api.app import build_app

@@ -1612,6 +1612,22 @@ def _ensure_bridge_connections_schema(db: DatabasePool) -> None:
         )
 
 
+def _ensure_seo_schema(db: DatabasePool) -> None:
+    """Create the fork-only SEO tables without taking a migration number.
+
+    ``run_migrations`` keeps one version watermark; a fork table under a number
+    would make a later upstream migration with that number look applied.
+    """
+    suffix = ".pg.sql" if db.dialect == "postgresql" else ".sql"
+    sql = (_MIGRATIONS_DIR / f"seo_workbench{suffix}").read_text(encoding="utf-8")
+    if db.dialect == "postgresql":
+        with db.connect() as conn, conn.transaction():
+            _apply_postgresql_migration(conn, sql)
+    else:
+        with db.connect() as conn:
+            conn.executescript(sql)
+
+
 def _repair_legacy_schema(db: DatabasePool) -> None:
     """Idempotent compatibility repairs for local databases from old builds."""
     if _table_exists(db, "users"):
@@ -1960,3 +1976,4 @@ def run_migrations(db: DatabasePool) -> None:
     _ensure_sso_provider_kind_schema(db)
     _ensure_user_role_schema(db)
     _ensure_bridge_connections_schema(db)
+    _ensure_seo_schema(db)

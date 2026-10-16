@@ -1729,6 +1729,7 @@
     "seo_get_report_context": "Read SEO report evidence",
     "seo_list_saved_keywords": "List saved SEO keywords",
     "seo_list_research_runs": "List SEO research runs",
+    "seo_list_research_rows": "Read SEO research rows",
     "seo_save_report": "Save SEO report",
     "seo_list_reports": "List SEO reports"
   },

@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, Response
 from pydantic import BaseModel, ConfigDict
 
-from octop.api.deps import current_user, get_server
+from octop.api.deps import current_user, get_server, require_admin
 from octop.infra.seo.models import (
     KeywordsSave,
     ProjectCreate,
@@ -19,7 +19,7 @@ from octop.infra.seo.service import SeoService
 from octop.infra.server import OctopServer
 from octop.infra.users.identity import User
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(require_admin())])
 
 
 class Project(BaseModel):

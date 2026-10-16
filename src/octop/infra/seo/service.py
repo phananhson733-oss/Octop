@@ -31,6 +31,7 @@ from octop.infra.seo.provider import (
     interleave,
     normalize_keyword,
 )
+from octop.infra.users.identity import Role
 from octop.infra.utils.ulid import new_ulid
 
 
@@ -55,6 +56,10 @@ class SeoService:
         return await _db(self.repo.projects, user_id)
 
     async def _project(self, user_id: int, project_id: str) -> dict[str, Any]:
+        # SEO is admin-only. HTTP checks it too; Agent tools only come through here.
+        user = await _db(self.repos.user_repo.get, user_id)
+        if user is None or user.role != Role.ADMIN:
+            raise _error(ErrorCode.FORBIDDEN)
         project = next(
             (p for p in await self.list_projects(user_id) if p["project_id"] == project_id), None
         )
@@ -372,15 +377,20 @@ class SeoService:
     async def list_keywords(
         self, user_id: int, project_id: str, *, search: str = "", page: int = 1, page_size: int = 50
     ) -> dict[str, Any]:
-        await self._project(user_id, project_id)
         if page < 1 or page_size < 1 or page_size > 500:
             raise _error()
-        rows = [
+        rows = await self.keyword_rows(user_id, project_id, search=search)
+        return {"rows": rows[(page - 1) * page_size : page * page_size], "total_count": len(rows)}
+
+    async def keyword_rows(
+        self, user_id: int, project_id: str, *, search: str = ""
+    ) -> list[dict[str, Any]]:
+        await self._project(user_id, project_id)
+        return [
             row
             for row in await _db(self.repo.keywords, project_id)
             if search.lower() in row["keyword"]
         ]
-        return {"rows": rows[(page - 1) * page_size : page * page_size], "total_count": len(rows)}
 
     async def report_context(self, user_id: int, project_id: str, run_id: str) -> dict[str, Any]:
         project = await self._project(user_id, project_id)
