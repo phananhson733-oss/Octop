@@ -1045,7 +1045,8 @@
       "errors": {
         "not_public": "only public websites can be audited; this address is on a private or internal network",
         "invalid_url": "enter a public http(s) website address without a username or password",
-        "busy": "an audit is already running for this project; wait for it or cancel it first"
+        "busy": "an audit is already running for this project; wait for it or cancel it first",
+        "other_site": "experts can only audit the project's own website"
       }
     }
   }

@@ -271,6 +271,14 @@ async def test_start_rules(project: Any, context: Any) -> None:
     assert cancelled["status"] == "cancelled"
     assert (await _start(project, key="k2"))["status"] == "queued"
 
+    # Experts start audits with own_site_only: the project domain, with or without www.
+    await audits.cancel(user, project_id, (await audits.get(user, project_id))["audit_id"])
+    with pytest.raises(OctopError) as other_site:
+        await _start(project, key="sub", start_url="https://blog.example.com/", own_site_only=True)
+    assert other_site.value.code.value == "SEO_INVALID_INPUT"
+    www = await _start(project, key="www", start_url="www.example.com/shop", own_site_only=True)
+    assert www["requested_url"] == "https://www.example.com/shop"
+
     for bad in ("ftp://example.com", "http://127.0.0.1/", "http://intranet.local/"):
         with pytest.raises(OctopError) as invalid:
             await _start(project, key=bad, start_url=bad)
@@ -294,20 +302,39 @@ async def test_agent_tools_read_the_bound_projects_audits(
 
     from octop.infra.seo.tools import MAX_RESULT_CHARS, build_seo_tools
 
-    _audits, repos, user, _project_id = project
+    _audits, repos, user, project_id = project
     service = context[0]
-    site = _site()
-    audit = await _start(project)
-    runner = SeoAuditRunner(repos, client_factory=site.client)
-    runner.submit(audit["audit_id"])
-    await runner.wait(audit["audit_id"])
-
     configurable = {"user": str(user), "agent_id": "seo", "thread_id": "thread-a"}
     monkeypatch.setattr("octop.infra.seo.tools.get_config", lambda: {"configurable": configurable})
     threads = Mock()
     threads.get.return_value = SimpleNamespace(user_id=user, agent_id="seo")
     tools = {tool.name: tool for tool in build_seo_tools(service, "seo", threads)}
-    assert "seo_start_audit" not in tools
+
+    # The expert may audit only its project's own site, one audit at a time.
+    with pytest.raises(OctopError) as elsewhere:
+        await tools["seo_start_audit"].ainvoke({"start_url": "https://other.example/"})
+    assert elsewhere.value.code.value == "SEO_INVALID_INPUT"
+    started = json.loads(await tools["seo_start_audit"].ainvoke({"max_pages": 10}))
+    audit = started["audit"]
+    assert (audit["status"], audit["max_pages"], audit["requested_url"]) == (
+        "queued",
+        10,
+        f"{ORIGIN}/",
+    )
+    with pytest.raises(OctopError) as busy:
+        await tools["seo_start_audit"].ainvoke({})
+    assert busy.value.code.value == "SEO_CONFLICT"
+
+    # Nothing submits it: the runner's sweep picks the queued audit up.
+    site = _site()
+    runner = SeoAuditRunner(repos, client_factory=site.client)
+    runner.start()
+    try:
+        await _until(
+            lambda: repos.seo_audit_repo.get(project_id, audit["audit_id"])["status"] == "completed"
+        )
+    finally:
+        await runner.stop()
 
     listed = json.loads(await tools["seo_list_audits"].ainvoke({}))
     assert [row["audit_id"] for row in listed["audits"]] == [audit["audit_id"]]

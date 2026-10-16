@@ -96,7 +96,7 @@ OpenSEO登录后界面现场取证、真实DataForSEO费用与供应商响应质
 - **安全。** 只连公网地址：程序自己解析域名，所有解析结果都是公网地址才连接，并按 IP 直连（防 DNS 重绑定）；拒绝 localhost、`.local`、`.internal` 和云元数据地址；不读代理环境变量；跳转不自动跟随，逐跳重新校验。起始网址或其跳转指向内网时，审计以 `target_blocked` 失败。
 - **与上游的差异。** ①按网页声明的字符集解码，上游一律按 UTF-8，GBK 等编码的中文网站会乱码；②robots 规则只作用于 robots 文件所在的协议、域名和端口，与上游 robots-parser 一致，记录在案；③限流状态只在内存里，断点续跑时从头计；④每页只存前 500 个站内链接，以 JSON 存在页面行里（Supabase 连接池慢，避免每页几百条插入）；⑤不执行 JavaScript，上游可选的浏览器渲染和 Lighthouse 没有做，疑似 JS 外壳的页面会单独标出并跳过内容检查。
 - **页面。** 工作台新增「技术审计」标签：填起始网址和页数上限后开始；运行中每 3 秒刷新进度，可取消；结果按严重程度列出每类问题的说明、修法和受影响网址，另有页面列表。达到页数上限、被限流、失败、取消、一页没爬到、存在 JS 外壳时，都会在结果上方写明结果不完整的原因。
-- **专家。** 只读工具 `seo_list_audits`、`seo_get_audit_issues`、`seo_get_audit_pages`，不能发起审计。问题说明在后端 i18n `seo.audit.issues.*`，接口按请求语言返回，专家拿到英文。
+- **专家。** 用户同意专家也能发起审计：`seo_start_audit` 只能审计项目自己的网站（带不带 www 都行），页数上限同样是 200，每个项目同时一个；专家发起的审计由服务器每 30 秒一次的扫描接手。查看用 `seo_list_audits`、`seo_get_audit_issues`、`seo_get_audit_pages`。问题说明在后端 i18n `seo.audit.issues.*`，接口按请求语言返回，专家拿到英文。
 - **表。** 新增 `seo_audits`、`seo_audit_frontier`、`seo_audit_pages`、`seo_audit_issues`，都是新表，写在 `seo_workbench.sql` / `.pg.sql` 里，版本号仍是 20。
 
 验证：`make all` 中格式、Ruff、mypy（580 个文件）通过，pytest 4497 通过、17 跳过、3 失败，失败的仍是本机缺 Linux `/proc` 的飞牛 NAS 测试；审计单元测试 154 项（含上游样本对照、SSRF、限流、规则、爬虫、断点续跑、取消、删除、认领失效）和 HTTP 集成测试通过；同一批 SEO 单元测试在本机临时 PostgreSQL 17 上跑，审计部分全部通过（R1 的 `test_reference_fallback_threshold` 在 PG 上失败，原因是三个供应商请求并发发出、测试却断言了顺序，与审计无关）；前端 `tsc -b`、eslint、`npm run build` 通过，SEO 相关 vitest 17 项通过。真实爬取：对 example.com 跑通一次，1 页、4 条警告，与页面实际内容相符。

@@ -11,6 +11,7 @@ from langchain_core.tools import StructuredTool
 from langgraph.config import get_config
 
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.utils.ulid import new_ulid
 
 if TYPE_CHECKING:
     from octop.infra.db.repos.threads import ThreadRepo
@@ -345,6 +346,27 @@ def build_seo_tools(
         user_id, project_id, _thread_id = await context()
         return _page(await service.list_reports(user_id, project_id), offset, "reports")
 
+    async def start_audit(start_url: str = "", max_pages: int = 50) -> str:
+        user_id, project_id, _thread_id = await context()
+        # A fresh key per call is safe: a repeat is refused while this audit is active.
+        audit = await audits.start(
+            user_id,
+            project_id,
+            own_site_only=True,
+            start_url=start_url or None,
+            max_pages=max_pages,
+            idempotency_key=f"agent-{new_ulid()}",
+        )
+        return json.dumps(
+            {
+                "audit": _audit_summary(audit),
+                "next": "Queued. The server starts it within about 30 seconds and crawls about "
+                "one page a second. Follow progress with seo_list_audits and read results with "
+                "seo_get_audit_issues once status is completed.",
+            },
+            ensure_ascii=False,
+        )
+
     async def list_audits(offset: int = 0) -> str:
         user_id, project_id, _thread_id = await context()
         rows = await audits.list_audits(user_id, project_id)
@@ -453,11 +475,19 @@ def build_seo_tools(
             "List private report metadata for this agent's project without loading HTML.",
         ),
         (
+            "seo_start_audit",
+            start_audit,
+            "Start a technical site audit of this agent's project website when the user asks for "
+            "one or agrees to it. Crawls up to max_pages pages (10-200, default 50) from "
+            "start_url (default the project domain; only the project's own site, with or without "
+            "www), one page a second, following robots.txt; it does not run JavaScript. Free: no "
+            "paid provider is called. Only one audit per project runs at a time.",
+        ),
+        (
             "seo_list_audits",
             list_audits,
             "List technical site audits of this agent's project, newest first, with status and "
-            "progress. Free. Audits are started by the user in the SEO workbench; you cannot "
-            "start one.",
+            "progress. Free.",
         ),
         (
             "seo_get_audit_issues",

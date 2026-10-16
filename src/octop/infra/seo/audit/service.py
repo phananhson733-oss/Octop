@@ -7,6 +7,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from functools import partial
 from typing import Any
+from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 
@@ -30,6 +31,10 @@ def _rejected(code: ErrorCode, reason: str, locale: str) -> OctopError:
     """The generic code message plus a specific reason the dashboard appends to it."""
     text = tr(f"seo.audit.errors.{reason}", locale)
     return OctopError.localized(code, message=text, details={"reason": text})
+
+
+def _bare_host(host: str | None) -> str:
+    return (host or "").lower().removeprefix("www.")
 
 
 def issue_descriptor(issue_type: str, locale: str) -> dict[str, str]:
@@ -66,9 +71,18 @@ class SeoAuditService:
         return self.seo.repos.seo_audit_repo
 
     async def start(
-        self, user_id: int, project_id: str, *, locale: str = "en", **kwargs: Any
+        self,
+        user_id: int,
+        project_id: str,
+        *,
+        locale: str = "en",
+        own_site_only: bool = False,
+        **kwargs: Any,
     ) -> dict[str, Any]:
-        """Queue an audit. The same key returns the same audit; one runs per project."""
+        """Queue an audit. The same key returns the same audit; one runs per project.
+
+        ``own_site_only`` keeps the crawl on the project's domain (with or without www).
+        """
         project = await self.seo._project(user_id, project_id)
         try:
             command = AuditCreate.model_validate(kwargs)
@@ -80,6 +94,8 @@ class SeoAuditService:
             raise _rejected(ErrorCode.SEO_INVALID_INPUT, "not_public", locale) from exc
         except ValueError as exc:
             raise _rejected(ErrorCode.SEO_INVALID_INPUT, "invalid_url", locale) from exc
+        if own_site_only and _bare_host(urlsplit(url).hostname) != _bare_host(project["domain"]):
+            raise _rejected(ErrorCode.SEO_INVALID_INPUT, "other_site", locale)
         status, audit = await _db(
             self.repo.create,
             {
