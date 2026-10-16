@@ -410,6 +410,16 @@ class AuditJob:
         issues += find_render_problems(pages, await _db(self.repo.renders, self.id))
         if rate_limited:
             issues.append(Issue("crawl-rate-limited", start_url))
+            if self.renderer_factory is not None:
+                # The render phase sends a throttling site no requests; without this row the
+                # report would read as if the rendered sample had found nothing.
+                issues.append(
+                    Issue(
+                        "render-unavailable",
+                        start_url,
+                        {"error": "the site was rate limiting the crawl, so no page was rendered"},
+                    )
+                )
         await self._fenced(
             await _db(
                 self.repo.complete,

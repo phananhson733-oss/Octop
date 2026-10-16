@@ -378,6 +378,25 @@ async def test_an_audit_without_a_browser_still_completes(project: Any) -> None:
     ]
 
 
+async def test_a_rate_limited_crawl_says_it_rendered_nothing(project: Any) -> None:
+    audits, repos, user, project_id = project
+    site = FakeSite({f"{ORIGIN}/": httpx.Response(429)})
+    browser = _Browser({})
+    audit = await _start(project)
+    runner = SeoAuditRunner(repos, client_factory=site.client, renderer_factory=browser.open)
+    runner.submit(audit["audit_id"])
+    await runner.wait(audit["audit_id"])
+    done = await audits.get(user, project_id, audit["audit_id"])
+    assert (done["status"], done["rate_limited"]) == ("completed", 1)
+    assert browser.opened == 0
+    issues = (await audits.issues(user, project_id))["issues"]
+    found = {row["issue_type"]: row["details"] for row in issues}
+    assert "crawl-rate-limited" in found
+    assert found["render-unavailable"] == {
+        "error": "the site was rate limiting the crawl, so no page was rendered"
+    }
+
+
 async def test_a_restarted_render_phase_renders_each_page_once(project: Any) -> None:
     audits, repos, user, project_id = project
     site = _site()

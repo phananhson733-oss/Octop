@@ -1163,9 +1163,9 @@
           "how_to_fix": "通常不是网站本身的问题：看一下错误，如果是超时就重跑一次审计。如果是网站拦了审计用的浏览器，按放行爬虫的同样方式放行它。"
         },
         "render-unavailable": {
-          "title": "无法渲染页面",
-          "explanation": "Octop 服务器上启动不了无头浏览器，所以这次审计只检查了服务器返回的 HTML，渲染相关的检查都没有执行。",
-          "how_to_fix": "请管理员为 Playwright 安装 Chromium，或把 OCTOP_SEO_AUDIT_CHROMIUM 设为某个 Chromium 程序的路径，然后重跑审计。"
+          "title": "这次没有渲染页面",
+          "explanation": "这次审计一个页面都没有渲染，只检查了服务器返回的 HTML，渲染相关的检查都没有执行。详情里写了原因：Octop 服务器上启动不了无头浏览器，或者网站在爬取时已经在限流，审计没有再向它发请求。",
+          "how_to_fix": "如果是启动不了浏览器，请管理员为 Playwright 安装 Chromium，或把 OCTOP_SEO_AUDIT_CHROMIUM 设为某个 Chromium 程序的路径；如果是网站在限流，放行审计爬虫或者过一阵再试。然后重跑审计。"
         }
       },
       "errors": {

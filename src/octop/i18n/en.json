@@ -1163,9 +1163,9 @@
           "how_to_fix": "Usually nothing to fix on the site: check the error, and run the audit again if it was a timeout. If the site blocks the audit browser, admit it the same way as the crawler."
         },
         "render-unavailable": {
-          "title": "Rendering was not available",
-          "explanation": "No headless browser could be started on the Octop server, so this audit checked only the served HTML and none of the rendered-page checks ran.",
-          "how_to_fix": "Ask the administrator to install Chromium for Playwright, or set OCTOP_SEO_AUDIT_CHROMIUM to a Chromium binary, then run the audit again."
+          "title": "Pages were not rendered",
+          "explanation": "This audit rendered no page, so it checked only the served HTML and none of the rendered-page checks ran. The details say why: no headless browser could be started on the Octop server, or the site was already rate limiting the crawl and the audit sent it no more requests.",
+          "how_to_fix": "If no browser could be started, ask the administrator to install Chromium for Playwright, or set OCTOP_SEO_AUDIT_CHROMIUM to a Chromium binary. If the site was rate limiting, let the audit crawler through or try again later. Then run the audit again."
         }
       },
       "errors": {
