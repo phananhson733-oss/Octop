@@ -321,7 +321,8 @@ def page_issues(page: PageFacts) -> list[Issue]:
         report("structured-data-invalid", {"invalid_blocks": page.schema_invalid})
     if page.schema_missing:
         report("structured-data-missing-fields", {"missing": page.schema_missing})
-    if page.faq_hidden:
+    # The FAQ section often sits at the end of a page, past where a cut-off body stops.
+    if page.faq_hidden and not page.body_truncated:
         report(
             "faq-schema-not-visible",
             {"count": len(page.faq_hidden), "questions": page.faq_hidden[:DUPLICATE_GROUP_SAMPLE]},

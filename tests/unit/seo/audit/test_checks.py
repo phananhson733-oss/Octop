@@ -197,6 +197,8 @@ def test_page_checks(overrides: dict[str, Any], issue_type: str, details: Any) -
         {"alternates": [("x-default", URL)]},
         # A body cut at the size limit may end inside a JSON-LD block.
         {"schema_invalid": 1, "body_truncated": True},
+        # Nor can it show that an FAQ question is missing from the text.
+        {"faq_hidden": ["Is it safe?"], "body_truncated": True},
     ],
 )
 def test_page_checks_leave_healthy_pages_alone(overrides: dict[str, Any]) -> None:
