@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 import urllib.error
 import urllib.request
@@ -10,14 +11,16 @@ from urllib.parse import urlparse
 
 import pytest
 
-from octop.infra.agents.providers.codex_apply import CODEX_MODELS, CODEX_PROVIDER_NAME
+from octop.infra.agents.providers.codex_apply import CODEX_FALLBACK_MODELS, CODEX_PROVIDER_NAME
 from octop.infra.agents.providers.codex_oauth import (
     CodexOAuthDeviceCodeError,
     build_codex_headers,
     exchange_device_code,
+    fetch_codex_models,
     poll_device_token,
     request_device_code,
 )
+from octop.infra.agents.providers.presets import load_provider_presets
 
 
 class _Resp:
@@ -129,4 +132,82 @@ def test_build_codex_headers_includes_account_id() -> None:
 
 def test_codex_provider_constants() -> None:
     assert CODEX_PROVIDER_NAME == "openai-codex"
-    assert any(m["id"] == "gpt-5.4" for m in CODEX_MODELS)
+    ids = [m["id"] for m in CODEX_FALLBACK_MODELS]
+    assert ids[0] == "gpt-6-astra"
+    # Rejected by the ChatGPT backend for ChatGPT accounts since 2026-10.
+    assert not {"gpt-5.4", "gpt-5.4-mini", "gpt-5.5"} & set(ids)
+
+
+def test_codex_preset_uses_fallback_models() -> None:
+    preset = next(p for p in load_provider_presets() if p["id"] == "openai-codex")
+    assert [m["id"] for m in preset["models"]] == [m["id"] for m in CODEX_FALLBACK_MODELS]
+
+
+def _catalog_entry(slug: str, *, priority: int, visibility: str = "list") -> dict[str, object]:
+    return {
+        "slug": slug,
+        "display_name": slug.upper(),
+        "visibility": visibility,
+        "priority": priority,
+        "input_modalities": ["text", "image"],
+    }
+
+
+def test_fetch_codex_models_keeps_listed_models_by_priority() -> None:
+    payload = json.dumps(
+        {
+            "models": [
+                _catalog_entry("gpt-6-sol", priority=3),
+                _catalog_entry("gpt-reserve", priority=4, visibility="hide"),
+                _catalog_entry("gpt-6.1-sol", priority=1),
+                _catalog_entry("gpt-6-astra", priority=2),
+            ]
+        }
+    ).encode()
+    seen: dict[str, object] = {}
+
+    def fake_urlopen(req: urllib.request.Request, timeout: float = 30) -> _Resp:
+        seen["url"] = req.full_url
+        seen["headers"] = {k.lower(): v for k, v in req.header_items()}
+        return _Resp(payload)
+
+    with mock.patch("urllib.request.urlopen", fake_urlopen):
+        models = fetch_codex_models("access-tok", "acct-123")
+
+    url = urlparse(str(seen["url"]))
+    assert url.hostname == "chatgpt.com"
+    assert url.path == "/backend-api/codex/models"
+    assert "client_version=" in url.query
+    headers = seen["headers"]
+    assert isinstance(headers, dict)
+    assert headers["authorization"] == "Bearer access-tok"
+    assert headers["chatgpt-account-id"] == "acct-123"
+    assert models == [
+        {"id": "gpt-6.1-sol", "name": "GPT-6.1-SOL", "enabled": True, "input": ["text", "image"]},
+        {"id": "gpt-6-astra", "name": "GPT-6-ASTRA", "enabled": True, "input": ["text", "image"]},
+        {"id": "gpt-6-sol", "name": "GPT-6-SOL", "enabled": True, "input": ["text", "image"]},
+    ]
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        urllib.error.HTTPError("https://chatgpt.com", 401, "unauthorized", {}, None),  # type: ignore[arg-type]
+        urllib.error.URLError("DNS lookup failed"),
+        http.client.IncompleteRead(b"{"),
+        b"not json",
+        json.dumps({"detail": "nope"}).encode(),
+        json.dumps(
+            {"models": [_catalog_entry("gpt-reserve", priority=4, visibility="hide")]}
+        ).encode(),
+    ],
+)
+def test_fetch_codex_models_returns_none_when_catalog_unusable(failure: object) -> None:
+    def fake_urlopen(req: urllib.request.Request, timeout: float = 30) -> _Resp:
+        if isinstance(failure, Exception):
+            raise failure
+        assert isinstance(failure, bytes)
+        return _Resp(failure)
+
+    with mock.patch("urllib.request.urlopen", fake_urlopen):
+        assert fetch_codex_models("access-tok", "acct-123") is None

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import http.client
 import json
 import logging
 import os
@@ -24,7 +25,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from octop.infra.utils.paths import PathLayout
 
@@ -46,6 +47,9 @@ CODEX_ATTRIBUTION_VERSION = (
     os.environ.get("OCTOP_CODEX_ATTRIBUTION_VERSION", "").strip() or _OPENCLAW_UPSTREAM_VERSION
 )
 CODEX_BASE_URL = "https://chatgpt.com/backend-api/codex"
+CODEX_MODELS_URL = f"{CODEX_BASE_URL}/models"
+# Codex CLI version reported to the model catalog; the backend filters models by it.
+CODEX_CLIENT_VERSION = "0.162.0"
 
 
 class CodexOAuthCredentials(TypedDict):
@@ -197,6 +201,48 @@ def build_codex_headers(account_id: str) -> dict[str, str]:
     if account_id:
         headers["chatgpt-account-id"] = account_id
     return headers
+
+
+def fetch_codex_models(access_token: str, account_id: str) -> list[dict[str, Any]] | None:
+    """Models the ChatGPT account may pick, as provider model entries ordered by priority.
+
+    Keeps only catalog entries with ``visibility == "list"``. Returns ``None`` when the
+    catalog cannot be read, so callers can fall back to a static list.
+    """
+    query = urllib.parse.urlencode({"client_version": CODEX_CLIENT_VERSION})
+    req = urllib.request.Request(
+        f"{CODEX_MODELS_URL}?{query}",
+        headers={"Authorization": f"Bearer {access_token}", **build_codex_headers(account_id)},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=TOKEN_REQUEST_TIMEOUT_S) as resp:
+            body = json.loads(resp.read())
+    except (urllib.error.URLError, http.client.HTTPException, OSError, ValueError) as exc:
+        logger.warning("Codex model catalog fetch failed: %s", exc)
+        return None
+    catalog = body.get("models") if isinstance(body, dict) else None
+    if not isinstance(catalog, list):
+        logger.warning("Codex model catalog response has no models list")
+        return None
+    listed = [
+        m
+        for m in catalog
+        if isinstance(m, dict) and m.get("visibility") == "list" and m.get("slug")
+    ]
+    listed.sort(key=lambda m: m["priority"] if isinstance(m.get("priority"), int) else 0)
+    models: list[dict[str, Any]] = []
+    for m in listed:
+        slug = str(m["slug"])
+        inputs = [x for x in m.get("input_modalities") or [] if isinstance(x, str)]
+        models.append(
+            {
+                "id": slug,
+                "name": str(m.get("display_name") or slug),
+                "enabled": True,
+                "input": inputs or ["text"],
+            }
+        )
+    return models or None
 
 
 class DeviceCodeInfo(TypedDict):

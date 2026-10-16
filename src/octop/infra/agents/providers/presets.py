@@ -220,6 +220,8 @@ def load_provider_presets() -> list[dict[str, Any]]:
     bundled = resources.files("octop_harness.providers").joinpath("provider_template.json")
     out = [serialize_provider_preset(p) for p in load_provider_templates(str(bundled))]
     if not any(p.get("id") == "openai-codex" for p in out):
+        from octop.infra.agents.providers.codex_apply import CODEX_FALLBACK_MODELS
+
         out.insert(
             0,
             {
@@ -229,16 +231,7 @@ def load_provider_presets() -> list[dict[str, Any]]:
                 "protocol": "openai",
                 "api_key_prefix": "",
                 "auth_method": "codex_oauth",
-                "models": [
-                    {"id": "gpt-5.4", "name": "GPT-5.4", "enabled": True, "input": ["text"]},
-                    {
-                        "id": "gpt-5.4-mini",
-                        "name": "GPT-5.4 mini",
-                        "enabled": True,
-                        "input": ["text"],
-                    },
-                    {"id": "gpt-5.5", "name": "GPT-5.5", "enabled": True, "input": ["text"]},
-                ],
+                "models": [dict(m) for m in CODEX_FALLBACK_MODELS],
                 "logo_id": "openai",
             },
         )

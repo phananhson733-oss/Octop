@@ -21,6 +21,7 @@ from octop.infra.agents.providers.codex_oauth import (
     DEVICE_POLL_TIMEOUT_S,
     CodexOAuthDeviceCodeError,
     exchange_device_code,
+    fetch_codex_models,
     get_valid_access_token,
     poll_device_token,
     request_device_code,
@@ -372,7 +373,10 @@ async def _run_codex_device_poll(
                 continue
             code, verifier = result
             cred = await asyncio.to_thread(exchange_device_code, code, verifier)
-            pid = apply_codex_credentials(server.services, server.services.paths, cred)
+            models = await asyncio.to_thread(fetch_codex_models, cred["access"], cred["account_id"])
+            pid = apply_codex_credentials(
+                server.services, server.services.paths, cred, models=models
+            )
             if server.app_runtime is not None:
                 await server.app_runtime.agent_registry.on_provider_changed(
                     provider_name=CODEX_PROVIDER_NAME,
