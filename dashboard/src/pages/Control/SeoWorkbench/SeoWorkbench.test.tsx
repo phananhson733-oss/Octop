@@ -284,6 +284,50 @@ describe("SEO native workflow", () => {
     );
     expect(seoApi.research).not.toHaveBeenCalled();
   });
+  it("opens the linked report's preview from a chat report link", async () => {
+    vi.mocked(seoApi.projects).mockResolvedValue([
+      {
+        project_id: "p1",
+        name: "Site",
+        domain: "one.test",
+        agent_id: "a1",
+        location_code: 2840,
+        language_code: "en",
+        created_at: "2026-10-14T12:00:00Z",
+      },
+      {
+        project_id: "p2",
+        name: "Second",
+        domain: "two.test",
+        agent_id: "a2",
+        location_code: 2840,
+        language_code: "en",
+        created_at: "2026-10-14T12:00:00Z",
+      },
+    ]);
+    vi.mocked(seoApi.report).mockResolvedValue({
+      report_id: "r1",
+      project_id: "p2",
+      run_id: "run-1",
+      title: "Linked report",
+      summary: "",
+      skill: "keyword-research",
+      created_at: "2026-10-19T07:00:00Z",
+      content_hash: "hash",
+      size_bytes: 10,
+      html: "<p>Body</p>",
+    });
+    setup("/workbench/seo-workbench.main?project=p2&view=reports&report=r1");
+    expect(await screen.findByText("Linked report")).toBeInTheDocument();
+    // Only the linked project's report is fetched, not one under the first project.
+    expect(seoApi.report).toHaveBeenCalledTimes(1);
+    expect(seoApi.report).toHaveBeenCalledWith("p2", "r1");
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    await waitFor(() =>
+      expect(screen.queryByText("Linked report")).not.toBeInTheDocument(),
+    );
+    expect(seoApi.report).toHaveBeenCalledTimes(1);
+  });
   it("clears selection and preserves the viewed run after returning to the workbench", async () => {
     vi.mocked(seoApi.runs).mockResolvedValue([summary(run)]);
     const view = render(

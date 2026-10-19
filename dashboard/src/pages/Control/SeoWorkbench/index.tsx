@@ -588,6 +588,29 @@ function ProjectWorkspace({
       setBusy("");
     }
   }
+  // A chat link to a saved report opens its preview directly.
+  const requestedReport =
+    query.get("project") === id ? query.get("report") : null;
+  useEffect(() => {
+    if (!requestedReport) return;
+    let live = true;
+    seoApi
+      .report(id, requestedReport)
+      .then((report) => {
+        if (live) setPreview(report);
+      })
+      .catch((err) => {
+        if (live) setError(apiErrorMessage(err, t("seo.loadError"), t));
+      });
+    return () => {
+      live = false;
+    };
+  }, [id, requestedReport, t]);
+  const closePreview = () => {
+    setPreview(undefined);
+    // Drop the link's report so following it again reopens the preview.
+    if (requestedReport) setQuery({ project: id, view }, { replace: true });
+  };
   const previewHtml = useMemo(
     () => (preview ? staticReportHtml(preview.html) : ""),
     [preview],
@@ -1013,7 +1036,7 @@ function ProjectWorkspace({
         title={preview?.title}
         footer={null}
         width="90vw"
-        onCancel={() => setPreview(undefined)}
+        onCancel={closePreview}
         destroyOnClose
       >
         <Paragraph type="secondary">{t("seo.staticPreview")}</Paragraph>

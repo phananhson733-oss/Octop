@@ -6615,6 +6615,7 @@
     "created": "创建时间",
     "preview": "预览",
     "staticPreview": "私有静态预览：禁用脚本、表单、跳转和外部资源。SHA-256：",
+    "openReport": "打开报告",
     "seedLimit": "请输入 1–5 个不重复的种子关键词。",
     "recoverHelp": "请求结果可能未知。请先刷新研究记录再重试；未修改输入的重试会复用请求标识。",
     "savedCount": "已保存 {{count}} 个：新增 {{created}}，更新 {{updated}}。",

@@ -6615,6 +6615,7 @@
     "created": "Created",
     "preview": "Preview",
     "staticPreview": "Static private preview: scripts, forms, navigation and external resources are disabled. SHA-256:",
+    "openReport": "Open report",
     "seedLimit": "Enter 1–5 unique seed keywords.",
     "recoverHelp": "The request outcome may be unknown. Refresh runs before retrying. An unchanged retry reuses the same request key.",
     "savedCount": "Saved {{count}}: {{created}} new, {{updated}} updated.",

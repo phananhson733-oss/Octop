@@ -32,7 +32,7 @@ export function isPinnedToolUiMessage(message: ChatMessage): boolean {
     pluginId,
     parsed,
   });
-  return reg != null && reg.id !== "default" && reg.pluginId !== "builtin";
+  return reg != null && reg.id !== "default";
 }
 
 /** Split rich-UI tools out of the foldable process summary. */

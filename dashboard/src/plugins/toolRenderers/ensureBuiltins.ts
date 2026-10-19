@@ -1,4 +1,5 @@
 import { DefaultToolRenderer } from "./builtin/DefaultToolRenderer";
+import { SeoReportRenderer } from "./builtin/SeoReportRenderer";
 import { builtinPluginHost } from "./host";
 import { exposeReactGlobals } from "./reactGlobals";
 import { registerToolRenderer } from "./registry";
@@ -14,6 +15,12 @@ export function ensureBuiltinToolRenderers(): void {
     id: "default",
     pluginId: "builtin",
     component: DefaultToolRenderer,
+  });
+  registerToolRenderer({
+    id: "seo_report",
+    pluginId: "builtin",
+    tools: ["seo_save_report"],
+    component: SeoReportRenderer,
   });
   void builtinPluginHost;
 }
