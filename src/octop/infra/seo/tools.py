@@ -31,9 +31,11 @@ _INSPECT_TEXT_CHARS = 24_000
 _REPORT_GUIDE = """Write one complete self-contained HTML keyword-research report from the returned
 research and saved-keyword evidence. Include the business opportunity, a prioritized table,
 why each selected term fits, missing metrics and shared-volume caveats, next steps, and an
-explicit methodology/source-date section. Treat keyword metrics as evidence, not guaranteed
-traffic. Never invent metrics or silently replace unknown values with zero. Distinguish a
-saved shortlist from all researched terms. Ground the report in project_context (business,
+explicit methodology/source-date section. Write the title, summary and prose in the language
+of the user's request and set <html lang> to match; keep keywords, URLs and SERP titles exactly
+as found, untranslated. Treat keyword metrics as evidence, not guaranteed traffic. Never invent
+metrics or silently replace unknown values with zero. Distinguish a saved shortlist from all
+researched terms. Ground the report in project_context (business,
 goal, positioning, writing preferences, competitors, key pages); say which sections are missing
 rather than guessing them. This context shows previews only: when saved_keywords,
 research_rows_preview or project_context has more entries than shown, read the rest with

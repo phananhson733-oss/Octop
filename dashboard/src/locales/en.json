@@ -6619,7 +6619,7 @@
     "seedLimit": "Enter 1–5 unique seed keywords.",
     "recoverHelp": "The request outcome may be unknown. Refresh runs before retrying. An unchanged retry reuses the same request key.",
     "savedCount": "Saved {{count}}: {{created}} new, {{updated}} updated.",
-    "reportPrompt": "For SEO project {{projectId}} and research run {{runId}}, call seo_get_report_context first. Analyze the actual research, saved keywords and project background, preserve source dates, missing values and cost uncertainty, and write a complete HTML keyword research report. Do not run paid research or invent metrics. Save it with seo_save_report using this project and run, append a short research log entry with seo_update_project_context, then return the report ID and summary.",
+    "reportPrompt": "For SEO project {{projectId}} and research run {{runId}}, call seo_get_report_context first. Analyze the actual research, saved keywords and project background, preserve source dates, missing values and cost uncertainty, and write a complete HTML keyword research report. Do not run paid research or invent metrics. Save it with seo_save_report using this project and run, append a short research log entry with seo_update_project_context, then return the report ID and summary. Write the title, summary and body in English (set the html lang to en), keeping keywords, URLs and search-result titles exactly as found.",
     "status_running": "Running",
     "status_completed": "Completed",
     "status_partial": "Partial success",
