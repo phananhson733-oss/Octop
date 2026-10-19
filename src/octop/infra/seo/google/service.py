@@ -294,8 +294,15 @@ class SeoGoogleService:
         return str(fresh["access_token"])
 
     def _client(self, grant: dict[str, Any]) -> gsc.GscClient:
+        # A client serves one request; its parallel calls share one token, so an
+        # expired grant is refreshed once rather than once per call.
+        pending: asyncio.Future[str] | None = None
+
         async def token() -> str:
-            return await self._access_token(grant)
+            nonlocal pending
+            if pending is None:
+                pending = asyncio.ensure_future(self._access_token(grant))
+            return await asyncio.shield(pending)
 
         return gsc.GscClient(token, transport=self._transport)
 

@@ -281,3 +281,13 @@ async def test_without_a_client_nothing_starts(google_env, monkeypatch):
     with pytest.raises(OctopError) as missing:
         await service.start(user, BASE, None)
     assert missing.value.code == "SEO_GOOGLE_NOT_CONFIGURED"
+
+
+async def test_parallel_report_calls_refresh_an_expired_token_once(google_env):
+    service, user, project_id, fake = await _bound(google_env)
+    google_env[6]["now"] += 3600
+    await service.gsc_report(user, project_id)
+    refreshes = [f for kind, f in fake.calls if kind == "token"]
+    assert [f["grant_type"] for f in refreshes] == ["refresh_token"]
+    auths = {body["auth"] for kind, body in fake.calls if kind == "query"}
+    assert auths == {"Bearer at-2"}
