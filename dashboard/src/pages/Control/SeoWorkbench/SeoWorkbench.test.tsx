@@ -11,6 +11,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import SeoWorkbench from "./index";
 import {
   seoApi,
+  type AiRun,
+  type AiVisibility,
   type ProjectContext,
   type RankResults,
   type ResearchRun,
@@ -81,6 +83,12 @@ vi.mock("../../../api/modules/seo", async (importOriginal) => ({
     removeRankKeyword: vi.fn(),
     rankHistory: vi.fn(),
     startRankCheck: vi.fn(),
+    aiVisibility: vi.fn(),
+    setAiEngines: vi.fn(),
+    addAiPrompts: vi.fn(),
+    removeAiPrompt: vi.fn(),
+    aiAnswer: vi.fn(),
+    startAiCheck: vi.fn(),
   },
 }));
 vi.mock("../../../api/modules/octopThreads", () => ({
@@ -1374,6 +1382,172 @@ describe("rank tracking", () => {
     expect(
       screen.getByRole("button", { name: "seo.rankCheck" }),
     ).toBeDisabled();
+  });
+});
+describe("AI visibility", () => {
+  const run: AiRun = {
+    run_id: "r1",
+    status: "completed",
+    started_at: "2026-10-19T09:00:00Z",
+    completed_at: "2026-10-19T09:01:00Z",
+    engines: ["chatgpt"],
+    brands: [
+      { name: "Example", domain: "example.com", own: true },
+      { name: "Rival", domain: "rival.com", own: false },
+    ],
+    prompts_total: 1,
+    answers_total: 1,
+    answers_done: 1,
+    answers_failed: 0,
+    cost_usd: 0.004,
+    cost_known_usd: 0.004,
+    estimate_usd: 0.004,
+    error: null,
+  };
+  const visibility: AiVisibility = {
+    settings: {
+      engines: ["chatgpt"],
+      location_code: 2840,
+      language_code: "en",
+      prompt_count: 1,
+      estimate_usd: 0.004,
+    },
+    brands: run.brands,
+    prompts: [
+      {
+        prompt_id: "q1",
+        topic: "General",
+        prompt: "best short drama apps",
+        created_at: "2026-10-19T08:00:00Z",
+        branded: false,
+      },
+    ],
+    runs: [run],
+    run,
+    branded: "neutral",
+    gap: false,
+    coverage: { answered: 1, no_answer: 0, failed: 0 },
+    summaries: [
+      {
+        ...run.brands[0],
+        answers: 1,
+        mentions: 1,
+        citations: 0,
+        avg_position: 2,
+      },
+      {
+        ...run.brands[1],
+        answers: 1,
+        mentions: 1,
+        citations: 1,
+        avg_position: 1,
+      },
+    ],
+    sources: [
+      { domain: "rival.com", citations: 1, answers: 1, owner: "competitor" },
+    ],
+    rows: [
+      {
+        prompt_id: "q1",
+        prompt: "best short drama apps",
+        topic: "General",
+        engine: "chatgpt",
+        branded: false,
+        status: "answered",
+        brands: [
+          {
+            ...run.brands[0],
+            mentioned: true,
+            cited: false,
+            first_mention: 30,
+          },
+          { ...run.brands[1], mentioned: true, cited: true, first_mention: 0 },
+        ],
+        citation_count: 1,
+        error: null,
+        cost_usd: 0.004,
+        checked_at: "2026-10-19T09:01:00Z",
+      },
+    ],
+  };
+  it("shows answers as plain text and buys a check only on a confirmed click at the shown cost", async () => {
+    vi.mocked(seoApi.aiVisibility).mockResolvedValue(visibility);
+    vi.mocked(seoApi.addAiPrompts).mockResolvedValue({ added: 1 });
+    const markdown = 'Rival <img src=x onerror="alert(1)"> then **Example**';
+    vi.mocked(seoApi.aiAnswer).mockResolvedValue({
+      ...visibility.rows[0],
+      run_id: "r1",
+      answer_markdown: markdown,
+      citations: [
+        {
+          url: "https://rival.com/top",
+          domain: "rival.com",
+          title: "Rival top",
+          position: 1,
+          owner: "competitor",
+        },
+      ],
+    });
+    const started: AiRun = {
+      ...run,
+      run_id: "r2",
+      status: "running",
+      completed_at: null,
+      answers_done: 0,
+    };
+    vi.mocked(seoApi.startAiCheck).mockImplementation(async () => {
+      // The server's read shows the running check from now on.
+      vi.mocked(seoApi.aiVisibility).mockResolvedValue({
+        ...visibility,
+        runs: [started, run],
+        run: started,
+        rows: [],
+      });
+      return started;
+    });
+    setup("/workbench/seo-workbench.main?project=p1&view=ai");
+    const [, answered] = await screen.findAllByText("best short drama apps");
+    const row = answered.closest("tr")!;
+    expect(within(row).getByText("seo.aiMentioned")).toBeVisible();
+    expect(within(row).getByText("Rival")).toBeVisible();
+    expect(seoApi.aiVisibility).toHaveBeenCalledWith("p1", {
+      run_id: undefined,
+      branded: "neutral",
+      gap: false,
+    });
+
+    fireEvent.click(within(row).getByRole("button", { name: "seo.aiOpen" }));
+    expect(await screen.findByText(markdown)).toBeVisible();
+    expect(seoApi.aiAnswer).toHaveBeenCalledWith("p1", "r1", "q1", "chatgpt");
+    expect(document.querySelector("img[src='x']")).toBeNull();
+    expect(screen.getByRole("link", { name: "Rival top" })).toHaveAttribute(
+      "href",
+      "https://rival.com/top",
+    );
+
+    fireEvent.change(screen.getByLabelText("seo.aiAddPrompts"), {
+      target: { value: "free apps\nfree apps" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "seo.aiAddPrompts" }));
+    });
+    expect(seoApi.addAiPrompts).toHaveBeenCalledWith("p1", ["free apps"], "");
+    expect(seoApi.startAiCheck).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "seo.aiCheck" }));
+    const confirm = await screen.findAllByRole("button", {
+      name: "seo.serpConfirmBuy",
+    });
+    await act(async () => {
+      fireEvent.click(confirm[confirm.length - 1]);
+    });
+    expect(seoApi.startAiCheck).toHaveBeenCalledWith("p1", {
+      idempotency_key: expect.any(String),
+      confirm_paid: true,
+      max_cost_usd: 0.004,
+    });
+    expect(await screen.findByText("seo.aiRunning")).toBeVisible();
+    expect(screen.getByRole("button", { name: "seo.aiCheck" })).toBeDisabled();
   });
 });
 describe("static private report preview", () => {

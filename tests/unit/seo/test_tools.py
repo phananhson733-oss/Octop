@@ -58,6 +58,24 @@ def tool_env(monkeypatch):
         history=AsyncMock(return_value=[]),
     )
     monkeypatch.setattr("octop.infra.seo.rank.SeoRankService", lambda seo: seo.ranks)
+    service.ai = SimpleNamespace(
+        results=AsyncMock(
+            return_value={
+                "settings": {"engines": ["chatgpt"]},
+                "prompts": [],
+                "runs": [],
+                "run": None,
+                "coverage": {},
+                "summaries": [],
+                "sources": [],
+                "rows": [],
+            }
+        ),
+        answer=AsyncMock(
+            return_value={"run_id": "r", "answer_markdown": None, "citations": [], "brands": []}
+        ),
+    )
+    monkeypatch.setattr("octop.infra.seo.ai_visibility.SeoAiService", lambda seo: seo.ai)
     tools = {tool.name: tool for tool in build_seo_tools(service, "agent-a", threads)}
     return configurable, threads, service, tools
 
@@ -127,6 +145,14 @@ async def test_agent_context_writes_are_attributed_and_serps_are_read_only(tool_
     service.ranks.results.assert_awaited_once_with(7, "project-a", "t", compare="30d")
     await tools["seo_get_rank_history"].ainvoke({"tracker_id": "t", "keyword_id": "k"})
     service.ranks.history.assert_awaited_once_with(7, "project-a", "t", "k")
+    await tools["seo_get_ai_visibility"].ainvoke(
+        {"run_id": "r", "view": "brands", "branded": "all", "gap": True}
+    )
+    service.ai.results.assert_awaited_once_with(7, "project-a", run_id="r", branded="all", gap=True)
+    with pytest.raises(OctopError):
+        await tools["seo_get_ai_visibility"].ainvoke({"view": "answers"})
+    await tools["seo_get_ai_answer"].ainvoke({"run_id": "r", "prompt_id": "p", "engine": "gemini"})
+    service.ai.answer.assert_awaited_once_with(7, "project-a", "r", "p", "gemini")
     assert not any(word in name for name in tools for word in ("buy", "fetch", "check"))
 
 
@@ -291,6 +317,56 @@ async def test_every_tool_result_stays_readable_at_maximum_size(tool_env):
     service.ranks.list_trackers.return_value = [
         tracker | {"tracker_id": f"t{i}", "domain": "d" * 253} for i in range(20)
     ]
+    brands = [{"name": "Example", "domain": "example.com", "own": True}] + [
+        {"name": "n" * 120, "domain": f"{'c' * 56}{i:02d}.com", "own": False} for i in range(100)
+    ]
+    matches = [
+        b | {"mentioned": True, "cited": True, "first_mention": i} for i, b in enumerate(brands)
+    ]
+    ai_run = {"run_id": "r", "status": "completed", "started_at": "x", "engines": ["chatgpt"]}
+    service.ai.results.return_value = {
+        "settings": {"engines": ["chatgpt"], "prompt_count": 100},
+        "prompts": [
+            {"prompt_id": f"p{i}", "topic": "t" * 100, "prompt": long * 10, "branded": False}
+            for i in range(100)
+        ],
+        "runs": [ai_run | {"run_id": f"r{i}", "brands": brands} for i in range(20)],
+        "run": ai_run | {"brands": brands, "answers_total": 300},
+        "coverage": {"answered": 300, "no_answer": 0, "failed": 0},
+        "summaries": [
+            b | {"answers": 300, "mentions": 300, "citations": 300, "avg_position": 1.5}
+            for b in brands
+        ],
+        "sources": [
+            {"domain": "d" * 253, "citations": 9, "answers": 9, "owner": None} for _ in range(50)
+        ],
+        "rows": [
+            {
+                "prompt_id": f"p{i}",
+                "prompt": long * 10,
+                "topic": "t" * 100,
+                "engine": "chatgpt",
+                "branded": False,
+                "status": "answered",
+                "brands": matches,
+                "citation_count": 2000,
+                "error": None,
+                "cost_usd": 0.004,
+                "checked_at": "x",
+            }
+            for i in range(300)
+        ],
+    }
+    service.ai.answer.return_value = {
+        "run_id": "r",
+        "prompt": long * 10,
+        "answer_markdown": "a" * 100_000,
+        "brands": matches,
+        "citations": [
+            {"url": f"https://x.com/{i}{'u' * 2000}", "title": "t" * 300, "position": i}
+            for i in range(2000)
+        ],
+    }
     service.get_run.return_value = run
     service.keyword_rows.return_value = saved
     service.list_runs.return_value = [run] * 300
@@ -326,6 +402,17 @@ async def test_every_tool_result_stays_readable_at_maximum_size(tool_env):
             "snapshots",
             200,
             "run_id",
+        ),
+        ("seo_list_ai_prompts", {}, "prompts", 100, "prompt_id"),
+        ("seo_get_ai_visibility", {}, "rows", 300, "prompt_id"),
+        ("seo_get_ai_visibility", {"view": "brands"}, "brands", 101, "domain"),
+        ("seo_get_ai_visibility", {"view": "sources"}, "sources", 50, None),
+        (
+            "seo_get_ai_answer",
+            {"run_id": "r", "prompt_id": "p", "engine": "chatgpt"},
+            "citations",
+            2000,
+            "position",
         ),
     ]:
         seen: list = []

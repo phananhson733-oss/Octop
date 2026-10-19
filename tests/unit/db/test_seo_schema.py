@@ -32,6 +32,10 @@ SEO_TABLES = {
     "seo_rank_keywords",
     "seo_rank_runs",
     "seo_rank_snapshots",
+    "seo_ai_settings",
+    "seo_ai_prompts",
+    "seo_ai_runs",
+    "seo_ai_answers",
 }
 
 

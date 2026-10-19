@@ -340,3 +340,21 @@ class Ga4Report(Command):
     ecommerce_breakdown: Literal["item", "landing_page"] | None = None
     only_with_transactions: bool = False
     audience_breakdown: Literal["device", "country", "new_vs_returning"] | None = None
+
+
+AiEngine = Literal["chatgpt", "gemini", "google_ai_overview"]
+AiPrompt = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
+AiTopic = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=100)]
+
+
+class AiEnginesPut(Command):
+    engines: list[AiEngine] = Field(min_length=1, max_length=3)
+
+
+class AiPromptsAdd(Command):
+    topic: AiTopic = "General"
+    prompts: list[AiPrompt] = Field(min_length=1, max_length=100)
+
+
+class AiCheckCreate(RankCheckCreate):
+    """The same approval as a rank check."""

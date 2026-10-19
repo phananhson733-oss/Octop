@@ -730,3 +730,100 @@ async def test_rank_tracking_over_http(env_with_agent, monkeypatch):
         (tracker_path + "/checks", "post"),
     ]:
         assert paths[route][method]["summary"], route
+
+
+async def test_ai_visibility_over_http(env_with_agent, monkeypatch):
+    import asyncio
+
+    import octop.infra.seo.ai_visibility as ai
+    import octop.infra.seo.service as module
+
+    client, server, auth, agent_id = env_with_agent
+    paths_asked = []
+
+    def supplier(request):
+        paths_asked.append(request.url.path)
+        result = {"markdown": "Example and Rival", "sources": [{"url": "https://example.com/"}]}
+        task = {"status_code": 20000, "cost": 0.004, "result": [result]}
+        return httpx.Response(200, json={"status_code": 20000, "tasks": [task]})
+
+    monkeypatch.setattr(
+        module,
+        "DataForSeoClient",
+        functools.partial(DataForSeoClient, transport=httpx.MockTransport(supplier)),
+    )
+    created = await client.post(
+        "/api/seo/projects",
+        headers=auth,
+        json={"name": "Example", "domain": "example.com", "agent_id": agent_id},
+    )
+    base = f"/api/seo/projects/{created.json()['project_id']}/ai-visibility"
+    await client.put(
+        "/api/seo/provider", headers=auth, json={"login": "fixture", "password": "secret"}
+    )
+    empty = await client.get(base, headers=auth)
+    assert empty.status_code == 200, empty.text
+    assert empty.json()["settings"]["engines"] == ["chatgpt", "gemini"]
+    for bad in ({"prompts": []}, {"prompts": ["x"], "topic": ""}):
+        assert (await client.post(base + "/prompts", headers=auth, json=bad)).status_code == 422
+    added = await client.post(
+        base + "/prompts", headers=auth, json={"prompts": ["best short drama apps"]}
+    )
+    assert added.json() == {"added": 1}
+    bad_engine = await client.put(base + "/engines", headers=auth, json={"engines": ["claude"]})
+    assert bad_engine.status_code == 422
+    put = await client.put(base + "/engines", headers=auth, json={"engines": ["chatgpt"]})
+    estimate = put.json()["settings"]["estimate_usd"]
+    assert estimate == 0.004
+    check = {"idempotency_key": "k", "confirm_paid": True, "max_cost_usd": estimate}
+    low = await client.post(base + "/checks", headers=auth, json=check | {"max_cost_usd": 0.001})
+    assert low.status_code == 409 and low.json()["error"]["details"]["reason"]
+    assert not paths_asked
+    started = await client.post(base + "/checks", headers=auth, json=check)
+    assert started.status_code == 202, started.text
+    assert started.json()["answers_total"] == 1
+    await asyncio.gather(*list(ai._CHECKS))
+    results = (await client.get(base, headers=auth, params={"branded": "all"})).json()
+    assert results["run"]["status"] == "completed"
+    assert paths_asked == ["/v3/ai_optimization/chat_gpt/llm_scraper/live/advanced"]
+    row = results["rows"][0]
+    assert (row["status"], row["brands"][0]["mentioned"], row["brands"][0]["cited"]) == (
+        "answered",
+        True,
+        True,
+    )
+    assert results["summaries"][0]["own"] and results["sources"][0]["owner"] == "own"
+    run_id = results["run"]["run_id"]
+    answer_path = f"{base}/runs/{run_id}/answers/{row['prompt_id']}/chatgpt"
+    answer = (await client.get(answer_path, headers=auth)).json()
+    assert answer["answer_markdown"] == "Example and Rival"
+    assert answer["citations"][0]["owner"] == "own"
+    assert (await client.get(base, headers=auth, params={"branded": "x"})).status_code == 422
+    assert (await client.get(base, headers=auth, params={"run_id": "x"})).status_code == 404
+    removed = await client.delete(f"{base}/prompts/{row['prompt_id']}", headers=auth)
+    assert removed.status_code == 204
+    gone = await client.delete(f"{base}/prompts/{row['prompt_id']}", headers=auth)
+    assert gone.status_code == 404
+
+    other = await create_user(client, auth, username="seo-ai-other")
+    for method, url, body in [
+        ("get", base, None),
+        ("post", base + "/checks", check),
+        ("get", answer_path, None),
+    ]:
+        kwargs = {"headers": other} | ({"json": body} if body is not None else {})
+        assert (await getattr(client, method)(url, **kwargs)).status_code == 403, url
+
+    from octop.api.app import build_app
+
+    paths = build_app(server).openapi()["paths"]
+    ai_path = "/api/seo/projects/{project_id}/ai-visibility"
+    for route, method in [
+        (ai_path, "get"),
+        (ai_path + "/engines", "put"),
+        (ai_path + "/prompts", "post"),
+        (ai_path + "/prompts/{prompt_id}", "delete"),
+        (ai_path + "/runs/{run_id}/answers/{prompt_id}/{engine}", "get"),
+        (ai_path + "/checks", "post"),
+    ]:
+        assert paths[route][method]["summary"], route

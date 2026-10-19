@@ -413,7 +413,7 @@ discovery.
 
 ## SEO workbench
 
-Admin only. Paid DataForSEO calls (`research`, `serps`, `lookups`, rank `checks`) require
+Admin only. Paid DataForSEO calls (`research`, `serps`, `lookups`, rank and AI visibility `checks`) require
 `confirm_paid: true` and an `idempotency_key`; the same key with the same
 input returns the earlier result instead of paying again. Deleting the bound
 expert keeps the project and its evidence with `agent_id: null` until it is
@@ -440,6 +440,12 @@ rebound.
 | `DELETE` | `/seo/projects/{id}/rank-trackers/{tracker_id}/keywords/{keyword_id}` | admin | stop tracking; its history stays |
 | `GET`    | `/seo/projects/{id}/rank-trackers/{tracker_id}/keywords/{keyword_id}/history` | admin | newest 200 saved positions, oldest first |
 | `POST`   | `/seo/projects/{id}/rank-trackers/{tracker_id}/checks` | admin | body `{max_cost_usd}` (≥ the tracker's `estimate_usd`) — paid: one live Google SERP per keyword and device, stopping at the domain's page, in the background → 202 run; one check at a time per tracker |
+| `GET`    | `/seo/projects/{id}/ai-visibility?run_id=&branded=neutral&gap=false` | admin | a check's answers (the newest by default): per prompt and engine whether each brand (the project and its saved competitors) is mentioned or cited, brand summaries, cited domains, the prompts, the newest 20 runs and `estimate_usd`; `branded` `neutral` leaves out prompts naming the project, `branded`/`all`; `gap` keeps answers naming a competitor but not the project |
+| `PUT`    | `/seo/projects/{id}/ai-visibility/engines` | admin | body `{engines: [chatgpt, gemini, google_ai_overview]}` (default ChatGPT and Gemini) |
+| `POST`   | `/seo/projects/{id}/ai-visibility/prompts` | admin | body `{prompts: [1-100], topic?}` → `{added}` (free; 100 per project) |
+| `DELETE` | `/seo/projects/{id}/ai-visibility/prompts/{prompt_id}` | admin | stop asking a prompt; its answers stay with their checks |
+| `GET`    | `/seo/projects/{id}/ai-visibility/runs/{run_id}/answers/{prompt_id}/{engine}` | admin | one saved answer: its text (model output, shown as plain text) and cited pages marked own / competitor |
+| `POST`   | `/seo/projects/{id}/ai-visibility/checks` | admin | body `{max_cost_usd}` (≥ `estimate_usd`, $0.004 per prompt and engine) — paid: one live answer per prompt and engine (ChatGPT / Gemini LLM scrapers, AI Overviews from a live Google SERP), in the background → 202 run; one check at a time per project |
 | `GET`/`PATCH` | `/seo/projects/{id}/context` | admin | project background; `PATCH {updates: [...]}` applies all ops or none |
 | `GET`/`POST` | `/seo/projects/{id}/keywords` | admin | saved keywords (paged) / save rows from a run |
 | `GET`    | `/seo/projects/{id}/report-context?run_id=` | admin | evidence and `context_hash` for an agent report |

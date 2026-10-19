@@ -43,6 +43,7 @@ import { attemptKey } from "./attemptKey";
 import { AuditPanel } from "./AuditPanel";
 import { CompetitorsPanel } from "./CompetitorsPanel";
 import { RankTrackingPanel } from "./RankTrackingPanel";
+import { AiVisibilityPanel } from "./AiVisibilityPanel";
 import { ProjectContextPanel } from "./ProjectContextPanel";
 import { SearchPerformancePanel } from "./SearchPerformancePanel";
 import { SerpPanel } from "./SerpPanel";
@@ -666,6 +667,7 @@ function ProjectWorkspace({
             "search",
             "competitors",
             "rank",
+            "ai",
             "context",
           ].includes(view)
             ? view
@@ -1034,6 +1036,18 @@ function ProjectWorkspace({
                 domain={project.domain}
                 configured={configured}
                 isVisible={isVisible && view === "rank"}
+              />
+            ),
+          },
+          {
+            key: "ai",
+            label: t("seo.ai"),
+            children: (
+              <AiVisibilityPanel
+                key={id}
+                projectId={id}
+                configured={configured}
+                isVisible={isVisible && view === "ai"}
               />
             ),
           },

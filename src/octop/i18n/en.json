@@ -1233,6 +1233,14 @@
         "busy": "a check is already running for this tracker; wait for it to finish",
         "estimate_changed": "the keywords or settings changed since the estimate was shown; review the new estimate and confirm again"
       }
+    },
+    "ai": {
+      "errors": {
+        "too_many_prompts": "a project can hold at most 100 AI visibility prompts",
+        "no_prompts": "add prompts before checking AI visibility",
+        "busy": "an AI visibility check is already running for this project; wait for it to finish",
+        "estimate_changed": "the prompts or engines changed since the estimate was shown; review the new estimate and confirm again"
+      }
     }
   }
 }

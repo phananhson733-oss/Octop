@@ -202,6 +202,102 @@ export interface RankSnapshot {
   cost_usd: number | null;
   checked_at: string;
 }
+export type AiEngine = "chatgpt" | "gemini" | "google_ai_overview";
+export type AiBranded = "neutral" | "branded" | "all";
+export type AiAnswerStatus = "answered" | "no_answer" | "failed";
+export type AiOwner = "own" | "competitor" | null;
+export interface AiBrand {
+  name: string;
+  domain: string;
+  /** The project itself; the others are its saved competitors. */
+  own: boolean;
+}
+export interface AiBrandMatch extends AiBrand {
+  mentioned: boolean;
+  cited: boolean;
+  first_mention: number | null;
+}
+export interface AiPrompt {
+  prompt_id: string;
+  topic: string;
+  prompt: string;
+  created_at: string;
+  /** Names the project's brand or domain; left out of results by default. */
+  branded: boolean;
+}
+export interface AiRun {
+  run_id: string;
+  status: "running" | "completed" | "failed" | "unknown";
+  started_at: string;
+  completed_at: string | null;
+  engines: AiEngine[];
+  brands: AiBrand[];
+  prompts_total: number;
+  answers_total: number;
+  answers_done: number;
+  answers_failed: number;
+  cost_usd: number | null;
+  cost_known_usd: number;
+  estimate_usd: number;
+  error: string | null;
+}
+export interface AiAnswerRow {
+  prompt_id: string;
+  prompt: string;
+  topic: string;
+  engine: AiEngine;
+  branded: boolean;
+  status: AiAnswerStatus;
+  brands: AiBrandMatch[];
+  citation_count: number;
+  error: string | null;
+  cost_usd: number | null;
+  checked_at: string;
+}
+export interface AiBrandSummary extends AiBrand {
+  answers: number;
+  mentions: number;
+  citations: number;
+  avg_position: number | null;
+}
+export interface AiSource {
+  domain: string;
+  citations: number;
+  answers: number;
+  owner: AiOwner;
+}
+export interface AiVisibility {
+  settings: {
+    engines: AiEngine[];
+    location_code: number;
+    language_code: string;
+    prompt_count: number;
+    /** What the next check costs; sent back as max_cost_usd to approve it. */
+    estimate_usd: number;
+  };
+  brands: AiBrand[];
+  prompts: AiPrompt[];
+  runs: AiRun[];
+  run: AiRun | null;
+  branded: AiBranded;
+  gap: boolean;
+  coverage: { answered: number; no_answer: number; failed: number };
+  summaries: AiBrandSummary[];
+  sources: AiSource[];
+  rows: AiAnswerRow[];
+}
+export interface AiAnswer extends Omit<AiAnswerRow, "citation_count"> {
+  run_id: string;
+  /** Model output: show it as plain text. */
+  answer_markdown: string | null;
+  citations: {
+    url: string;
+    domain: string;
+    title: string | null;
+    position: number;
+    owner: AiOwner;
+  }[];
+}
 export const SECTION_KEYS = [
   "business_overview",
   "current_goal",
@@ -483,6 +579,7 @@ export interface GscInspection {
 const projectPath = (id: string) => `/seo/projects/${encodeURIComponent(id)}`;
 const trackerPath = (id: string, trackerId: string) =>
   `${projectPath(id)}/rank-trackers/${encodeURIComponent(trackerId)}`;
+const aiPath = (id: string) => `${projectPath(id)}/ai-visibility`;
 const auditPath = (id: string, auditId: string) =>
   `${projectPath(id)}/audits/${encodeURIComponent(auditId)}`;
 export const seoApi = {
@@ -610,6 +707,49 @@ export const seoApi = {
     },
   ) =>
     request<RankRun>(`${trackerPath(id, trackerId)}/checks`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  aiVisibility: (
+    id: string,
+    query: { run_id?: string; branded: AiBranded; gap: boolean },
+  ) =>
+    request<AiVisibility>(
+      `${aiPath(id)}?${new URLSearchParams({
+        ...(query.run_id ? { run_id: query.run_id } : {}),
+        branded: query.branded,
+        gap: String(query.gap),
+      })}`,
+    ),
+  setAiEngines: (id: string, engines: AiEngine[]) =>
+    request<AiVisibility>(`${aiPath(id)}/engines`, {
+      method: "PUT",
+      body: JSON.stringify({ engines }),
+    }),
+  addAiPrompts: (id: string, prompts: string[], topic?: string) =>
+    request<{ added: number }>(`${aiPath(id)}/prompts`, {
+      method: "POST",
+      body: JSON.stringify(topic ? { prompts, topic } : { prompts }),
+    }),
+  removeAiPrompt: (id: string, promptId: string) =>
+    request<void>(`${aiPath(id)}/prompts/${encodeURIComponent(promptId)}`, {
+      method: "DELETE",
+    }),
+  aiAnswer: (id: string, runId: string, promptId: string, engine: AiEngine) =>
+    request<AiAnswer>(
+      `${aiPath(id)}/runs/${encodeURIComponent(
+        runId,
+      )}/answers/${encodeURIComponent(promptId)}/${engine}`,
+    ),
+  startAiCheck: (
+    id: string,
+    data: {
+      idempotency_key: string;
+      confirm_paid: true;
+      max_cost_usd: number;
+    },
+  ) =>
+    request<AiRun>(`${aiPath(id)}/checks`, {
       method: "POST",
       body: JSON.stringify(data),
     }),

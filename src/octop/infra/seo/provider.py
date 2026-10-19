@@ -3,15 +3,18 @@
 Labs mapping follows OpenSEO d7ea785 research-data.ts/helpers.ts, SERP mapping
 follows lib/dataforseo/serp.ts and mcp/tools/get-serp-results.ts, competitor research
 follows lib/dataforseo/labs.ts, features/domain/services and mcp/tools/
-dataforseo-research-tools.ts (MIT).
+dataforseo-research-tools.ts, AI answers follow lib/dataforseo/ai-tracking.ts and
+features/ai-visibility/providers/dataforseoEvidence.ts (MIT).
 """
 
 from __future__ import annotations
 
 import math
+import re
 from collections.abc import Callable
 from itertools import zip_longest
 from typing import Any
+from urllib.parse import unquote_plus, urlsplit, urlunsplit
 
 import httpx
 
@@ -239,6 +242,138 @@ def map_serp_competitors(result: dict[str, Any]) -> list[dict[str, Any]]:
     return sorted(rows, key=lambda row: -(row["visibility"] or 0))
 
 
+AI_ENGINES = ("chatgpt", "gemini", "google_ai_overview")
+_AI_PATHS = {
+    "chatgpt": "ai_optimization/chat_gpt/llm_scraper/live/advanced",
+    "gemini": "ai_optimization/gemini/llm_scraper/live/advanced",
+    "google_ai_overview": "serp/google/organic/live/advanced",
+}
+# Live answers can take up to 120 seconds.
+AI_TIMEOUT_SECONDS = 150
+_IMAGE = re.compile(r"!\[[^\]]*\]\([^)\s]*\)")
+_LINK = re.compile(r"\[((?:[^\[\]]|\[[^\]]*\])*)\]\((https?://[^)\s]+)\)")
+_MARKS = re.compile(r"\*\*|__|`")
+_HEADING = re.compile(r"^#{1,6}\s+", re.MULTILINE)
+_BULLET = re.compile(r"^(\s*)[*+-]\s+", re.MULTILINE)
+_TRACKING_PARAM = re.compile(r"utm_.*|gclid|fbclid|msclkid", re.IGNORECASE)
+
+
+def safe_http_url(value: Any) -> str | None:
+    """``value`` when it is an http(s) URL without credentials, else ``None``.
+
+    Answers come from LLMs, which a crafted prompt can coax into ``javascript:`` links, and
+    a ``user@host`` link can show one host and open another.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parts = urlsplit(value)
+        if (
+            parts.scheme.lower() not in {"http", "https"}
+            or not parts.hostname
+            or parts.username
+            or parts.password
+        ):
+            return None
+        _ = parts.port  # raises on a malformed port
+    except ValueError:
+        return None
+    return value
+
+
+def _citation_pill(label: str, url: str) -> bool:
+    """``[1]`` or ``[example.com]`` marks a source, not prose naming a brand."""
+    text = re.sub(r"^\[|\]$", "", label).strip().lower()
+    if re.fullmatch(r"[0-9]+", text):
+        return True
+    try:
+        host = urlsplit(url).hostname or ""
+    except ValueError:
+        return False
+    return text.removeprefix("www.") == host.removeprefix("www.")
+
+
+def markdown_to_text(markdown: str) -> str:
+    """Answer prose for brand matching: no images, citation pills or markdown marks."""
+    text = _IMAGE.sub("", markdown)
+    text = _LINK.sub(lambda m: "" if _citation_pill(m.group(1), m.group(2)) else m.group(1), text)
+    text = _MARKS.sub("", text)
+    text = _HEADING.sub("", text)
+    return _BULLET.sub(r"\1", text)
+
+
+def _citation_url(raw: str) -> tuple[str, str] | None:
+    """The URL without its fragment and tracking parameters, and its host."""
+    if safe_http_url(raw) is None:
+        return None
+    parts = urlsplit(raw)
+    query = "&".join(
+        pair
+        for pair in parts.query.split("&")
+        if pair and not _TRACKING_PARAM.fullmatch(unquote_plus(pair.split("=", 1)[0]))
+    )
+    url = urlunsplit((parts.scheme.lower(), parts.netloc.lower(), parts.path or "/", query, ""))
+    return url, parts.hostname or ""
+
+
+def _citations(sources: list[Any]) -> list[dict[str, Any]]:
+    """Safe cited pages, first citation first, one per URL."""
+    found: dict[str, dict[str, Any]] = {}
+    for source in sources:
+        if not isinstance(source, dict) or not isinstance(source.get("url"), str):
+            continue
+        cited = _citation_url(source["url"]) if len(source["url"]) <= 16_384 else None
+        if cited is None:
+            continue
+        url, domain = cited
+        title = source.get("title")
+        title = title if isinstance(title, str) and len(title) <= 10_000 else None
+        if url in found:
+            found[url]["title"] = found[url]["title"] or title
+            continue
+        found[url] = {"url": url, "domain": domain, "title": title, "position": len(found) + 1}
+    return list(found.values())
+
+
+def _sources(value: Any) -> list[Any]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or len(value) > 2_000:
+        raise _MalformedResult
+    return value
+
+
+def map_ai_answer(result: dict[str, Any], engine: str) -> dict[str, Any]:
+    """An engine's answer and the pages it cites; no answer when the engine showed none.
+
+    The LLM scrapers return the answer as ``markdown`` with ``sources``. Google shows an AI
+    Overview as one SERP item, with references on it and on each of its parts.
+    """
+    if engine == "google_ai_overview":
+        overview = next(
+            (item for item in _item_list(result) if item.get("type") == "ai_overview"), {}
+        )
+        parts = overview.get("items") or []
+        if not isinstance(parts, list) or any(not isinstance(part, dict) for part in parts):
+            raise _MalformedResult
+        markdown = overview.get("markdown")
+        sources = _sources(overview.get("references"))
+        for part in parts:
+            sources = sources + _sources(part.get("references"))
+    else:
+        markdown = result.get("markdown")
+        sources = _sources(result.get("sources"))
+    if markdown is not None and (not isinstance(markdown, str) or len(markdown) > 1_000_000):
+        raise _MalformedResult
+    text = markdown_to_text(markdown) if markdown else ""
+    answered = bool(text.strip())
+    return {
+        "answer_markdown": markdown if answered else None,
+        "answer_text": text if answered else "",
+        "citations": _citations(sources),
+    }
+
+
 class DataForSeoClient:
     def __init__(
         self, login: str, password: str, *, transport: httpx.AsyncBaseTransport | None = None
@@ -340,6 +475,27 @@ class DataForSeoClient:
             no_results_ok=True,
         )
 
+    async def ai_answer(
+        self, *, engine: str, prompt: str, location_code: int, language_code: str
+    ) -> tuple[dict[str, Any], float | None, dict[str, Any]]:
+        """One live answer from ``engine`` to ``prompt`` in the market."""
+        payload: dict[str, Any] = {
+            # DataForSEO decodes %-escapes in keywords; escape literal % and +.
+            "keyword": prompt.replace("%", "%25").replace("+", "%2B"),
+            "location_code": location_code,
+            "language_code": language_code,
+        }
+        if engine == "google_ai_overview":
+            # Loads an overview Google renders after the page; refunded when none loads.
+            payload.update(depth=10, load_async_ai_overview=True)
+        return await self._result(
+            _AI_PATHS[engine],
+            payload,
+            lambda result: map_ai_answer(result, engine),
+            no_results_ok=True,
+            timeout=AI_TIMEOUT_SECONDS,
+        )
+
     async def domain_overview(
         self, *, target: str, location_code: int, language_code: str
     ) -> tuple[dict[str, Any], float | None, dict[str, Any]]:
@@ -402,11 +558,12 @@ class DataForSeoClient:
         mapper: Callable[[dict[str, Any]], T],
         *,
         no_results_ok: bool = False,
+        timeout: float = 60,
     ) -> tuple[T, float | None, dict[str, Any]]:
         """One charged task; ``mapper`` reads its first result (``{}`` when there is none)."""
         try:
             async with httpx.AsyncClient(
-                transport=self._transport, timeout=60, follow_redirects=False
+                transport=self._transport, timeout=timeout, follow_redirects=False
             ) as client:
                 response = await client.post(
                     "https://api.dataforseo.com/v3/" + path, json=[payload], auth=self._auth

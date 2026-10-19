@@ -171,3 +171,19 @@ balancebiketoddler.com 的审计只报了三类小问题，同一个站 ChatGPT 
 - **专家工具：** `seo_list_rank_trackers`、`seo_get_rank_results`、`seo_get_rank_history`，只读、免费，不能发起查询。
 
 表 `seo_rank_trackers`、`seo_rank_keywords`、`seo_rank_runs`、`seo_rank_snapshots` 追加在 `seo_workbench.sql` / `.pg.sql`，版本号不变。
+
+## 2026-10-19 R4：AI 可见度（提问追踪）
+
+移植 OpenSEO d7ea785 的 Prompt Tracking（`features/ai-visibility/services/aiVisibilityCollection.ts`、`aiVisibilityMatching.ts`、`aiVisibilityResults.ts`、`shared/ai-visibility-results.ts`、`providers/dataforseoEvidence.ts`、`lib/dataforseo/ai-tracking.ts`），只做手动查询。没做的：Claude 和 Perplexity（上游走按 token 计价的 LLM Responses 接口，解析也不同）、定时查询、Prompt Explorer（一条提问的追踪就能代替）、Prompt Research（上游靠 OpenRouter 生成，我们没有）、趋势图。
+
+- **提问和引擎：** 每个项目一组提问（最多 100 条，带主题，默认 General），引擎在 ChatGPT、Gemini、Google AI 概览里选（默认前两个），市场就是项目市场。加减提问、换引擎都免费。
+- **品牌：** 自己的品牌是项目名加域名（去掉 www），竞品取项目背景里保存的竞争对手。每次查询开始时把品牌名单存进这次记录，之后改竞品不会改旧结果。
+- **查询：** 每条提问、每个引擎买一次实时回答：ChatGPT、Gemini 走 DataForSEO LLM Scraper（`ai_optimization/{chat_gpt,gemini}/llm_scraper/live/advanced`），AI 概览走实时 Google 自然结果（`serp/google/organic/live/advanced`，`depth: 10`、`load_async_ai_overview: true`，没加载出概览的那部分会退款）。提问里的 `%`、`+` 先转义（DataForSEO 会解码）。单次请求最长等 150 秒；后台同时跑 5 个，每拿到一个就写一条回答、更新进度；页面每 3 秒刷新。一个项目同一时间只能有一次查询；没有重试。
+- **费用：** 照上游实时价，每条回答 $0.004。确认时把显示的金额交上去，服务器算出的比它高就拒绝。实际费用按每次返回的金额累加，有一次没拿到回复就记成未知。
+- **解析：** 回答正文去掉图片和引用角标（`[1]`、`[域名]`）、markdown 标记后用来找品牌；引用只收 http(s) 且不带账号密码的链接，去掉 # 和 utm_* / gclid / fbclid / msclkid，按网址去重编号。AI 概览取结果里 `type: ai_overview` 那一项的正文，引用取它自己和各段落的 `references`。没有正文就记成「没有 AI 回答」（AI 概览常见）。
+- **匹配：** 品牌名或域名作为整词出现在正文里算「被提到」（Unicode 规范化后比，正文里的网址和邮箱不算）；名字就是域名的品牌（如 rival.com）也认去掉后缀的词（rival），后缀只认项目四个市场常见的两段式（co.uk、com.au 等），没有引入公共后缀表。引用里有该品牌域名（含子域名）的网页算「被引用」。提问本身提到自己品牌或域名的算「含品牌提问」，默认不计入结果。
+- **结果：** 默认看最新一次查询（可选最近 20 次里的任意一次）。品牌汇总只数「有回答」的条目：被提到次数、被引用次数、平均位次（按每条回答里各品牌第一次出现的先后排）；失败和「没有 AI 回答」都不算没提到。另有被引用最多的 50 个域名（标出自己的和竞品的）、「只看提到竞品没提到你」的筛选，以及每条回答的原文和引用列表。回答原文是模型输出，页面只按纯文本显示。
+- **中断：** 和排名追踪一样，6 分钟没心跳（重启）就记为 unknown / interrupted、费用未知；已写下的回答照常算数。
+- **专家工具：** `seo_list_ai_prompts`、`seo_get_ai_visibility`（rows / brands / sources 三个视图分页）、`seo_get_ai_answer`（正文前 24000 字和引用），只读、免费，不能发起查询。
+
+表 `seo_ai_settings`、`seo_ai_prompts`、`seo_ai_runs`、`seo_ai_answers` 追加在 `seo_workbench.sql` / `.pg.sql`，版本号不变。
