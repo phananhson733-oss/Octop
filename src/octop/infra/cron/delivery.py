@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -29,6 +31,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Seconds between live history writes of one turn (see ``CronDeliveryCommand.live_history``).
+_LIVE_HISTORY_INTERVAL = 2.0
+
 
 @dataclass(frozen=True)
 class CronDeliveryCommand:
@@ -45,6 +50,8 @@ class CronDeliveryCommand:
     model: str | None
     mcp_servers: tuple[str, ...]
     title: str | None = None
+    # Write the turn's finished messages to the thread as they come, not only at the end.
+    live_history: bool = False
 
 
 class InteractionRequired(RuntimeError):
@@ -149,6 +156,8 @@ class CronDeliveryService:
         usage = UsageTracker()
         parts: list[str] = []
         interaction_required = False
+        written: set[str] = set()
+        last_written = 0.0
         try:
             from octop.infra.connectors.gateway.adapters.agently_cli import write_scope
 
@@ -160,6 +169,13 @@ class CronDeliveryService:
                         parts.append(str(chunk.get("content") or chunk.get("text") or ""))
                     elif chunk.get("type") == "hitl_required":
                         interaction_required = True
+                    elif (
+                        command.live_history
+                        and chunk.get("type") in ("state_snapshot", "state_update")
+                        and time.monotonic() - last_written >= _LIVE_HISTORY_INTERVAL
+                    ):
+                        last_written = time.monotonic()
+                        await self._project_finished(session.thread_id, tracker, written)
             if interaction_required:
                 raise InteractionRequired("cron agent run requires user interaction")
             outbound = strip_thinking("".join(parts)).strip()
@@ -278,6 +294,29 @@ class CronDeliveryService:
             is_admin=is_admin,
             locale=locale,
         )
+
+    async def _project_finished(
+        self,
+        thread_id: str,
+        tracker: TurnHistoryTracker,
+        written: set[str],
+    ) -> None:
+        """Write the turn's state messages that are new since the last call.
+
+        Only messages with an id: the repo skips those it already holds, so the full write at
+        the end of the turn does not repeat them. The streamed text has no id until the turn
+        ends and waits for that write. Off the event loop: it runs every few seconds for the
+        whole turn and may wait for a database connection.
+        """
+        fresh = [
+            item
+            for item in tracker.inputs
+            if item.message_id is not None and item.message_id not in written
+        ]
+        if not fresh:
+            return
+        await asyncio.to_thread(self._project_best_effort, thread_id, fresh)
+        written.update(item.message_id for item in fresh if item.message_id is not None)
 
     def _project_best_effort(
         self,

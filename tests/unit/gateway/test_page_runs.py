@@ -68,24 +68,30 @@ async def test_a_page_run_gets_its_own_thread_and_leaves_the_chat_alone(
     delivery = FakeDelivery()
     runs = PageRuns(gateway=SimpleNamespace(thread_registry=registry), delivery=delivery)  # type: ignore[arg-type]
 
-    run = await runs.start(
+    run, started = await runs.start(
         agent_id="a1", user_id=1, session="blog-x", prompt="按审稿意见改", title="改稿 x"
     )
     await asyncio.sleep(0)
     dm_key = ThreadRegistry.dashboard_key(agent_id="a1", user_id=1)
-    assert run.session_key != dm_key
+    assert started and run.session_key != dm_key
     assert registry.get_bound_thread_id(dm_key) == chat_thread
     assert run.thread_id not in (chat_thread, "")
     assert run.status == "running"
+    # Named and listed in the sidebar before the agent has answered.
+    thread = registry.get_thread(run.thread_id)
+    assert thread is not None and thread.title == "改稿 x" and thread.last_active > 0
     # A second press while it runs gets the same run, not a second turn.
-    again = await runs.start(agent_id="a1", user_id=1, session="blog-x", prompt="再来", title="t")
-    assert again is run and len(delivery.commands) == 1
+    again, started_again = await runs.start(
+        agent_id="a1", user_id=1, session="blog-x", prompt="再来", title="t"
+    )
+    assert again is run and not started_again and len(delivery.commands) == 1
     sent = delivery.commands[0]
-    assert (sent.session_key, sent.task_type, sent.title, sent.prompt) == (
+    assert (sent.session_key, sent.task_type, sent.title, sent.prompt, sent.live_history) == (
         run.session_key,
         "agent",
         "改稿 x",
         "按审稿意见改",
+        True,
     )
 
     await _settle(runs, delivery, "改好了")
@@ -93,14 +99,25 @@ async def test_a_page_run_gets_its_own_thread_and_leaves_the_chat_alone(
     assert run.finished_at is not None
     assert registry.get_bound_thread_id(dm_key) == chat_thread
 
-    # Same name continues the same thread; fresh starts a new one.
-    later = await runs.start(agent_id="a1", user_id=1, session="blog-x", prompt="p", title="t")
+    # Same name continues the same thread under the new task's title; fresh starts a new one.
+    later, _ = await runs.start(
+        agent_id="a1", user_id=1, session="blog-x", prompt="p", title="改写 x"
+    )
     assert later.thread_id == run.thread_id
+    later_thread = registry.get_thread(run.thread_id)
+    assert later_thread is not None and later_thread.title == "改写 x"
     await _settle(runs, delivery, "ok")
-    fresh = await runs.start(
+    fresh, _ = await runs.start(
         agent_id="a1", user_id=1, session="blog-x", prompt="p", title="t", fresh=True
     )
     assert fresh.thread_id != run.thread_id
+    await _settle(runs, delivery, "ok")
+    # Fresh under a name never used before makes one thread, not an empty one plus another.
+    first, _ = await runs.start(
+        agent_id="a1", user_id=1, session="new-1", prompt="p", title="新写", fresh=True
+    )
+    threads = registry.list_threads_for_session(session_key=first.session_key)
+    assert [t.thread_id for t in threads] == [first.thread_id]
     await _settle(runs, delivery, "ok")
 
 
@@ -108,10 +125,10 @@ async def test_a_question_to_the_user_and_a_failure_are_reported(registry: Threa
     delivery = FakeDelivery()
     runs = PageRuns(gateway=SimpleNamespace(thread_registry=registry), delivery=delivery)  # type: ignore[arg-type]
 
-    asked = await runs.start(agent_id="a1", user_id=1, session="new-1", prompt="p", title="t")
+    asked, _ = await runs.start(agent_id="a1", user_id=1, session="new-1", prompt="p", title="t")
     await asyncio.sleep(0)
     await _settle(runs, delivery, InteractionRequired("cron agent run requires user interaction"))
-    broke = await runs.start(agent_id="a1", user_id=1, session="new-2", prompt="p", title="t")
+    broke, _ = await runs.start(agent_id="a1", user_id=1, session="new-2", prompt="p", title="t")
     await asyncio.sleep(0)
     await _settle(runs, delivery, RuntimeError("model down"))
 
@@ -139,8 +156,10 @@ async def test_routes_are_for_the_owner_and_admins(registry: ThreadRegistry) -> 
         await start_page_run("a1", body, user=other, server=server)
     started = await start_page_run("a1", body, user=owner, server=server)
     await asyncio.sleep(0)
+    pressed_again = await start_page_run("a1", body, user=owner, server=server)
 
-    assert started.status == "running" and started.thread_id
+    assert started.status == "running" and started.thread_id and not started.reused
+    assert pressed_again.reused and pressed_again.run_id == started.run_id
     assert (await get_page_run("a1", started.run_id, user=admin, server=server)).run_id == (
         started.run_id
     )

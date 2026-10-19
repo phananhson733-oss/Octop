@@ -7,7 +7,7 @@ from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from octop.infra.cron.delivery import CronDeliveryCommand, CronDeliveryService
 from octop.infra.db.migrate import run_migrations
@@ -433,4 +433,60 @@ async def test_agent_failure_projects_the_prompt(tmp_path: Path) -> None:
     assert [row.role for row in page] == ["human", "ai"]
     assert "记得喝水" in page[0].message_json
     assert "先查一下" in page[1].message_json
+    db.close()
+
+
+@pytest.mark.asyncio
+async def test_live_history_writes_finished_messages_while_the_turn_runs(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("octop.infra.cron.delivery._LIVE_HISTORY_INTERVAL", 0.0)
+    db, session = _seed_dashboard_thread(tmp_path, thread_id="thr_live")
+    rows_mid_turn: list[str] = []
+    human = HumanMessage(content="改写这篇", id="m-human")
+    call = AIMessage(content="", id="m-call", tool_calls=[{"name": "read", "args": {}, "id": "t1"}])
+    result = ToolMessage(content="稿子内容", tool_call_id="t1", id="m-tool")
+    answer = AIMessage(content="改好了", id="m-answer")
+
+    async def _stream(_aid: str, _request: dict):
+        yield {"type": "state_update", "data": {"messages": [human, call]}}
+        yield {"type": "state_snapshot", "data": {"messages": [human, call, result]}}
+        page, _ = ThreadMessageRepo(db).page("thr_live", limit=10)
+        rows_mid_turn.extend(row.role for row in page)
+        yield {"type": "token", "content": "改好了"}
+        yield {"type": "state_snapshot", "data": {"messages": [human, call, result, answer]}}
+
+    agent_manager = MagicMock()
+    agent_manager.merge_turn_mcp_servers = MagicMock(return_value=None)
+    agent_manager.prepare_chat_mcp = AsyncMock(return_value=[])
+    agent_manager.stream = _stream
+    agent_manager.get_row = MagicMock(return_value=None)
+    gateway = MagicMock()
+    gateway.run_in_session = _run_locked
+    gateway.require_session = MagicMock(return_value=session)
+    gateway.push_session_text = AsyncMock()
+    gateway.notify_dashboard_push = AsyncMock()
+    repos = MagicMock()
+    repos.user_repo = UserRepo(db)
+    repos.thread_message_repo = ThreadMessageRepo(db)
+    service = CronDeliveryService(gateway=gateway, agent_manager=agent_manager, repos=repos)
+
+    reply = await service.deliver(
+        _command(
+            task_type="agent",
+            prompt="改写这篇",
+            session_key=session.session_key,
+            live_history=True,
+        )
+    )
+
+    assert reply == "改好了"
+    assert rows_mid_turn == ["human", "ai", "tool"]
+    page, _ = ThreadMessageRepo(db).page("thr_live", limit=10)
+    assert [(row.role, row.message_id) for row in page] == [
+        ("human", "m-human"),
+        ("ai", "m-call"),
+        ("tool", "m-tool"),
+        ("ai", "m-answer"),
+    ]
     db.close()

@@ -25,7 +25,8 @@ class PageRunBody(BaseModel):
         pattern=r"^[a-z0-9][a-z0-9-]{0,79}$",
         description=(
             "Name the page picks for this line of work. Runs with the same name share one "
-            "dashboard thread; a second start while one is running returns the running one."
+            "dashboard thread; a second start while one is running returns the running one "
+            "with reused: true."
         ),
     )
     title: str = Field(
@@ -48,9 +49,16 @@ class PageRunOut(BaseModel):
     finished_at: float | None
     reply: str = Field(..., description="The agent's visible reply when done (truncated)")
     error: str
+    reused: bool = Field(
+        False,
+        description=(
+            "On start: true when a run under this session name was still going, so that run "
+            "came back and this prompt was not sent"
+        ),
+    )
 
 
-def _out(run: PageRun) -> PageRunOut:
+def _out(run: PageRun, *, reused: bool = False) -> PageRunOut:
     return PageRunOut(
         run_id=run.run_id,
         agent_id=run.agent_id,
@@ -62,6 +70,7 @@ def _out(run: PageRun) -> PageRunOut:
         finished_at=run.finished_at,
         reply=run.reply,
         error=run.error,
+        reused=reused,
     )
 
 
@@ -72,9 +81,10 @@ def _out(run: PageRun) -> PageRunOut:
     description=(
         "For workbench pages, which cannot open the chat WebSocket. The turn runs like a "
         "scheduled agent task in a dashboard thread of its own (the caller's current chat "
-        "thread is untouched) and appears in the chat sidebar. Only the agent's owner and "
-        "admins; the agent must be running. Poll the run with GET; runs are kept in memory, "
-        "so after a restart the GET is 404 and the thread holds the outcome."
+        "thread is untouched). The thread gets the title and appears in the chat sidebar at "
+        "once, and the turn's messages are written to it as they come. Only the agent's owner "
+        "and admins; the agent must be running. Poll the run with GET; runs are kept in memory, "
+        "so after a restart the GET is 404 and the thread shows how far the turn got."
     ),
     response_model=PageRunOut,
 )
@@ -86,7 +96,7 @@ async def start_page_run(
 ) -> PageRunOut:
     require_agent_owner_row(agent_id, user=user, as_user=None, server=server)
     require_running_agent(server, agent_id)
-    run = await server.app_runtime.page_runs.start(
+    run, started = await server.app_runtime.page_runs.start(
         agent_id=agent_id,
         user_id=int(user.id),
         session=body.session,
@@ -94,7 +104,7 @@ async def start_page_run(
         title=body.title,
         fresh=body.fresh,
     )
-    return _out(run)
+    return _out(run, reused=not started)
 
 
 @router.get(
