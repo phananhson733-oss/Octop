@@ -1,4 +1,4 @@
-"""The expert's Search Console tools: identity binding, paging in Google's row space, trimming."""
+"""The expert's Search Console and Analytics tools: identity, paging, trimming."""
 
 import json
 from types import SimpleNamespace
@@ -14,7 +14,12 @@ from octop.infra.seo.tools import build_seo_tools
 def gsc_tools(monkeypatch):
     configurable = {"user": "7", "agent_id": "agent-a", "thread_id": "thread-a"}
     monkeypatch.setattr("octop.infra.seo.tools.get_config", lambda: {"configurable": configurable})
-    google = SimpleNamespace(gsc_performance=AsyncMock(), gsc_inspect=AsyncMock())
+    google = SimpleNamespace(
+        gsc_performance=AsyncMock(),
+        gsc_inspect=AsyncMock(),
+        ga4_overview=AsyncMock(return_value={"comparison": {}}),
+        ga4_report=AsyncMock(),
+    )
     monkeypatch.setattr("octop.infra.seo.google.service.SeoGoogleService", lambda _seo: google)
     threads = Mock()
     threads.get.return_value = SimpleNamespace(user_id=7, agent_id="agent-a")
@@ -114,3 +119,39 @@ async def test_a_foreign_thread_reads_no_search_console_data(gsc_tools):
     with pytest.raises(OctopError):
         await tools["seo_gsc_performance"].ainvoke({})
     google.gsc_performance.assert_not_awaited()
+
+
+async def test_ga4_tools_pass_blank_options_as_unset(gsc_tools):
+    google, _threads, tools = gsc_tools
+    await tools["seo_ga4_overview"].ainvoke({"trend": "weekly"})
+    assert google.ga4_overview.await_args.kwargs == {
+        "start_date": None,
+        "end_date": None,
+        "trend": "weekly",
+    }
+    google.ga4_report.return_value = {
+        "rows": [],
+        "row_count": 0,
+        "page_info": {"offset": 0, "limit": 100, "has_more": False, "next_offset": None},
+    }
+    await tools["seo_ga4_report"].ainvoke({"kind": "key_events", "breakdown": ""})
+    kwargs = google.ga4_report.await_args.kwargs
+    assert (kwargs["kind"], kwargs["breakdown"], kwargs["channel"]) == (
+        "key_events",
+        None,
+        "organic_search",
+    )
+
+
+async def test_ga4_rows_cut_to_fit_continue_after_the_last_one(gsc_tools):
+    google, _threads, tools = gsc_tools
+    rows = [{"landingPage": f"/{i:03d}" + "x" * 1500, "sessions": i} for i in range(100)]
+    google.ga4_report.return_value = {
+        "rows": rows,
+        "row_count": 100,
+        "page_info": {"offset": 200, "limit": 100, "has_more": False, "next_offset": None},
+    }
+    out = json.loads(await tools["seo_ga4_report"].ainvoke({"kind": "landing_pages"}))
+    assert 0 < out["row_count"] < 100 and len(out["rows"]) == out["row_count"]
+    assert out["page_info"]["has_more"] is True
+    assert out["page_info"]["next_offset"] == 200 + out["row_count"]

@@ -1,4 +1,4 @@
-"""SQL persistence for Google sign-in grants and Search Console property bindings."""
+"""SQL persistence for Google sign-in grants and Search Console / Analytics bindings."""
 
 from __future__ import annotations
 
@@ -108,9 +108,10 @@ class SeoGoogleRepo:
             )
 
     def delete_grant(self, user_id: int, grant_id: str) -> bool:
-        """Remove the grant; projects bound through it lose their property too."""
+        """Remove the grant; projects bound through it lose their properties too."""
         with self._db.transaction() as conn:
             conn.execute("DELETE FROM seo_gsc_connections WHERE grant_id=?", (grant_id,))
+            conn.execute("DELETE FROM seo_ga4_connections WHERE grant_id=?", (grant_id,))
             cur = conn.execute(
                 "DELETE FROM seo_google_grants WHERE user_id=? AND grant_id=?",
                 (user_id, grant_id),
@@ -147,4 +148,38 @@ class SeoGoogleRepo:
     def delete_gsc(self, project_id: str) -> bool:
         with self._db.transaction() as conn:
             cur = conn.execute("DELETE FROM seo_gsc_connections WHERE project_id=?", (project_id,))
+            return bool(cur.rowcount == 1)
+
+    def set_ga4(self, value: dict[str, Any]) -> None:
+        with self._db.transaction() as conn:
+            conn.execute(
+                "DELETE FROM seo_ga4_connections WHERE project_id=?", (value["project_id"],)
+            )
+            conn.execute(
+                "INSERT INTO seo_ga4_connections(project_id,grant_id,property_id,display_name,"
+                "time_zone,currency_code,connected_at) VALUES(?,?,?,?,?,?,?)",
+                (
+                    value["project_id"],
+                    value["grant_id"],
+                    value["property_id"],
+                    value["display_name"],
+                    value["time_zone"],
+                    value["currency_code"],
+                    value["connected_at"],
+                ),
+            )
+
+    def ga4(self, project_id: str) -> dict[str, Any] | None:
+        with self._db.connect() as conn:
+            row = conn.execute(
+                "SELECT c.project_id,c.grant_id,c.property_id,c.display_name,c.time_zone,"
+                "c.currency_code,c.connected_at,g.email FROM seo_ga4_connections c "
+                "JOIN seo_google_grants g ON g.grant_id=c.grant_id WHERE c.project_id=?",
+                (project_id,),
+            ).fetchone()
+        return dict(row) if row is not None else None
+
+    def delete_ga4(self, project_id: str) -> bool:
+        with self._db.transaction() as conn:
+            cur = conn.execute("DELETE FROM seo_ga4_connections WHERE project_id=?", (project_id,))
             return bool(cur.rowcount == 1)

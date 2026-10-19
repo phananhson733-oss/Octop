@@ -63,6 +63,11 @@ vi.mock("../../../api/modules/seo", async (importOriginal) => ({
     gscReport: vi.fn(),
     gscTable: vi.fn(),
     gscInspect: vi.fn(),
+    ga4: vi.fn(),
+    ga4Properties: vi.fn(),
+    bindGa4: vi.fn(),
+    unbindGa4: vi.fn(),
+    ga4Overview: vi.fn(),
   },
 }));
 vi.mock("../../../api/modules/octopThreads", () => ({
@@ -783,6 +788,23 @@ describe("search performance", () => {
         { key: "top query", clicks: 9, impressions: 90, ctr: 0.1, position: 2 },
       ],
     });
+    vi.mocked(seoApi.ga4).mockResolvedValue({ connection: null });
+    vi.mocked(seoApi.ga4Properties).mockResolvedValue({
+      accounts: [
+        {
+          ...account,
+          requires_reconnect: false,
+          api_disabled: false,
+          properties: [
+            {
+              property_id: "properties/123",
+              display_name: "Example web",
+              account_display_name: "Example account",
+            },
+          ],
+        },
+      ],
+    });
   });
   it("binds a verified property, then reads totals, queries and striking distance", async () => {
     setup("/workbench/seo-workbench.main?project=p1&view=search");
@@ -827,6 +849,102 @@ describe("search performance", () => {
     );
     fireEvent.click(screen.getByRole("tab", { name: "seo.gscStriking" }));
     expect(await screen.findByText("near query")).toBeVisible();
+  });
+  it("binds a GA4 property and compares organic traffic with the previous period", async () => {
+    const metrics = (sessions: number, keyEvents: number) => ({
+      sessions,
+      activeUsers: 80,
+      engagedSessions: 70,
+      engagementRate: 0.5,
+      keyEvents,
+      transactions: 0,
+      purchaseRevenue: 0,
+    });
+    vi.mocked(seoApi.bindGa4).mockResolvedValue({
+      project_id: "p1",
+      grant_id: "grant-one",
+      property_id: "properties/123",
+      display_name: "Example web",
+      time_zone: "America/New_York",
+      currency_code: "USD",
+      connected_at: 1,
+      email: "owner@example.com",
+    });
+    vi.mocked(seoApi.ga4Overview).mockResolvedValue({
+      source: {
+        property_id: "properties/123",
+        display_name: "Example web",
+        email: "owner@example.com",
+      },
+      request: {
+        requested_date_range: null,
+        resolved_date_range: {
+          start_date: "2026-09-21",
+          end_date: "2026-10-18",
+        },
+        previous_date_range: {
+          start_date: "2026-08-24",
+          end_date: "2026-09-20",
+        },
+        time_zone: "America/New_York",
+        currency_code: "USD",
+        channel: "organic_search",
+        trend: "daily",
+      },
+      current: metrics(150, 2),
+      previous: metrics(100, 8),
+      comparison: {
+        sessions: {
+          current: 150,
+          previous: 100,
+          absolute_change: 50,
+          percent_change: 0.5,
+        },
+        engagementRate: {
+          current: 0.5,
+          previous: 0.4,
+          absolute_change: 0.1,
+          percent_change: 0.25,
+        },
+        keyEvents: {
+          current: 2,
+          previous: 8,
+          absolute_change: -6,
+          percent_change: -0.75,
+        },
+      },
+      trend: [{ ...metrics(150, 2), date: "20261018" }],
+      diagnostics: [{ code: "key_events_sharp_decline" }],
+      has_limited_data: false,
+      warnings: [],
+    });
+    setup("/workbench/seo-workbench.main?project=p1&view=search");
+    const picker = await screen.findByRole("combobox", {
+      name: "seo.ga4Property",
+    });
+    await waitFor(() =>
+      expect(seoApi.ga4Properties).toHaveBeenCalledWith("p1"),
+    );
+    fireEvent.mouseDown(picker);
+    fireEvent.click(await screen.findByTitle("Example web · Example account"));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "seo.ga4Bind" }));
+    });
+    expect(seoApi.bindGa4).toHaveBeenCalledWith("p1", {
+      grant_id: "grant-one",
+      property_id: "properties/123",
+    });
+    expect(await screen.findByText("+50%")).toBeVisible();
+    expect(seoApi.ga4Overview).toHaveBeenCalledWith("p1", { trend: "daily" });
+    expect(screen.getByText("+10.0 pp")).toBeVisible();
+    expect(screen.getByText("-75%")).toBeVisible();
+    expect(screen.getByText("seo.ga4KeyEventsDrop")).toBeVisible();
+    fireEvent.click(screen.getByText("seo.ga4Weekly"));
+    await waitFor(() =>
+      expect(seoApi.ga4Overview).toHaveBeenLastCalledWith("p1", {
+        trend: "weekly",
+      }),
+    );
   });
   it("starts Google consent with the page to come back to", async () => {
     vi.mocked(seoApi.google).mockResolvedValue({

@@ -1,4 +1,4 @@
-"""Admin Google grants and per-project Search Console properties for the SEO workbench.
+"""Admin Google grants and per-project Search Console / Analytics properties for SEO.
 
 Ported from OpenSEO d7ea785 ``GscService.ts``, ``googleOAuth.ts`` and
 ``serverFunctions/searchPerformance.ts``. Grants are per admin and encrypted like the
@@ -11,7 +11,7 @@ import asyncio
 import json
 import secrets
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, date, datetime
 from functools import partial
 from typing import TYPE_CHECKING, Any
@@ -24,8 +24,11 @@ from pydantic import ValidationError
 from octop.infra.connectors.crypto import decrypt_credentials, encrypt_credentials
 from octop.infra.connectors.oauth.pkce import new_pkce_pair
 from octop.infra.errors import ErrorCode, OctopError
-from octop.infra.seo.google import gsc, oauth
+from octop.infra.seo.google import ga4, gsc, oauth
 from octop.infra.seo.models import (
+    Ga4Bind,
+    Ga4Overview,
+    Ga4Report,
     GscBind,
     GscInspect,
     GscPerformance,
@@ -75,11 +78,37 @@ def _account(grant: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _google_failure(exc: gsc.GscApiError) -> OctopError:
+def _message(exc: gsc.GoogleApiError) -> str:
+    """Google's own error message, or the start of the body when it has none."""
+    try:
+        message = json.loads(exc.body).get("error", {}).get("message")
+    except (ValueError, AttributeError):
+        message = None
+    return str(message or exc.body[:200])
+
+
+def _google_failure(exc: gsc.GoogleApiError) -> OctopError:
     if exc.denied:
         return _error(ErrorCode.SEO_GOOGLE_RECONNECT)
-    detail = "SERVICE_DISABLED" if exc.api_disabled else exc.body[:300]
+    detail = "SERVICE_DISABLED" if exc.api_disabled else _message(exc)[:300]
     return _error(ErrorCode.SEO_GOOGLE_API, google_status=exc.status, detail=detail)
+
+
+def _ga4_failure(exc: Exception) -> OctopError:
+    """Analytics errors. Unlike Search Console, a 403 means the account lost access to the
+    property (or the API is off), which a new consent does not fix, so only 401 asks for it."""
+    if isinstance(exc, ga4.Ga4Malformed):
+        return _error(ErrorCode.SEO_GOOGLE_API, google_status=0, detail="malformed report")
+    if isinstance(exc, httpx.HTTPError):
+        return _error(ErrorCode.SEO_GOOGLE_API, google_status=0, detail=type(exc).__name__)
+    assert isinstance(exc, gsc.GoogleApiError)
+    if exc.status == 401:
+        return _error(ErrorCode.SEO_GOOGLE_RECONNECT)
+    detail = "SERVICE_DISABLED" if exc.api_disabled else _message(exc)[:300]
+    return _error(ErrorCode.SEO_GOOGLE_API, google_status=exc.status, detail=detail)
+
+
+_GA4_ERRORS = (gsc.GoogleApiError, ga4.Ga4Malformed, httpx.HTTPError)
 
 
 def _rounded(row: dict[str, Any]) -> dict[str, Any]:
@@ -293,7 +322,7 @@ class SeoGoogleService:
         )
         return str(fresh["access_token"])
 
-    def _client(self, grant: dict[str, Any]) -> gsc.GscClient:
+    def _token(self, grant: dict[str, Any]) -> Callable[[], Awaitable[str]]:
         # A client serves one request; its parallel calls share one token, so an
         # expired grant is refreshed once rather than once per call.
         pending: asyncio.Future[str] | None = None
@@ -304,7 +333,13 @@ class SeoGoogleService:
                 pending = asyncio.ensure_future(self._access_token(grant))
             return await asyncio.shield(pending)
 
-        return gsc.GscClient(token, transport=self._transport)
+        return token
+
+    def _client(self, grant: dict[str, Any]) -> gsc.GscClient:
+        return gsc.GscClient(self._token(grant), transport=self._transport)
+
+    def _ga4_client(self, grant: dict[str, Any]) -> ga4.Ga4Client:
+        return ga4.Ga4Client(self._token(grant), transport=self._transport)
 
     # -- Search Console --------------------------------------------------------------
 
@@ -327,7 +362,7 @@ class SeoGoogleService:
                 return out | {"requires_reconnect": True}
             try:
                 sites = await self._client(grant).list_sites()
-            except gsc.GscApiError as exc:
+            except gsc.GoogleApiError as exc:
                 return out | {"requires_reconnect": exc.denied, "api_disabled": exc.api_disabled}
             except OctopError as exc:
                 if exc.code != ErrorCode.SEO_GOOGLE_RECONNECT:
@@ -355,7 +390,7 @@ class SeoGoogleService:
             raise _error(ErrorCode.NOT_FOUND)
         try:
             sites = await self._client(grant).list_sites()
-        except gsc.GscApiError as exc:
+        except gsc.GoogleApiError as exc:
             raise _google_failure(exc) from exc
         match = next((s for s in sites if s.get("siteUrl") == command.site_url), None)
         if match is None:
@@ -395,7 +430,7 @@ class SeoGoogleService:
     ) -> list[dict[str, Any]]:
         try:
             return await client.query(site_url, body)
-        except gsc.GscApiError as exc:
+        except gsc.GoogleApiError as exc:
             raise _google_failure(exc) from exc
         except httpx.HTTPError as exc:
             raise _error(
@@ -580,7 +615,7 @@ class SeoGoogleService:
             # per URL; a grant that cannot mint a token still fails the whole call.
             try:
                 result = await client.inspect(connection["site_url"], url, command.language_code)
-            except gsc.GscApiError as exc:
+            except gsc.GoogleApiError as exc:
                 results.append({"url": url, "result": None, "error": _detail(exc)})
                 continue
             except httpx.HTTPError as exc:
@@ -589,10 +624,201 @@ class SeoGoogleService:
             results.append({"url": url, "result": result})
         return {"site_url": connection["site_url"], "results": results}
 
+    # -- Analytics -------------------------------------------------------------------
 
-def _detail(exc: gsc.GscApiError) -> str:
-    try:
-        message = json.loads(exc.body).get("error", {}).get("message")
-    except (ValueError, AttributeError):
-        message = None
-    return f"{exc.status}: {message or exc.body[:200]}"
+    async def ga4_connection(self, user_id: int, project_id: str) -> dict[str, Any] | None:
+        await self.seo._project(user_id, project_id)
+        return await _db(self.repo.ga4, project_id)
+
+    async def ga4_properties(self, user_id: int, project_id: str) -> dict[str, Any]:
+        """Each grant's Analytics properties, or why they could not be listed."""
+        await self.seo._project(user_id, project_id)
+        grants = await _db(self.repo.grants, user_id)
+
+        async def listed(grant: dict[str, Any]) -> dict[str, Any]:
+            out = _account(grant) | {
+                "properties": [],
+                "requires_reconnect": False,
+                "api_disabled": False,
+            }
+            if oauth.GA4_SCOPE not in grant["scopes"]:
+                return out | {"requires_reconnect": True}
+            try:
+                properties = await self._ga4_client(grant).list_properties()
+            except gsc.GoogleApiError as exc:
+                return out | {
+                    "requires_reconnect": exc.status == 401,
+                    "api_disabled": exc.api_disabled,
+                }
+            except OctopError as exc:
+                if exc.code != ErrorCode.SEO_GOOGLE_RECONNECT:
+                    raise
+                return out | {"requires_reconnect": True}
+            except _GA4_ERRORS as exc:
+                raise _ga4_failure(exc) from exc
+            return out | {"properties": properties}
+
+        return {"accounts": list(await asyncio.gather(*(listed(g) for g in grants)))}
+
+    async def ga4_bind(self, user_id: int, project_id: str, **kwargs: Any) -> dict[str, Any]:
+        """Bind a property the grant can read; its time zone and currency are kept."""
+        await self.seo._project(user_id, project_id)
+        try:
+            command = Ga4Bind.model_validate(kwargs)
+        except ValidationError as exc:
+            raise _error(ErrorCode.SEO_INVALID_INPUT) from exc
+        grant = await _db(self.repo.grant, user_id, command.grant_id)
+        if grant is None:
+            raise _error(ErrorCode.NOT_FOUND)
+        client = self._ga4_client(grant)
+        try:
+            listed = await client.list_properties()
+            if not any(p["property_id"] == command.property_id for p in listed):
+                raise _error(ErrorCode.NOT_FOUND)
+            prop = await client.get_property(command.property_id)
+        except _GA4_ERRORS as exc:
+            raise _ga4_failure(exc) from exc
+        await _db(
+            self.repo.set_ga4,
+            prop
+            | {
+                "project_id": project_id,
+                "grant_id": grant["grant_id"],
+                "connected_at": int(self._clock()),
+            },
+        )
+        connection = await _db(self.repo.ga4, project_id)
+        assert connection is not None
+        return connection
+
+    async def ga4_unbind(self, user_id: int, project_id: str) -> None:
+        await self.seo._project(user_id, project_id)
+        await _db(self.repo.delete_ga4, project_id)
+
+    async def _ga4_bound(
+        self, user_id: int, project_id: str
+    ) -> tuple[dict[str, Any], ga4.Ga4Client]:
+        await self.seo._project(user_id, project_id)
+        connection = await _db(self.repo.ga4, project_id)
+        if connection is None:
+            raise _error(ErrorCode.SEO_GOOGLE_NOT_CONNECTED)
+        grant = await _db(self.repo.grant, user_id, connection["grant_id"])
+        if grant is None:
+            raise _error(ErrorCode.SEO_GOOGLE_NOT_CONNECTED)
+        return connection, self._ga4_client(grant)
+
+    def _ga4_dates(
+        self, connection: dict[str, Any], start_date: str | None, end_date: str | None
+    ) -> dict[str, Any]:
+        try:
+            return ga4.resolve_date_range(
+                start_date=start_date,
+                end_date=end_date,
+                time_zone=connection["time_zone"],
+                now=self._clock(),
+            )
+        except ga4.Ga4Invalid as exc:
+            raise OctopError.localized(ErrorCode.SEO_INVALID_INPUT, message=str(exc)) from exc
+
+    @staticmethod
+    def _ga4_source(connection: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "property_id": connection["property_id"],
+            "display_name": connection["display_name"],
+            "email": connection["email"],
+        }
+
+    async def ga4_overview(self, user_id: int, project_id: str, **kwargs: Any) -> dict[str, Any]:
+        """Organic totals against the previous equal-length period, plus a trend."""
+        try:
+            command = Ga4Overview.model_validate(kwargs)
+        except ValidationError as exc:
+            raise _error(ErrorCode.SEO_INVALID_INPUT) from exc
+        connection, client = await self._ga4_bound(user_id, project_id)
+        dates = self._ga4_dates(connection, command.start_date, command.end_date)
+        start, end = dates["resolved"]["start_date"], dates["resolved"]["end_date"]
+        previous = ga4.previous_period(start, end)
+        requests = (
+            ga4.overview_request(start, end),
+            ga4.overview_request(previous["start_date"], previous["end_date"]),
+            ga4.overview_request(start, end, command.trend),
+        )
+        prop = connection["property_id"]
+        try:
+            answers = await asyncio.gather(*(client.run_report(prop, body) for body in requests))
+            current, before, trend = (
+                ga4.normalize(answer, body) for answer, body in zip(answers, requests, strict=True)
+            )
+        except _GA4_ERRORS as exc:
+            raise _ga4_failure(exc) from exc
+        result = ga4.overview(current, before, trend)
+        truncated = result.pop("trend_truncated")
+        return {
+            "source": self._ga4_source(connection),
+            "request": {
+                "requested_date_range": dates["requested"],
+                "resolved_date_range": dates["resolved"],
+                "previous_date_range": previous,
+                "time_zone": connection["time_zone"],
+                "currency_code": connection["currency_code"],
+                "channel": "organic_search",
+                "trend": command.trend,
+            },
+            **result,
+            "warnings": dates["warnings"] + (["trend_truncated"] if truncated else []),
+        }
+
+    async def ga4_report(self, user_id: int, project_id: str, **kwargs: Any) -> dict[str, Any]:
+        """One page of a report kind; ``next_offset`` continues it."""
+        try:
+            command = Ga4Report.model_validate(kwargs)
+        except ValidationError as exc:
+            raise _error(ErrorCode.SEO_INVALID_INPUT) from exc
+        connection, client = await self._ga4_bound(user_id, project_id)
+        dates = self._ga4_dates(connection, command.start_date, command.end_date)
+        options = command.model_dump(
+            exclude={"start_date", "end_date", "limit", "offset", "channel"}
+        )
+        options.pop("only_with_transactions")
+        config = ga4.report_configuration(**options)
+        body = ga4.report_request(
+            **command.model_dump(exclude={"start_date", "end_date"}), **dates["resolved"]
+        )
+        try:
+            report = ga4.normalize(await client.run_report(connection["property_id"], body), body)
+        except _GA4_ERRORS as exc:
+            raise _ga4_failure(exc) from exc
+        rows = report["rows"]
+        next_offset = command.offset + len(rows)
+        has_more = next_offset < report["total_row_count"]
+        config.pop("order")
+        return {
+            "source": self._ga4_source(connection),
+            "request": {
+                "requested_date_range": dates["requested"],
+                "resolved_date_range": dates["resolved"],
+                "time_zone": connection["time_zone"],
+                "currency_code": connection["currency_code"],
+                # Site search keeps every channel: its filter is the search event.
+                "channel": "all" if command.kind == "site_search" else command.channel,
+                **config,
+                "limit": command.limit,
+                "offset": command.offset,
+            },
+            "row_count": len(rows),
+            "total_row_count": report["total_row_count"],
+            "rows": rows,
+            "page_info": {
+                "offset": command.offset,
+                "limit": command.limit,
+                "has_more": has_more,
+                "next_offset": next_offset if has_more else None,
+            },
+            "report_metadata": report["metadata"],
+            "quota": report["quota"],
+            "warnings": dates["warnings"],
+        }
+
+
+def _detail(exc: gsc.GoogleApiError) -> str:
+    return f"{exc.status}: {_message(exc)}"

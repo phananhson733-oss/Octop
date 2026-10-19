@@ -450,3 +450,71 @@ async def test_search_console_over_http(env_with_agent, monkeypatch):
     gone = await client.delete(f"/api/seo/google/accounts/{grant_id}", headers=auth)
     assert gone.status_code == 204
     assert (await client.get("/api/seo/google", headers=auth)).json()["accounts"] == []
+
+
+async def test_analytics_over_http(env_with_agent, monkeypatch):
+    from urllib.parse import parse_qs, urlsplit
+
+    import octop.api.routers.seo_google as router_module
+    from octop.infra.seo.google import ga4, oauth
+    from octop.infra.seo.google.service import SeoGoogleService
+    from tests.unit.seo.google.fakegoogle import PROPERTY, FakeGoogle
+
+    client, _server, auth, agent_id = env_with_agent
+    monkeypatch.setenv(oauth.CLIENT_ID_ENV, "client-1")
+    monkeypatch.setenv(oauth.CLIENT_SECRET_ENV, "secret-1")
+    status = (await client.get("/api/seo/google", headers=auth)).json()
+    fake = FakeGoogle(base=status["redirect_uri"].removesuffix(oauth.CALLBACK_PATH))
+    monkeypatch.setattr(
+        router_module,
+        "SeoGoogleService",
+        functools.partial(SeoGoogleService, transport=httpx.MockTransport(fake.handler)),
+    )
+    started = await client.post("/api/seo/google/connect", headers=auth, json={})
+    query = parse_qs(urlsplit(started.json()["authorize_url"]).query)
+    fake.verifiers["code-1"] = query["code_challenge"][0]
+    back = await client.get(
+        "/api/seo/google/callback", params={"state": query["state"][0], "code": "code-1"}
+    )
+    assert back.headers["location"] == "/workbench?seo_google=connected"
+    grant_id = (await client.get("/api/seo/google", headers=auth)).json()["accounts"][0]["grant_id"]
+    created = await client.post(
+        "/api/seo/projects",
+        headers=auth,
+        json={"name": "Example", "domain": "example.com", "agent_id": agent_id},
+    )
+    base = f"/api/seo/projects/{created.json()['project_id']}/ga4"
+    properties = (await client.get(f"{base}/properties", headers=auth)).json()
+    assert properties["accounts"][0]["properties"][0]["property_id"] == PROPERTY
+    bad = await client.put(base, headers=auth, json={"grant_id": grant_id, "property_id": "123"})
+    assert bad.status_code == 422
+    bound = await client.put(
+        base, headers=auth, json={"grant_id": grant_id, "property_id": PROPERTY}
+    )
+    assert bound.status_code == 200, bound.text
+    assert bound.json()["time_zone"] == "America/New_York"
+
+    headers = {"metricHeaders": [{"name": m} for m in ga4.OVERVIEW_METRICS]}
+    values = [{"value": v} for v in ("100", "80", "70", "0.7", "10", "4", "500")]
+    fake.reports = {
+        (): headers
+        | {"dimensionHeaders": [], "rows": [{"dimensionValues": [], "metricValues": values}]},
+        ("date",): headers
+        | {
+            "dimensionHeaders": [{"name": "date"}],
+            "rows": [{"dimensionValues": [{"value": "20261018"}], "metricValues": values}],
+        },
+    }
+    overview = await client.post(f"{base}/overview", headers=auth, json={})
+    assert overview.status_code == 200, overview.text
+    data = overview.json()
+    assert data["comparison"]["sessions"]["percent_change"] == 0
+    assert data["trend"][0]["date"] == "20261018"
+    report = await client.post(f"{base}/report", headers=auth, json={"kind": "site_search"})
+    assert report.status_code == 200, report.text
+    assert report.json()["request"]["channel"] == "all"
+    assert report.json()["rows"] == []
+    wrong = await client.post(f"{base}/report", headers=auth, json={"kind": "funnels"})
+    assert wrong.status_code == 422
+    assert (await client.delete(base, headers=auth)).status_code == 204
+    assert (await client.get(base, headers=auth)).json() == {"connection": None}

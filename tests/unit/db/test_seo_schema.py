@@ -26,6 +26,7 @@ SEO_TABLES = {
     "seo_google_states",
     "seo_google_grants",
     "seo_gsc_connections",
+    "seo_ga4_connections",
 }
 
 

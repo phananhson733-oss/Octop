@@ -6,7 +6,7 @@ from datetime import date
 import pytest
 
 from octop.infra.seo.google.gsc import (
-    GscApiError,
+    GoogleApiError,
     build_request,
     previous_period,
     resolve_date_range,
@@ -153,9 +153,9 @@ def test_previous_period_is_the_same_length_ending_the_day_before(start, end, pr
 
 
 def test_disabled_api_is_not_a_dead_grant():
-    disabled = GscApiError(
+    disabled = GoogleApiError(
         403, '{"error": {"status": "PERMISSION_DENIED", "details": "SERVICE_DISABLED"}}'
     )
     assert disabled.api_disabled and not disabled.denied
-    assert GscApiError(403, "{}").denied and GscApiError(401, "").denied
-    assert not GscApiError(429, "").denied
+    assert GoogleApiError(403, "{}").denied and GoogleApiError(401, "").denied
+    assert not GoogleApiError(429, "").denied

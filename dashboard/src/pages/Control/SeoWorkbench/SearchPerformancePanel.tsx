@@ -40,6 +40,7 @@ import {
 import { useServerTimezone } from "../../../hooks/useServerTimezone";
 import { formatServerIsoDateTime } from "../../../utils/formatMessageTime";
 import { apiErrorMessage } from "../../../utils/apiError";
+import { AnalyticsCard } from "./AnalyticsCard";
 import styles from "./index.module.less";
 
 const { Text, Paragraph } = Typography;
@@ -809,6 +810,11 @@ export function SearchPerformancePanel({ projectId }: { projectId: string }) {
       {notice && <Alert type="success" showIcon message={notice} />}
       {accounts}
       {binder}
+      <AnalyticsCard
+        projectId={projectId}
+        accountCount={accountCount}
+        version={version}
+      />
       {performance}
       {connection === null && google.configured && !accountCount && (
         <Empty description={t("seo.gscConnectFirst")} />

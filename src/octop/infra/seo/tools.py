@@ -445,6 +445,60 @@ def build_seo_tools(
                     index[f"{key}_count"] = len(values)
         return json.dumps(data, ensure_ascii=False)
 
+    async def ga4_overview(start_date: str = "", end_date: str = "", trend: str = "daily") -> str:
+        user_id, project_id, _thread_id = await context()
+        data = await google.ga4_overview(
+            user_id,
+            project_id,
+            start_date=start_date or None,
+            end_date=end_date or None,
+            trend=trend,
+        )
+        return json.dumps(data, ensure_ascii=False)
+
+    async def ga4_report(
+        kind: str,
+        start_date: str = "",
+        end_date: str = "",
+        channel: str = "organic_search",
+        limit: int = 100,
+        offset: int = 0,
+        include_date: bool = False,
+        breakdown: str = "",
+        acquisition_breakdown: str = "",
+        ecommerce_breakdown: str = "",
+        only_with_transactions: bool = False,
+        audience_breakdown: str = "",
+    ) -> str:
+        user_id, project_id, _thread_id = await context()
+        data = await google.ga4_report(
+            user_id,
+            project_id,
+            kind=kind,
+            start_date=start_date or None,
+            end_date=end_date or None,
+            channel=channel,
+            limit=limit,
+            offset=offset,
+            include_date=include_date,
+            breakdown=breakdown or None,
+            acquisition_breakdown=acquisition_breakdown or None,
+            ecommerce_breakdown=ecommerce_breakdown or None,
+            only_with_transactions=only_with_transactions,
+            audience_breakdown=audience_breakdown or None,
+        )
+        rows = data["rows"]
+        kept = _prefix(rows, MAX_RESULT_CHARS - 4_000)
+        if kept < len(rows):
+            # Continue right after the last row that fit.
+            data["rows"] = rows[:kept]
+            data["row_count"] = kept
+            data["page_info"] |= {
+                "has_more": True,
+                "next_offset": data["page_info"]["offset"] + kept,
+            }
+        return json.dumps(data, ensure_ascii=False)
+
     async def list_audits(offset: int = 0) -> str:
         user_id, project_id, _thread_id = await context()
         rows = await audits.list_audits(user_id, project_id)
@@ -630,6 +684,36 @@ def build_seo_tools(
             "seo_inspect_page for what the page serves now. Each URL must belong to the "
             "property; a failure for one URL is reported next to it. language_code is BCP-47, "
             "e.g. en-US. Read-only and free.",
+        ),
+        (
+            "seo_ga4_overview",
+            ga4_overview,
+            "Answer whether organic traffic is improving, from the Google Analytics 4 property "
+            "connected to this agent's project: Organic Search sessions, activeUsers, "
+            "engagedSessions, engagementRate (0-1), keyEvents, transactions and purchaseRevenue "
+            "(property currency), each against the previous equal-length period (comparison: "
+            "current, previous, absolute_change, percent_change as a 0-1 fraction), plus a "
+            "trend (daily rows keyed by date YYYYMMDD, or weekly by yearWeek). Defaults to the "
+            "28 days ending yesterday in the property's time zone; or start_date and end_date "
+            "(YYYY-MM-DD, both). diagnostics flags a sharp key-event drop; has_limited_data "
+            "means sampled or thresholded numbers. Read-only and free. Fails with a hint when "
+            "the project has no Analytics property bound or the Google grant expired.",
+        ),
+        (
+            "seo_ga4_report",
+            ga4_report,
+            "Read one page of a Google Analytics 4 report for this agent's project. kind: "
+            "landing_pages (sessions, users, engagement, key events, transactions, revenue by "
+            "landing page), page_performance (views, users, engagement seconds, key events by "
+            "page path; include_date=true adds a date dimension), key_events (by event, or "
+            "breakdown=event_and_landing_page), traffic_acquisition (acquisition_breakdown "
+            "channel_group, source_medium or campaign), ecommerce_performance "
+            "(ecommerce_breakdown item, or landing_page with only_with_transactions), "
+            "site_search (search terms, every channel), audience_breakdown (audience_breakdown "
+            "device, country or new_vs_returning). channel organic_search (default) or all. "
+            "Dates as for seo_ga4_overview. limit 1-1000 (default 100); when page_info.has_more "
+            "call again with offset=page_info.next_offset. Restricted metrics are null. "
+            "Read-only and free.",
         ),
         (
             "seo_inspect_page",

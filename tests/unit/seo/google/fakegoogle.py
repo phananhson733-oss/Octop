@@ -3,20 +3,22 @@
 import base64
 import hashlib
 import json
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 import jwt
 
-from octop.infra.seo.google import oauth
+from octop.infra.seo.google import ga4, oauth
 
 NOW = 1_800_000_000.0
 BASE = "https://octop.test"
 SITE = "sc-domain:example.com"
+PROPERTY = "properties/123"
 
 
 class FakeGoogle:
-    """Token endpoint, Search Console sites, Search Analytics and URL Inspection."""
+    """Token endpoint, Search Console (sites, Search Analytics, URL Inspection) and
+    Analytics (account summaries, property, runReport)."""
 
     def __init__(self, base: str = BASE) -> None:
         self.base = base
@@ -34,6 +36,34 @@ class FakeGoogle:
         self.sites_body = ""
         self.rows: dict[tuple[str, ...], list[dict]] = {}
         self.inspect_status: dict[str, int] = {}
+        # Two pages of account summaries, so paging is exercised.
+        self.summaries = [
+            {
+                "accountSummaries": [
+                    {
+                        "account": "accounts/1",
+                        "displayName": "Example Co",
+                        "propertySummaries": [{"property": PROPERTY, "displayName": "example.com"}],
+                    }
+                ],
+                "nextPageToken": "page 2",
+            },
+            {
+                "accountSummaries": [
+                    {
+                        "account": "accounts/2",
+                        "displayName": "Other",
+                        "propertySummaries": [
+                            {"property": "properties/999", "displayName": "other"}
+                        ],
+                    }
+                ]
+            },
+        ]
+        self.ga4_status = 200
+        self.ga4_body = ""
+        # runReport answers by dimension names; the default is a headerless empty report.
+        self.reports: dict[tuple[str, ...], dict] = {}
 
     def id_token(self, sub: str = "g-1") -> str:
         claims = {
@@ -99,4 +129,26 @@ class FakeGoogle:
                     }
                 },
             )
+        if url.startswith((ga4.ADMIN_API, ga4.DATA_API)) and self.ga4_status != 200:
+            return httpx.Response(self.ga4_status, text=self.ga4_body)
+        if url.startswith(f"{ga4.ADMIN_API}/accountSummaries"):
+            page = parse_qs(urlsplit(url).query).get("pageToken", [""])[0]
+            self.calls.append(("summaries", {"page": page, "auth": auth}))
+            return httpx.Response(200, json=self.summaries[1 if page == "page 2" else 0])
+        if url == f"{ga4.ADMIN_API}/{PROPERTY}":
+            self.calls.append(("property", {}))
+            return httpx.Response(
+                200,
+                json={
+                    "name": PROPERTY,
+                    "displayName": "example.com",
+                    "timeZone": "America/New_York",
+                    "currencyCode": "USD",
+                },
+            )
+        if url == f"{ga4.DATA_API}/{PROPERTY}:runReport":
+            body = json.loads(request.content)
+            self.calls.append(("ga4", body | {"auth": auth}))
+            names = tuple(d["name"] for d in body["dimensions"])
+            return httpx.Response(200, json=self.reports.get(names, {}))
         raise AssertionError(f"unexpected request {url}")

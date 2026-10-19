@@ -451,6 +451,10 @@ rebound.
 | `POST`   | `/seo/projects/{id}/gsc/report` | admin | body `{date_range, device?, country?, page_filter?, query_filter?}` — totals vs the previous period, daily series, striking-distance queries (best page 5–20), countries |
 | `POST`   | `/seo/projects/{id}/gsc/table` | admin | report filters plus `{dimension: query\|page, page, page_size ≤ 100}`; `has_next_page` from one extra row |
 | `POST`   | `/seo/projects/{id}/gsc/inspect` | admin | body `{urls: 1–10, language_code?}` — Google's stored index status; one URL's error is reported next to it |
+| `GET`/`PUT`/`DELETE` | `/seo/projects/{id}/ga4` | admin | the bound GA4 property; `PUT {grant_id, property_id: "properties/<n>"}` needs a property that grant can read |
+| `GET`    | `/seo/projects/{id}/ga4/properties` | admin | properties per connected account, with `requires_reconnect` / `api_disabled` |
+| `POST`   | `/seo/projects/{id}/ga4/overview` | admin | body `{start_date?, end_date?, trend: daily\|weekly}` — organic-search totals vs the previous equal-length period and a trend; days follow the property's time zone, default the last 28 complete days |
+| `POST`   | `/seo/projects/{id}/ga4/report` | admin | body `{kind, start_date?, end_date?, channel, limit ≤ 1000, offset, …breakdowns}` — one page of a report kind (`landing_pages`, `page_performance`, `key_events`, `traffic_acquisition`, `ecommerce_performance`, `site_search`, `audience_breakdown`); `page_info.next_offset` continues it |
 
 Site audits crawl on the server as `Octop-SEO-Audit/1.0`: robots.txt and its sitemaps are
 followed, one page at a time (1 s apart, backing off on `429`), without running JavaScript, and
@@ -458,7 +462,7 @@ only to public addresses (every DNS answer is checked; redirects are not followe
 crawl is stored as it runs, so an audit interrupted by a restart or deploy resumes where it
 stopped.
 
-Search Console needs `OCTOP_SEO_GOOGLE_CLIENT_ID` and `OCTOP_SEO_GOOGLE_CLIENT_SECRET` (a Google
+Search Console and GA4 need `OCTOP_SEO_GOOGLE_CLIENT_ID` and `OCTOP_SEO_GOOGLE_CLIENT_SECRET` (a Google
 OAuth web client with `GET /seo/google`'s `redirect_uri` registered). Tokens are stored
 encrypted per admin and refreshed on use; data is read live from Google on every call and
 nothing else is stored. `409 SEO_GOOGLE_NOT_CONFIGURED`, `SEO_GOOGLE_NOT_CONNECTED` or

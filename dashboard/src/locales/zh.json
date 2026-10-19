@@ -6811,6 +6811,24 @@
     "gscCallback_missing_code": "Google 没有返回授权码，请重试。",
     "gscCallback_not_configured": "服务器还没有配置 Google OAuth 客户端。",
     "gscCallback_code_rejected": "Google 拒绝了这次授权码，请重试。",
-    "gscCallback_scope_not_granted": "授权时没有勾选 Search Console 或 Analytics 的访问权限，请重新连接并勾选。"
+    "gscCallback_scope_not_granted": "授权时没有勾选 Search Console 或 Analytics 的访问权限，请重新连接并勾选。",
+    "ga4Title": "Analytics（自然搜索流量）",
+    "ga4Property": "GA4 媒体资源",
+    "ga4PickProperty": "选择这个站点的 GA4 媒体资源",
+    "ga4Bind": "绑定媒体资源",
+    "ga4NoProperties": "已连接的 Google 账号都读不到任何 GA4 媒体资源。",
+    "ga4Reconnect": "{{email}} 没有授权 Analytics，或授权已失效，请重新连接。",
+    "ga4ApiDisabled": "{{email}}：OAuth 客户端所在的 Google Cloud 项目没有启用 Google Analytics Admin API。",
+    "ga4BoundTo": "GA4 媒体资源 {{property}}（通过 {{email}}）",
+    "ga4UnbindConfirm": "确定把这个 GA4 媒体资源从项目上解绑？",
+    "ga4Daily": "按天",
+    "ga4Weekly": "按周",
+    "ga4RangeText": "{{start}} 至 {{end}}，对比 {{prevStart}} 至 {{prevEnd}}（媒体资源时区 {{zone}}）",
+    "ga4Sessions": "会话数",
+    "ga4ActiveUsers": "活跃用户",
+    "ga4EngagementRate": "互动率",
+    "ga4KeyEvents": "关键事件",
+    "ga4KeyEventsDrop": "自然搜索带来的关键事件比上一周期少了一半以上。",
+    "ga4LimitedData": "Google 对这份数据做了阈值处理、抽样或隐去了部分指标，数值小的项可能缺失。"
   }
 }

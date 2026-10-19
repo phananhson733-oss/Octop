@@ -183,11 +183,11 @@ def previous_period(start_date: str, end_date: str) -> tuple[str, str]:
     return (previous_end - length).isoformat(), previous_end.isoformat()
 
 
-class GscApiError(Exception):
-    """A Search Console call answered with a non-2xx status."""
+class GoogleApiError(Exception):
+    """A Google API call (Search Console or Analytics) answered with a non-2xx status."""
 
     def __init__(self, status: int, body: str) -> None:
-        super().__init__(f"Search Console API error ({status})")
+        super().__init__(f"Google API error ({status})")
         self.status = status
         self.body = body
 
@@ -199,6 +199,26 @@ class GscApiError(Exception):
     @property
     def denied(self) -> bool:
         return self.status in (401, 403) and not self.api_disabled
+
+
+async def request_json(
+    token: Callable[[], Awaitable[str]],
+    url: str,
+    body: dict[str, Any] | None = None,
+    *,
+    transport: httpx.AsyncBaseTransport | None = None,
+) -> dict[str, Any]:
+    """GET (no ``body``) or POST JSON with a bearer token; non-2xx raises ``GoogleApiError``."""
+    headers = {"Authorization": f"Bearer {await token()}"}
+    async with httpx.AsyncClient(timeout=60, transport=transport) as client:
+        if body is None:
+            response = await client.get(url, headers=headers)
+        else:
+            response = await client.post(url, headers=headers, json=body)
+    if response.status_code // 100 != 2:
+        raise GoogleApiError(response.status_code, response.text[:2000])
+    data = response.json()
+    return data if isinstance(data, dict) else {}
 
 
 class GscClient:
@@ -214,16 +234,7 @@ class GscClient:
         self._transport = transport
 
     async def _request(self, url: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
-        headers = {"Authorization": f"Bearer {await self._token()}"}
-        async with httpx.AsyncClient(timeout=60, transport=self._transport) as client:
-            if body is None:
-                response = await client.get(url, headers=headers)
-            else:
-                response = await client.post(url, headers=headers, json=body)
-        if response.status_code // 100 != 2:
-            raise GscApiError(response.status_code, response.text[:2000])
-        data = response.json()
-        return data if isinstance(data, dict) else {}
+        return await request_json(self._token, url, body, transport=self._transport)
 
     async def list_sites(self) -> list[dict[str, Any]]:
         """Properties on the grant: ``siteUrl`` and ``permissionLevel``."""

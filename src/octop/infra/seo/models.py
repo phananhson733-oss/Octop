@@ -235,3 +235,41 @@ class GscPerformance(Command):
         if bool(self.start_date) != bool(self.end_date):
             raise ValueError("give both start_date and end_date, or neither")
         return self
+
+
+Ga4Kind = Literal[
+    "landing_pages",
+    "page_performance",
+    "key_events",
+    "traffic_acquisition",
+    "ecommerce_performance",
+    "site_search",
+    "audience_breakdown",
+]
+
+
+class Ga4Bind(Command):
+    grant_id: str = Field(min_length=1, max_length=100)
+    property_id: str = Field(pattern=r"^properties/\d+$")
+
+
+class Ga4Overview(Command):
+    # Both or neither; dates are calendar days in the property's time zone.
+    start_date: GscDate | None = None
+    end_date: GscDate | None = None
+    trend: Literal["daily", "weekly"] = "daily"
+
+
+class Ga4Report(Command):
+    kind: Ga4Kind
+    start_date: GscDate | None = None
+    end_date: GscDate | None = None
+    channel: Literal["organic_search", "all"] = "organic_search"
+    limit: int = Field(default=100, ge=1, le=1000)
+    offset: int = Field(default=0, ge=0)
+    include_date: bool = False
+    breakdown: Literal["event", "event_and_landing_page"] | None = None
+    acquisition_breakdown: Literal["channel_group", "source_medium", "campaign"] | None = None
+    ecommerce_breakdown: Literal["item", "landing_page"] | None = None
+    only_with_transactions: bool = False
+    audience_breakdown: Literal["device", "country", "new_vs_returning"] | None = None

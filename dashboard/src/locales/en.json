@@ -6811,6 +6811,24 @@
     "gscCallback_missing_code": "Google sent no authorization code; try again.",
     "gscCallback_not_configured": "The server has no Google OAuth client yet.",
     "gscCallback_code_rejected": "Google rejected the authorization code; try again.",
-    "gscCallback_scope_not_granted": "Search Console and Analytics access were both left unchecked; connect again and check them."
+    "gscCallback_scope_not_granted": "Search Console and Analytics access were both left unchecked; connect again and check them.",
+    "ga4Title": "Analytics (organic search)",
+    "ga4Property": "GA4 property",
+    "ga4PickProperty": "Pick the site's GA4 property",
+    "ga4Bind": "Bind property",
+    "ga4NoProperties": "None of the connected Google accounts can read a GA4 property.",
+    "ga4Reconnect": "{{email}} has not granted Analytics access, or the grant has expired; connect it again.",
+    "ga4ApiDisabled": "{{email}}: the Google Analytics Admin API is not enabled in the OAuth client's Google Cloud project.",
+    "ga4BoundTo": "GA4 property {{property}} via {{email}}",
+    "ga4UnbindConfirm": "Unbind this GA4 property from the project?",
+    "ga4Daily": "Daily",
+    "ga4Weekly": "Weekly",
+    "ga4RangeText": "{{start}} – {{end}} vs {{prevStart}} – {{prevEnd}} (property time zone {{zone}})",
+    "ga4Sessions": "Sessions",
+    "ga4ActiveUsers": "Active users",
+    "ga4EngagementRate": "Engagement rate",
+    "ga4KeyEvents": "Key events",
+    "ga4KeyEventsDrop": "Organic key events fell by half or more against the previous period.",
+    "ga4LimitedData": "Google thresholded, sampled or withheld part of this data, so small numbers may be missing."
   }
 }

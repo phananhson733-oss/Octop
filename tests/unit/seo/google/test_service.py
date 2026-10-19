@@ -6,9 +6,9 @@ import httpx
 import pytest
 
 from octop.infra.errors import OctopError
-from octop.infra.seo.google import oauth
+from octop.infra.seo.google import ga4, oauth
 from octop.infra.seo.google.service import SeoGoogleService
-from tests.unit.seo.google.fakegoogle import BASE, NOW, SITE, FakeGoogle
+from tests.unit.seo.google.fakegoogle import BASE, NOW, PROPERTY, SITE, FakeGoogle
 
 
 @pytest.fixture
@@ -291,3 +291,172 @@ async def test_parallel_report_calls_refresh_an_expired_token_once(google_env):
     assert [f["grant_type"] for f in refreshes] == ["refresh_token"]
     auths = {body["auth"] for kind, body in fake.calls if kind == "query"}
     assert auths == {"Bearer at-2"}
+
+
+# -- Analytics ------------------------------------------------------------------------
+
+OVERVIEW_HEADERS = [{"name": m} for m in ga4.OVERVIEW_METRICS]
+
+
+def _overview_rows(*values):
+    return [{"dimensionValues": [], "metricValues": [{"value": v} for v in values]}]
+
+
+async def _ga4_project(google_env):
+    service, seo, repos, user, _other, fake, _clock = google_env
+    await _connect(service, fake, user)
+    project_id = await _project(seo, user)
+    grant_id = repos.seo_google_repo.grants(user)[0]["grant_id"]
+    return service, user, project_id, grant_id, fake
+
+
+async def test_ga4_lists_every_page_of_properties_and_binds_one_with_its_zone(google_env):
+    service, user, project_id, grant_id, fake = await _ga4_project(google_env)
+    listed = await service.ga4_properties(user, project_id)
+    assert [p["property_id"] for p in listed["accounts"][0]["properties"]] == [
+        PROPERTY,
+        "properties/999",
+    ]
+    assert [c[1]["page"] for c in fake.calls if c[0] == "summaries"] == ["", "page 2"]
+    with pytest.raises(OctopError) as missing:
+        await service.ga4_bind(user, project_id, grant_id=grant_id, property_id="properties/5")
+    assert missing.value.code == "NOT_FOUND"
+    with pytest.raises(OctopError) as unbound:
+        await service.ga4_overview(user, project_id)
+    assert unbound.value.code == "SEO_GOOGLE_NOT_CONNECTED"
+    connection = await service.ga4_bind(user, project_id, grant_id=grant_id, property_id=PROPERTY)
+    assert (connection["time_zone"], connection["currency_code"], connection["email"]) == (
+        "America/New_York",
+        "USD",
+        "owner@example.com",
+    )
+    assert (await service.ga4_connection(user, project_id))["display_name"] == "example.com"
+    await service.ga4_unbind(user, project_id)
+    assert await service.ga4_connection(user, project_id) is None
+
+
+async def test_ga4_overview_runs_three_organic_reports_in_the_property_calendar(google_env):
+    service, user, project_id, grant_id, fake = await _ga4_project(google_env)
+    await service.ga4_bind(user, project_id, grant_id=grant_id, property_id=PROPERTY)
+    fake.reports = {
+        (): {
+            "dimensionHeaders": [],
+            "metricHeaders": OVERVIEW_HEADERS,
+            "rows": _overview_rows("100", "80", "70", "0.7", "10", "4", "500"),
+            "rowCount": 1,
+        },
+        ("date",): {
+            "dimensionHeaders": [{"name": "date"}],
+            "metricHeaders": OVERVIEW_HEADERS,
+            "rows": [
+                {
+                    "dimensionValues": [{"value": "20270114"}],
+                    "metricValues": [{"value": v} for v in ("5", "4", "3", "0.6", "1", "0", "0")],
+                }
+            ],
+            "rowCount": 1,
+        },
+    }
+    result = await service.ga4_overview(user, project_id)
+    # NOW is 2027-01-15 08:00 UTC = 03:00 in New York: yesterday there is 2027-01-14.
+    assert result["request"]["resolved_date_range"] == {
+        "start_date": "2026-12-18",
+        "end_date": "2027-01-14",
+    }
+    assert result["request"]["previous_date_range"] == {
+        "start_date": "2026-11-20",
+        "end_date": "2026-12-17",
+    }
+    bodies = [body for kind, body in fake.calls if kind == "ga4"]
+    assert len(bodies) == 3
+    assert all(
+        b["dimensionFilter"]["filter"]["stringFilter"]["value"] == "Organic Search" for b in bodies
+    )
+    assert result["comparison"]["sessions"]["current"] == 100
+    assert result["trend"][0]["date"] == "20270114"
+    assert result["source"] == {
+        "property_id": PROPERTY,
+        "display_name": "example.com",
+        "email": "owner@example.com",
+    }
+    assert result["warnings"] == []
+
+
+async def test_ga4_report_pages_and_rejects_bad_dates_before_calling_google(google_env):
+    service, user, project_id, grant_id, fake = await _ga4_project(google_env)
+    await service.ga4_bind(user, project_id, grant_id=grant_id, property_id=PROPERTY)
+    fake.calls.clear()
+    with pytest.raises(OctopError) as reversed_range:
+        await service.ga4_report(
+            user, project_id, kind="landing_pages", start_date="2027-01-10", end_date="2027-01-01"
+        )
+    assert reversed_range.value.code == "SEO_INVALID_INPUT"
+    assert not [c for c in fake.calls if c[0] == "ga4"]
+    fake.reports = {
+        ("hostName", "pagePath"): {
+            "dimensionHeaders": [{"name": "hostName"}, {"name": "pagePath"}],
+            "metricHeaders": [
+                {"name": n}
+                for n in ("screenPageViews", "activeUsers", "userEngagementDuration", "keyEvents")
+            ],
+            "rows": [
+                {
+                    "dimensionValues": [{"value": "example.com"}, {"value": "/a"}],
+                    "metricValues": [{"value": v} for v in ("9", "7", "120.5", "1")],
+                }
+            ],
+            "rowCount": 5,
+        }
+    }
+    result = await service.ga4_report(
+        user, project_id, kind="page_performance", channel="all", limit=1, offset=2
+    )
+    body = [b for kind, b in fake.calls if kind == "ga4"][-1]
+    assert (body["offset"], body["limit"], "dimensionFilter" in body) == ("2", "1", False)
+    assert result["rows"] == [
+        {
+            "hostName": "example.com",
+            "pagePath": "/a",
+            "screenPageViews": 9,
+            "activeUsers": 7,
+            "userEngagementDuration": 120.5,
+            "keyEvents": 1,
+        }
+    ]
+    assert result["page_info"] == {"offset": 2, "limit": 1, "has_more": True, "next_offset": 3}
+    assert result["request"]["breakdown"] == "page"
+    assert result["request"]["channel"] == "all"
+
+
+async def test_ga4_errors_ask_for_a_reconnect_only_on_401(google_env):
+    service, user, project_id, grant_id, fake = await _ga4_project(google_env)
+    await service.ga4_bind(user, project_id, grant_id=grant_id, property_id=PROPERTY)
+    fake.ga4_status = 403
+    fake.ga4_body = '{"error": {"message": "User does not have sufficient permissions."}}'
+    with pytest.raises(OctopError) as lost:
+        await service.ga4_report(user, project_id, kind="landing_pages")
+    assert lost.value.code == "SEO_GOOGLE_API"
+    assert lost.value.details == {
+        "google_status": 403,
+        "detail": "User does not have sufficient permissions.",
+    }
+    fake.ga4_body = '{"error": {"details": [{"reason": "SERVICE_DISABLED"}]}}'
+    listed = await service.ga4_properties(user, project_id)
+    assert listed["accounts"][0]["api_disabled"] and not listed["accounts"][0]["requires_reconnect"]
+    fake.ga4_status, fake.ga4_body = 401, "{}"
+    with pytest.raises(OctopError) as expired:
+        await service.ga4_overview(user, project_id)
+    assert expired.value.code == "SEO_GOOGLE_RECONNECT"
+    # A report that does not match the request is Google's fault, not the caller's.
+    fake.ga4_status = 200
+    fake.reports = {(): {"dimensionHeaders": [{"name": "x"}], "metricHeaders": []}}
+    with pytest.raises(OctopError) as malformed:
+        await service.ga4_overview(user, project_id)
+    assert malformed.value.details["detail"] == "malformed report"
+
+
+async def test_disconnecting_the_account_drops_the_analytics_property(google_env):
+    service, user, project_id, grant_id, _fake = await _ga4_project(google_env)
+    await service.ga4_bind(user, project_id, grant_id=grant_id, property_id=PROPERTY)
+    await service.delete_account(user, grant_id)
+    assert await service.ga4_connection(user, project_id) is None

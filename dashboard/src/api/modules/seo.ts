@@ -243,6 +243,60 @@ export interface GscConnection {
   connected_at: number;
   email: string | null;
 }
+export interface Ga4Property {
+  /** properties/<number> */
+  property_id: string;
+  display_name: string;
+  account_display_name: string;
+}
+export interface Ga4AccountProperties extends GoogleAccount {
+  properties: Ga4Property[];
+  requires_reconnect: boolean;
+  api_disabled: boolean;
+}
+export interface Ga4Connection {
+  project_id: string;
+  grant_id: string;
+  property_id: string;
+  display_name: string;
+  /** Report days follow the property's time zone. */
+  time_zone: string;
+  currency_code: string;
+  connected_at: number;
+  email: string | null;
+}
+export interface Ga4DateRange {
+  start_date: string;
+  end_date: string;
+}
+export interface Ga4Comparison {
+  current: number | null;
+  previous: number | null;
+  absolute_change: number | null;
+  /** 0-1 fraction; null when the previous value is 0. */
+  percent_change: number | null;
+}
+export type Ga4Metrics = Record<string, number | null>;
+export interface Ga4Overview {
+  source: { property_id: string; display_name: string; email: string | null };
+  request: {
+    requested_date_range: Ga4DateRange | null;
+    resolved_date_range: Ga4DateRange;
+    previous_date_range: Ga4DateRange;
+    time_zone: string;
+    currency_code: string;
+    channel: string;
+    trend: "daily" | "weekly";
+  };
+  current: Ga4Metrics | null;
+  previous: Ga4Metrics | null;
+  comparison: Record<string, Ga4Comparison>;
+  /** Rows keyed by date (YYYYMMDD) or yearWeek and metric names. */
+  trend: (Ga4Metrics & { date?: string; yearWeek?: string })[];
+  diagnostics: { code: string }[];
+  has_limited_data: boolean;
+  warnings: string[];
+}
 export type GscDateRange =
   | "last_7_days"
   | "last_28_days"
@@ -464,4 +518,29 @@ export const seoApi = {
       `${projectPath(id)}/gsc/inspect`,
       { method: "POST", body: JSON.stringify({ urls }) },
     ),
+  ga4: (id: string) =>
+    request<{ connection: Ga4Connection | null }>(`${projectPath(id)}/ga4`),
+  ga4Properties: (id: string) =>
+    request<{ accounts: Ga4AccountProperties[] }>(
+      `${projectPath(id)}/ga4/properties`,
+    ),
+  bindGa4: (id: string, data: { grant_id: string; property_id: string }) =>
+    request<Ga4Connection>(`${projectPath(id)}/ga4`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  unbindGa4: (id: string) =>
+    request<void>(`${projectPath(id)}/ga4`, { method: "DELETE" }),
+  ga4Overview: (
+    id: string,
+    data: {
+      start_date?: string;
+      end_date?: string;
+      trend?: "daily" | "weekly";
+    },
+  ) =>
+    request<Ga4Overview>(`${projectPath(id)}/ga4/overview`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
 };
