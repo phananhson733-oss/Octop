@@ -289,6 +289,31 @@ async def test_agent_strips_orphan_thinking_prefix() -> None:
 
 
 @pytest.mark.asyncio
+async def test_agent_reply_is_returned_and_title_names_the_thread() -> None:
+    session = _session(channel_type="weixin")
+
+    async def _stream(_aid: str, _request: dict):
+        yield {"type": "token", "content": "改好了"}
+
+    agent_manager = MagicMock()
+    agent_manager.merge_turn_mcp_servers = MagicMock(return_value=None)
+    agent_manager.prepare_chat_mcp = AsyncMock(return_value=[])
+    agent_manager.stream = _stream
+    agent_manager.get_row = MagicMock(return_value=None)
+    gateway = MagicMock()
+    gateway.run_in_session = _run_locked
+    gateway.require_session = MagicMock(return_value=session)
+    gateway.push_session_text = AsyncMock()
+    service = CronDeliveryService(gateway=gateway, agent_manager=agent_manager, repos=MagicMock())
+
+    reply = await service.deliver(_command(task_type="agent", prompt="长长的指令", title="改稿"))
+    text = await service.deliver(_command(task_type="text"))
+
+    assert (reply, text) == ("改好了", None)
+    assert gateway.push_session_text.await_args_list[0].kwargs["title_source"] == "改稿"
+
+
+@pytest.mark.asyncio
 async def test_fresh_thread_resets_before_require_session() -> None:
     session = _session(channel_type="feishu")
     order: list[str] = []

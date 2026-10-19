@@ -44,6 +44,11 @@ class CronDeliveryCommand:
     task_type: CronTaskType
     model: str | None
     mcp_servers: tuple[str, ...]
+    title: str | None = None
+
+
+class InteractionRequired(RuntimeError):
+    """The agent turn stopped to wait for the user (approval or a question)."""
 
 
 class CronDeliveryService:
@@ -64,8 +69,12 @@ class CronDeliveryService:
         """Retarget projection and locale lookups after a control-plane swap."""
         self._repos = repos
 
-    async def deliver(self, command: CronDeliveryCommand) -> None:
-        """Run one delivery under the target channel session lock."""
+    async def deliver(self, command: CronDeliveryCommand) -> str | None:
+        """Run one delivery under the target channel session lock.
+
+        Returns the visible reply of an ``agent`` task (``None`` for ``text``).
+        """
+        outbound: list[str] = []
 
         async def _locked() -> None:
             if command.fresh_thread:
@@ -78,13 +87,14 @@ class CronDeliveryService:
             if command.task_type == "text":
                 await self._deliver_text(command, session)
             else:
-                await self._deliver_agent(command, session)
+                outbound.append(await self._deliver_agent(command, session))
 
         await self._gateway.run_in_session(
             command.agent_id,
             command.session_key,
             _locked,
         )
+        return outbound[0] if outbound else None
 
     async def _deliver_text(
         self,
@@ -133,7 +143,7 @@ class CronDeliveryService:
         self,
         command: CronDeliveryCommand,
         session: SessionRow,
-    ) -> None:
+    ) -> str:
         request = await self._build_agent_request(command, session)
         tracker = TurnHistoryTracker.from_request(request)
         usage = UsageTracker()
@@ -151,7 +161,7 @@ class CronDeliveryService:
                     elif chunk.get("type") == "hitl_required":
                         interaction_required = True
             if interaction_required:
-                raise RuntimeError("cron agent run requires user interaction")
+                raise InteractionRequired("cron agent run requires user interaction")
             outbound = strip_thinking("".join(parts)).strip()
             if not outbound:
                 raise RuntimeError("cron agent run produced no visible response")
@@ -171,9 +181,10 @@ class CronDeliveryService:
         await self._gateway.push_session_text(
             session,
             outbound,
-            title_source=command.prompt,
+            title_source=command.title or command.prompt,
         )
         await self._notify_best_effort(session, command.agent_id, outbound)
+        return outbound
 
     async def _build_agent_request(
         self,
@@ -321,5 +332,6 @@ def command_from_row(row: Any) -> CronDeliveryCommand:
 __all__ = [
     "CronDeliveryCommand",
     "CronDeliveryService",
+    "InteractionRequired",
     "command_from_row",
 ]

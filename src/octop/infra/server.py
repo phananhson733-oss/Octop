@@ -222,6 +222,7 @@ class AppRuntime:
     history_archive: Any | None = None
     bridge_manager: Any | None = None
     seo_audits: Any | None = None
+    page_runs: Any | None = None
 
     def replace_services(self, services: SharedServices, config: OctopConfig) -> None:
         """Retarget all runtime singletons onto a new SharedServices / config.
@@ -568,6 +569,10 @@ class OctopServer:
             history_archive=history_archive,
             bridge_manager=bridge_mgr,
         )
+        from octop.infra.gateway.page_runs import PageRuns  # noqa: PLC0415
+
+        # Agent turns started from workbench pages run through the same delivery as cron.
+        self.app_runtime.page_runs = PageRuns(gateway=gateway, delivery=cron_delivery)
         from octop.infra.seo.audit.render import open_chromium_renderer  # noqa: PLC0415
         from octop.infra.seo.audit.runner import SeoAuditRunner  # noqa: PLC0415
 
