@@ -215,10 +215,9 @@ class TurnHistoryTracker:
     def _inputs_cover_stream(self, items: list[ThreadMessageInput]) -> bool:
         if not self._stream_text:
             return False
-        return any(
-            item.role in _ASSISTANT_ROLES and self._stream_text in _wire_text(item)
-            for item in items
-        )
+        # A turn with tool calls streams the text of each of its assistant messages back to back.
+        said = "".join(_wire_text(item) for item in items if item.role in _ASSISTANT_ROLES)
+        return self._stream_text in said
 
     @property
     def inputs(self) -> list[ThreadMessageInput]:

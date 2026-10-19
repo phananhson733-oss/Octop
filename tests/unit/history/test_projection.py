@@ -4,7 +4,7 @@ import asyncio
 import json
 
 import pytest
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from octop.infra.gateway.history_backfill import HistoryBackfillQueue
 from octop.infra.gateway.process.message_keys import (
@@ -140,6 +140,40 @@ def test_turn_tracker_does_not_duplicate_state_assistant() -> None:
     texts = [_wire_text(item) for item in tracker.inputs]
     assert texts.count("hello") == 0
     assert any(text == "hello world" for text in texts)
+
+
+def _tool_turn(answer: str) -> list[object]:
+    return [
+        HumanMessage(content="fix it", id="u1"),
+        AIMessage(
+            content="Reading the draft.",
+            id="a1",
+            tool_calls=[{"id": "c1", "name": "read_file", "args": {"path": "a.md"}}],
+        ),
+        ToolMessage(content="draft text", tool_call_id="c1", id="t1"),
+        *([AIMessage(content=answer, id="a2")] if answer else []),
+    ]
+
+
+def test_turn_tracker_does_not_stitch_a_tool_turn_back_together() -> None:
+    tracker = TurnHistoryTracker.from_request({"messages": [{"role": "user", "content": "fix it"}]})
+    tracker.observe({"type": "token", "content": "Reading the draft."})
+    tracker.observe({"type": "token", "content": "Done: two fixes."})
+    tracker.observe(
+        {"type": "state_snapshot", "data": {"messages": _tool_turn("Done: two fixes.")}}
+    )
+
+    assert [item.message_id for item in tracker.inputs] == ["u1", "a1", "t1", "a2"]
+
+
+def test_turn_tracker_keeps_streamed_text_the_state_has_not_caught_up_with() -> None:
+    tracker = TurnHistoryTracker.from_request({"messages": [{"role": "user", "content": "fix it"}]})
+    tracker.observe({"type": "token", "content": "Reading the draft."})
+    tracker.observe({"type": "token", "content": "Done: two"})
+    tracker.observe({"type": "state_snapshot", "data": {"messages": _tool_turn("")}})
+
+    texts = [_wire_text(item) for item in tracker.inputs]
+    assert texts[-1] == "Reading the draft.Done: two"
 
 
 @pytest.mark.asyncio
