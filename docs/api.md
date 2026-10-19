@@ -323,6 +323,7 @@ Bundled experts live in `src/octop/infra/agents/experts/library/`
 | `GET`    | `/agents/{aid}/workspace/glob` | owner | glob backend paths |
 | `GET`    | `/agents/{aid}/workspace/grep` | owner | grep backend files |
 | `GET`    | `/agents/{aid}/workspace/...` | owner | see `api/routers/workspace.py` |
+| `POST`   | `/agents/{aid}/media/chatgpt-image` | owner | body `{prompt, aspect_ratio?, quality?}`: draw one PNG with the instance's ChatGPT login into `generated/image/` — same switches and allowance check as the `chatgpt_image` tool; a refusal or failure is still `200` with `status: "failed"` and an error code |
 | `GET`    | `/agents/{aid}/skills` | owner | list installed skills |
 | `PUT`    | `/agents/{aid}/skills/{slug}` | owner | enable / disable a skill |
 | `GET`    | `/agents/{aid}/skills/hub/search` | user | Skill Hub search |

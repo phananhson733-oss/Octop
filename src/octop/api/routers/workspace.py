@@ -9,7 +9,7 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, File, Query, UploadFile
 from fastapi.responses import Response, StreamingResponse
 from octop_harness.backends.utils import BackendOperationNotSupportedError
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from octop.api.common.agent_workspace import resolve_agent_workspace_dir
 from octop.api.common.content_disposition import content_disposition
@@ -22,6 +22,7 @@ from octop.api.common.workspace import (
     workspace_api_path,
 )
 from octop.api.deps import current_user, get_server
+from octop.infra.agents.providers.codex_image_tool import generate_to_workspace
 from octop.infra.backend.tree_listing import dedupe_tree_rows
 from octop.infra.backup.workspace_archive import export_workspace_zip, import_workspace_zip
 from octop.infra.errors import ErrorCode, OctopError
@@ -463,6 +464,80 @@ async def preview_media(
             "X-Content-Type-Options": "nosniff",
         },
     )
+
+
+class ChatgptImageBody(BaseModel):
+    prompt: str = Field(description="Full description of the image to create.")
+    aspect_ratio: Literal["square", "landscape", "portrait"] = Field(
+        default="square",
+        description="square (1024x1024), landscape (1536x1024) or portrait (1024x1536).",
+    )
+    quality: Literal["low", "medium", "high"] = Field(
+        default="medium",
+        description="low is fastest and uses the least allowance; high is slowest.",
+    )
+
+
+class ChatgptImageFile(BaseModel):
+    path: str = Field(description="Workspace-relative path of the saved PNG.")
+    mediaType: str  # noqa: N815 - same key as the tool envelope
+    sizeBytes: int  # noqa: N815
+
+
+class ChatgptImageError(BaseModel):
+    code: str = Field(
+        description=(
+            "disabled, admin_only, auth_required, quota_exhausted, quota_unknown, "
+            "invalid_request, unsupported_model, rate_limited or another failure code."
+        )
+    )
+    message: str
+    retryable: bool
+    safe_to_resubmit: bool = Field(description="True when nothing was sent to ChatGPT.")
+
+
+class ChatgptImageResult(BaseModel):
+    status: Literal["completed", "failed"]
+    message: str
+    prompt: str
+    images: list[ChatgptImageFile]
+    error: ChatgptImageError | None
+    execution: dict[str, Any] | None
+
+
+@router.post(
+    "/agents/{agent_id}/media/chatgpt-image",
+    summary="Generate an image into the agent workspace",
+    description=(
+        "Same as the agent's chatgpt_image tool, called from the dashboard: draws one PNG "
+        "with the instance's ChatGPT login and saves it under generated/image/ in this "
+        "agent's workspace. The same switches apply (turned on, admin only, allowance "
+        "check unless credits are allowed). A refused or failed generation is still a 200 "
+        "with status 'failed' and an error code. Owner only."
+    ),
+    response_model=ChatgptImageResult,
+)
+async def generate_chatgpt_image(
+    agent_id: str,
+    body: ChatgptImageBody,
+    as_user: int | None = None,
+    user: Any = Depends(current_user),
+    server: Any = Depends(get_server),
+) -> ChatgptImageResult:
+    ws = await require_running_workspace(
+        agent_id, user=user, as_user=as_user, server=server, owner_only=True
+    )
+    result = await generate_to_workspace(
+        workspace=ws,
+        paths=server.services.paths,
+        provider_repo=server.services.provider_repo,
+        settings_store=server.app_runtime.agent_registry.chatgpt_image,
+        prompt=body.prompt,
+        aspect_ratio=body.aspect_ratio,
+        quality=body.quality,
+        acting_user_is_admin=bool(getattr(user, "is_admin", False)),
+    )
+    return ChatgptImageResult.model_validate(result)
 
 
 @router.get("/agents/{agent_id}/workspace/glob")

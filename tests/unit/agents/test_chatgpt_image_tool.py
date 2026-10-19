@@ -303,3 +303,50 @@ def test_tool_is_a_media_tool() -> None:
     assert is_media_push_tool("chatgpt_image") is True
     assert builtin_tool_available("chatgpt_image", agent_cfg={}) is False
     assert builtin_tool_available("chatgpt_image", agent_cfg={}, chatgpt_image_mounted=True) is True
+
+
+def _route_server(
+    paths: PathLayout, store: ChatgptImageSettingsStore, workspace: FakeWorkspace
+) -> SimpleNamespace:
+    row = SimpleNamespace(agent_id="a1", user_id=1, is_shared=0, enabled=True, last_state="running")
+    registry = SimpleNamespace(
+        get_row=lambda _aid: row,
+        get_agent=lambda _aid: SimpleNamespace(workspace=workspace),
+        chatgpt_image=store,
+    )
+    return SimpleNamespace(
+        app_runtime=SimpleNamespace(agent_registry=registry),
+        services=SimpleNamespace(paths=paths, provider_repo=FakeProviderRepo()),
+    )
+
+
+async def test_dashboard_route_uses_the_caller_not_the_agent_context(
+    paths: PathLayout, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from octop.api.routers.workspace import ChatgptImageBody, generate_chatgpt_image
+    from octop.infra.errors import OctopError
+
+    # The route must not read the LangGraph config: it gets the caller from the request.
+    monkeypatch.setattr(codex_image_tool, "_acting_user_is_admin", lambda: pytest.fail("tool path"))
+    calls = _mock_http(monkeypatch, USAGE_OK)
+    workspace = FakeWorkspace(tmp_path)
+    server = _route_server(paths, _store(enabled=True), workspace)
+    body = ChatgptImageBody(prompt="a brass plumb bob", aspect_ratio="landscape", quality="low")
+
+    owner = SimpleNamespace(id=1, is_admin=False)
+    refused = await generate_chatgpt_image("a1", body, user=owner, server=server)
+    admin = SimpleNamespace(id=9, is_admin=True)
+    done = await generate_chatgpt_image("a1", body, user=admin, server=server)
+    with pytest.raises(OctopError):
+        await generate_chatgpt_image(
+            "a1", body, user=SimpleNamespace(id=2, is_admin=False), server=server
+        )
+
+    assert refused.status == "failed"
+    assert refused.error is not None and refused.error.code == "admin_only"
+    assert refused.error.safe_to_resubmit is True
+    assert done.status == "completed" and done.error is None
+    assert done.images[0].path.startswith("generated/image/chatgpt-")
+    assert workspace.files[done.images[0].path] == _png()
+    assert done.execution is not None and done.execution["requested_size"] == "1536x1024"
+    assert calls.count(USAGE_URL) == 1

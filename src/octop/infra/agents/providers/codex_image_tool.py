@@ -190,6 +190,99 @@ def _reset_text(resets_at: int | None) -> str:
     return f"; it resets at {stamp}"
 
 
+async def generate_to_workspace(
+    *,
+    workspace: BackendWorkspace,
+    paths: PathLayout,
+    provider_repo: Any,
+    settings_store: ChatgptImageSettingsStore,
+    prompt: str,
+    aspect_ratio: AspectRatio = "square",
+    quality: Quality = "medium",
+    acting_user_is_admin: bool,
+) -> dict[str, object]:
+    """Generate one image into ``workspace`` under the same switches as the tool.
+
+    Shared by the agent tool and the dashboard route, so both check the same
+    settings and allowance and return the same ``image_gen_tool_result`` envelope.
+    """
+    prompt = prompt.strip()
+    settings = await asyncio.to_thread(settings_store.load)
+    if not settings.enabled:
+        return _failure("disabled", "ChatGPT image generation is turned off.", prompt=prompt)
+    if settings.admin_only and not acting_user_is_admin:
+        return _failure(
+            "admin_only",
+            "ChatGPT image generation is limited to administrators.",
+            prompt=prompt,
+        )
+    if not prompt:
+        return _failure("invalid_request", "The image description is empty.", prompt=prompt)
+    login = await asyncio.to_thread(_load_login, paths, provider_repo)
+    if login is None:
+        return _failure("auth_required", "No usable ChatGPT login is stored.", prompt=prompt)
+
+    try:
+        async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
+            if not settings.allow_credits:
+                quota = await fetch_quota(client, token=login.token, account_id=login.account_id)
+                if quota.plan_exhausted:
+                    return _failure(
+                        "quota_exhausted",
+                        "The ChatGPT plan's Codex allowance is used up"
+                        f"{_reset_text(quota.resets_at)}. "
+                        "This instance does not bill images to purchased credits.",
+                        prompt=prompt,
+                    )
+            image = await generate_image(
+                client,
+                token=login.token,
+                account_id=login.account_id,
+                prompt=prompt,
+                aspect_ratio=aspect_ratio,
+                quality=quality,
+                host_models=login.host_models,
+            )
+    except CodexImageError as exc:
+        return _failure(exc.code, str(exc), prompt=prompt, http_status=exc.http_status)
+
+    timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    path = f"{OUTPUT_DIR}/chatgpt-{timestamp}-{uuid4().hex[:12]}.png"
+    await workspace.aupload_bytes(path, image.data)
+    local = await asyncio.to_thread(workspace.materialize_local, path)
+    size = f"{image.width}x{image.height}"
+    return {
+        "schema_version": 1,
+        "type": _RESULT_TYPE,
+        "tool": TOOL_NAME,
+        "prompt": prompt,
+        "status": "completed",
+        "is_error": False,
+        "message": f"Generated 1 image artifact ({size}).",
+        "provider": _PROVIDER,
+        "model": IMAGE_MODEL,
+        "error": None,
+        "remediation": None,
+        "execution": {
+            "provider": _PROVIDER,
+            "model": IMAGE_MODEL,
+            "host_model": image.host_model,
+            "quality": quality,
+            "requested_size": SIZES[aspect_ratio],
+            "size": size,
+            "fallback_used": False,
+        },
+        "images": [
+            {
+                "localPath": str(local) if local is not None else path,
+                "path": path,
+                "mediaType": "image/png",
+                "sizeBytes": len(image.data),
+            }
+        ],
+    }
+
+
 def build_chatgpt_image_tools(
     *,
     workspace: BackendWorkspace,
@@ -215,83 +308,16 @@ def build_chatgpt_image_tools(
             Field(description="low is fastest and uses the least allowance; high is slowest."),
         ] = "medium",
     ) -> dict[str, object]:
-        prompt = prompt.strip()
-        settings = await asyncio.to_thread(settings_store.load)
-        if not settings.enabled:
-            return _failure("disabled", "ChatGPT image generation is turned off.", prompt=prompt)
-        if settings.admin_only and not _acting_user_is_admin():
-            return _failure(
-                "admin_only",
-                "ChatGPT image generation is limited to administrators.",
-                prompt=prompt,
-            )
-        if not prompt:
-            return _failure("invalid_request", "The image description is empty.", prompt=prompt)
-        login = await asyncio.to_thread(_load_login, paths, provider_repo)
-        if login is None:
-            return _failure("auth_required", "No usable ChatGPT login is stored.", prompt=prompt)
-
-        try:
-            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-                if not settings.allow_credits:
-                    quota = await fetch_quota(
-                        client, token=login.token, account_id=login.account_id
-                    )
-                    if quota.plan_exhausted:
-                        return _failure(
-                            "quota_exhausted",
-                            "The ChatGPT plan's Codex allowance is used up"
-                            f"{_reset_text(quota.resets_at)}. "
-                            "This instance does not bill images to purchased credits.",
-                            prompt=prompt,
-                        )
-                image = await generate_image(
-                    client,
-                    token=login.token,
-                    account_id=login.account_id,
-                    prompt=prompt,
-                    aspect_ratio=aspect_ratio,
-                    quality=quality,
-                    host_models=login.host_models,
-                )
-        except CodexImageError as exc:
-            return _failure(exc.code, str(exc), prompt=prompt, http_status=exc.http_status)
-
-        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-        path = f"{OUTPUT_DIR}/chatgpt-{timestamp}-{uuid4().hex[:12]}.png"
-        await workspace.aupload_bytes(path, image.data)
-        local = await asyncio.to_thread(workspace.materialize_local, path)
-        size = f"{image.width}x{image.height}"
-        return {
-            "schema_version": 1,
-            "type": _RESULT_TYPE,
-            "tool": TOOL_NAME,
-            "prompt": prompt,
-            "status": "completed",
-            "is_error": False,
-            "message": f"Generated 1 image artifact ({size}).",
-            "provider": _PROVIDER,
-            "model": IMAGE_MODEL,
-            "error": None,
-            "remediation": None,
-            "execution": {
-                "provider": _PROVIDER,
-                "model": IMAGE_MODEL,
-                "host_model": image.host_model,
-                "quality": quality,
-                "requested_size": SIZES[aspect_ratio],
-                "size": size,
-                "fallback_used": False,
-            },
-            "images": [
-                {
-                    "localPath": str(local) if local is not None else path,
-                    "path": path,
-                    "mediaType": "image/png",
-                    "sizeBytes": len(image.data),
-                }
-            ],
-        }
+        return await generate_to_workspace(
+            workspace=workspace,
+            paths=paths,
+            provider_repo=provider_repo,
+            settings_store=settings_store,
+            prompt=prompt,
+            aspect_ratio=aspect_ratio,
+            quality=quality,
+            acting_user_is_admin=_acting_user_is_admin(),
+        )
 
     return [
         StructuredTool.from_function(
@@ -307,5 +333,6 @@ __all__ = [
     "TOOL_NAME",
     "QuotaStatus",
     "build_chatgpt_image_tools",
+    "generate_to_workspace",
     "read_quota_status",
 ]

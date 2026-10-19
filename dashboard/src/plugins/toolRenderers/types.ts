@@ -92,6 +92,17 @@ export interface OctopPluginUIHost {
   patchResult(callId: string, nextData: unknown): void;
   /** Authenticated Octop API request (path starts with ``/`` under ``/api``). */
   request<T = unknown>(path: string, init?: RequestInit): Promise<T>;
+  /**
+   * Authenticated binary download (images, files), e.g.
+   * ``/agents/{id}/media/preview?source=…``. ``request`` reads non-JSON bodies as text.
+   */
+  requestBlob(path: string, init?: RequestInit): Promise<Blob>;
+  /**
+   * Authenticated multipart upload (POST by default), e.g.
+   * ``/agents/{id}/workspace/upload?path=…&from_workspace=true``. ``request``
+   * always sends ``Content-Type: application/json``, which breaks ``FormData``.
+   */
+  upload<T = unknown>(path: string, body: FormData, init?: RequestInit): Promise<T>;
   /** Open this tool call's UI in the chat side dock (one tab per callId). */
   openSidePanel(opts: OpenSidePanelOptions): void;
   /** Close the side dock tab for this tool call, if open. */

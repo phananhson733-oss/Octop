@@ -1,4 +1,4 @@
-import { request } from "../../api/request";
+import { request, requestBlob, requestUpload } from "../../api/request";
 import * as chatStore from "../../pages/Chat/hooks/chatStore";
 import i18n from "../../i18n";
 import {
@@ -69,6 +69,12 @@ function createHost(defaultPluginId: string): OctopPluginUIHost {
     },
     request<T = unknown>(path: string, init?: RequestInit) {
       return request<T>(path, init);
+    },
+    requestBlob(path: string, init?: RequestInit) {
+      return requestBlob(path, init);
+    },
+    upload<T = unknown>(path: string, body: FormData, init?: RequestInit) {
+      return requestUpload<T>(path, body, init);
     },
     openSidePanel(opts) {
       dockHandlers.openSidePanel?.(opts);
