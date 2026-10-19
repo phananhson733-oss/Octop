@@ -70,6 +70,7 @@ async def run_foreground(
     from octop.infra.setup.tls.http_companion import build_http_companion_app
     from octop.infra.setup.tls.listeners import build_listen_plan
     from octop.infra.setup.tls.store import resolve_tls_paths
+    from octop.infra.utils.log_redact import install_query_secret_filter
 
     srv = OctopServer()
     await srv.start()
@@ -143,6 +144,7 @@ async def run_foreground(
             ssl_keyfile=plan.ssl_keyfile,
         )
         servers.append(uvicorn.Server(single_config))
+    install_query_secret_filter()
 
     from octop.infra.agents.memory.slim_control import MemorySlimControl
 
