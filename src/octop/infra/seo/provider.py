@@ -136,6 +136,36 @@ def map_serp(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+def map_rank_check(items: list[dict[str, Any]], target: str) -> dict[str, Any]:
+    """The target's first organic listing (subdomains count) and the SERP's feature types.
+
+    ``position`` is ``rank_group``, the place among organic results, which is what people
+    mean by "my ranking"; ``rank_absolute`` would also count ads, maps and answer boxes.
+    """
+    target = target.lower()
+    match = next(
+        (
+            item
+            for item in items
+            if item.get("type") == "organic"
+            and isinstance(item.get("domain"), str)
+            and (item["domain"].lower() == target or item["domain"].lower().endswith("." + target))
+        ),
+        None,
+    )
+    return {
+        "position": (
+            None
+            if match is None
+            else match["rank_group"]
+            if match.get("rank_group") is not None
+            else match.get("rank_absolute")
+        ),
+        "url": match.get("url") if match else None,
+        "serp_features": sorted({str(item["type"]) for item in items if item.get("type")}),
+    }
+
+
 class _MalformedResult(Exception):
     """The task succeeded but its result does not have the documented shape."""
 
@@ -277,6 +307,37 @@ class DataForSeoClient:
         # A valid empty SERP comes back as a charged "No Search Results" task error.
         return await self._items(
             "serp/google/organic/live/advanced", payload, map_serp, no_results_ok=True
+        )
+
+    async def rank_check(
+        self,
+        *,
+        keyword: str,
+        target: str,
+        location_code: int,
+        language_code: str,
+        device: str,
+        depth: int,
+    ) -> tuple[dict[str, Any], float | None, dict[str, Any]]:
+        """Where ``target`` ranks for ``keyword``, crawling at most ``depth`` results."""
+        payload = {
+            "keyword": keyword,
+            "location_code": location_code,
+            "language_code": language_code,
+            "device": device,
+            "os": "windows" if device == "desktop" else "android",
+            "depth": min(100, max(10, depth)),
+            # Stop at the page where the target's organic listing shows: only crawled
+            # pages are billed. Matching organic results only, as map_rank_check does, so
+            # a sitelink or answer-box mention cannot stop the crawl early.
+            "stop_crawl_on_match": [{"match_value": target, "match_type": "with_subdomains"}],
+            "find_targets_in": ["organic"],
+        }
+        return await self._result(
+            "serp/google/organic/live/advanced",
+            payload,
+            lambda result: map_rank_check(_item_list(result), target),
+            no_results_ok=True,
         )
 
     async def domain_overview(

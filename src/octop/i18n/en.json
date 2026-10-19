@@ -1223,6 +1223,16 @@
         "busy": "an audit is already running for this project; wait for it or cancel it first",
         "other_site": "experts can only audit the project's own website"
       }
+    },
+    "rank": {
+      "errors": {
+        "exists": "this domain is already tracked in the project's market",
+        "full": "a project can have at most 20 rank trackers",
+        "too_many_keywords": "a tracker can hold at most 200 keywords",
+        "no_keywords": "add keywords to the tracker before checking it",
+        "busy": "a check is already running for this tracker; wait for it to finish",
+        "estimate_changed": "the keywords or settings changed since the estimate was shown; review the new estimate and confirm again"
+      }
     }
   }
 }

@@ -631,3 +631,102 @@ async def test_competitor_lookups_over_http(env_with_agent, monkeypatch):
         ("/api/seo/projects/{project_id}/lookups/{lookup_id}", "get"),
     ]:
         assert paths[path][method]["summary"], path
+
+
+async def test_rank_tracking_over_http(env_with_agent, monkeypatch):
+    import asyncio
+
+    import octop.infra.seo.rank as rank
+    import octop.infra.seo.service as module
+
+    client, server, auth, agent_id = env_with_agent
+    bodies = []
+
+    def supplier(request):
+        body = json.loads(request.content)[0]
+        bodies.append(body)
+        items = [{"type": "organic", "rank_group": 3, "domain": "www.example.com", "url": "u"}]
+        task = {"status_code": 20000, "cost": 0.002, "result": [{"items": items}]}
+        return httpx.Response(200, json={"status_code": 20000, "tasks": [task]})
+
+    monkeypatch.setattr(
+        module,
+        "DataForSeoClient",
+        functools.partial(DataForSeoClient, transport=httpx.MockTransport(supplier)),
+    )
+    created = await client.post(
+        "/api/seo/projects",
+        headers=auth,
+        json={"name": "Example", "domain": "example.com", "agent_id": agent_id},
+    )
+    base = f"/api/seo/projects/{created.json()['project_id']}/rank-trackers"
+    await client.put(
+        "/api/seo/provider", headers=auth, json={"login": "fixture", "password": "secret"}
+    )
+    for bad in ({"depth": 15}, {"depth": 20, "devices": "tablet"}, {}):
+        assert (await client.post(base, headers=auth, json=bad)).status_code == 422
+    made = await client.post(
+        base, headers=auth, json={"depth": 20, "devices": "desktop", "keywords": ["Short Drama"]}
+    )
+    assert made.status_code == 200, made.text
+    tracker = made.json()["tracker"]
+    path = f"{base}/{tracker['tracker_id']}"
+    assert (tracker["domain"], tracker["estimate_usd"]) == ("example.com", 0.0035)
+    taken = await client.post(base, headers=auth, json={"depth": 10})
+    assert taken.status_code == 409 and taken.json()["error"]["details"]["reason"]
+    added = await client.post(path + "/keywords", headers=auth, json={"keywords": ["reelshort"]})
+    assert added.json() == {"added": 1}
+    estimate = (await client.get(path, headers=auth)).json()["tracker"]["estimate_usd"]
+    check = {"idempotency_key": "k", "confirm_paid": True, "max_cost_usd": estimate}
+    low = await client.post(path + "/checks", headers=auth, json=check | {"max_cost_usd": 0.001})
+    assert low.status_code == 409 and not bodies
+    assert (
+        await client.post(path + "/checks", headers=auth, json=check | {"confirm_paid": False})
+    ).status_code == 422
+    started = await client.post(path + "/checks", headers=auth, json=check)
+    assert started.status_code == 202, started.text
+    assert started.json()["checks_total"] == 2
+    await asyncio.gather(*list(rank._CHECKS))
+    results = (await client.get(path, headers=auth, params={"compare": "30d"})).json()
+    assert results["run"]["status"] == "completed" and results["compare"] == "30d"
+    assert [row["desktop"]["position"] for row in results["rows"]] == [3, 3]
+    assert {body["keyword"] for body in bodies} == {"short drama", "reelshort"}
+    keyword_id = results["rows"][0]["keyword_id"]
+    history = (await client.get(f"{path}/keywords/{keyword_id}/history", headers=auth)).json()
+    assert [row["position"] for row in history] == [3]
+    assert (await client.get(path, headers=auth, params={"compare": "2d"})).status_code == 422
+    patched = await client.patch(path, headers=auth, json={"devices": "both"})
+    assert patched.json()["tracker"]["estimate_usd"] == 0.014
+    removed = await client.delete(f"{path}/keywords/{keyword_id}", headers=auth)
+    assert removed.status_code == 204
+    assert (await client.delete(f"{path}/keywords/{keyword_id}", headers=auth)).status_code == 404
+    listed = (await client.get(base, headers=auth)).json()
+    assert [(row["keyword_count"], bool(row["last_checked_at"])) for row in listed] == [(1, True)]
+
+    other = await create_user(client, auth, username="seo-rank-other")
+    for method, url, body in [
+        ("get", base, None),
+        ("post", path + "/checks", check),
+        ("get", path, None),
+    ]:
+        kwargs = {"headers": other} | ({"json": body} if body is not None else {})
+        assert (await getattr(client, method)(url, **kwargs)).status_code == 403, url
+    assert (await client.delete(path, headers=auth)).status_code == 204
+    assert (await client.get(path, headers=auth)).status_code == 404
+
+    from octop.api.app import build_app
+
+    paths = build_app(server).openapi()["paths"]
+    tracker_path = "/api/seo/projects/{project_id}/rank-trackers/{tracker_id}"
+    for route, method in [
+        ("/api/seo/projects/{project_id}/rank-trackers", "get"),
+        ("/api/seo/projects/{project_id}/rank-trackers", "post"),
+        (tracker_path, "get"),
+        (tracker_path, "patch"),
+        (tracker_path, "delete"),
+        (tracker_path + "/keywords", "post"),
+        (tracker_path + "/keywords/{keyword_id}", "delete"),
+        (tracker_path + "/keywords/{keyword_id}/history", "get"),
+        (tracker_path + "/checks", "post"),
+    ]:
+        assert paths[route][method]["summary"], route

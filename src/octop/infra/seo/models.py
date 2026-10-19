@@ -2,7 +2,14 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    StringConstraints,
+    model_validator,
+)
 
 
 class Command(BaseModel):
@@ -80,6 +87,45 @@ class LookupCreate(Command):
         ):
             raise ValueError("domain lookups take a domain, competitor lookups keywords")
         return self
+
+
+# Rank tracking, ported from OpenSEO rank-tracking.ts schemas.
+TrackedKeyword = Annotated[str, StringConstraints(max_length=200)]
+Devices = Literal["both", "desktop", "mobile"]
+
+
+def _pages_of_ten(depth: int) -> int:
+    # DataForSEO bills SERPs in pages of 10.
+    if depth % 10:
+        raise ValueError("depth is counted in pages of 10")
+    return depth
+
+
+SerpDepth = Annotated[int, Field(ge=10, le=100), AfterValidator(_pages_of_ten)]
+
+
+class RankTrackerCreate(Command):
+    # Omitted tracks the project's own domain.
+    domain: str | None = Field(default=None, min_length=1, max_length=253)
+    devices: Devices = "both"
+    depth: SerpDepth
+    keywords: list[TrackedKeyword] = Field(default_factory=list, max_length=200)
+
+
+class RankTrackerUpdate(Command):
+    devices: Devices | None = None
+    depth: SerpDepth | None = None
+
+
+class RankKeywordsAdd(Command):
+    keywords: list[TrackedKeyword] = Field(min_length=1, max_length=200)
+
+
+class RankCheckCreate(Command):
+    idempotency_key: str = Field(min_length=1, max_length=100)
+    confirm_paid: Literal[True]
+    # The estimate the page showed; a check that would now cost more is refused.
+    max_cost_usd: float = Field(ge=0)
 
 
 # Project memory, ported from OpenSEO projectContext.ts. Each op is one strict

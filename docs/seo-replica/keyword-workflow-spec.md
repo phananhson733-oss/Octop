@@ -158,3 +158,16 @@ balancebiketoddler.com 的审计只报了三类小问题，同一个站 ChatGPT 
 - **专家工具：** `seo_list_competitor_lookups` / `seo_get_competitor_lookup`，只读、免费，买不了新的（和 SERP 同一个规矩）。
 
 表 `seo_lookups` 追加在 `seo_workbench.sql` / `.pg.sql`（`CREATE TABLE IF NOT EXISTS`），版本号不变。
+
+### 2026-10-19 R3 补：排名追踪
+
+移植 OpenSEO d7ea785 的排名追踪（`features/rank-tracking/services/RankTrackingService.ts`、`rankTrackingResults.ts`、`lib/dataforseo/serp.ts` 的 `fetchRankCheckSerp`、`shared/rank-tracking.ts` 的费用估算），只做手动查询；定时查询（上游走 DataForSEO 任务队列，便宜约七成）没做。
+
+- **追踪：** 一个追踪 = 一个域名（默认项目自己的，子域名算同一个站）在项目市场里的一组关键词，选设备（桌面和移动 / 只桌面 / 只移动）和查询深度（10-100，以 10 为单位）。建追踪和加减关键词都免费；一个项目最多 20 个追踪，一个追踪最多 200 个词（上游是 500 / 1000，这里先收紧）。
+- **查询：** 每个关键词、每种设备买一次实时 Google 自然结果（`serp/google/organic/live/advanced`），带 `stop_crawl_on_match`（只在自然结果里找，含子域名），找到域名所在那一页就停，只按爬过的页数计费。排名取 `rank_group`（自然结果里的名次，和人眼里的排名一致），记下排名网址和这页结果里出现过的类型。后台同时跑 5 个，每查完一个就写一条快照、更新进度；页面每 3 秒刷新一次。一个追踪同一时间只能有一次查询；没有重试。
+- **费用：** 估算照上游实时价：第一页 $0.002，之后每页 $0.0015，关键词里有 `site:` 一类高级搜索语法按 5 倍算。页面先显示「最多 $X」，确认时把这个数一起交上去；服务器算出的估算比它高（期间加了词或改了设置）就拒绝，什么都不买。实际费用按每次返回的金额累加，有一次没拿到回复就记成未知。
+- **中断：** 每查完一个更新一次心跳；超过 3 分钟没心跳（重启）就把这次查询记为 unknown / interrupted、费用未知，并放开这个追踪。已经写下的快照照常算数。
+- **结果：** 每个关键词每种设备取最新一次快照，和「对比期之前最新的一次」比较（1 / 7 / 30 / 90 天，默认 7 天），没有那么早的就和第一次比，和上游一样。移除的关键词不再显示，历史还在。
+- **专家工具：** `seo_list_rank_trackers`、`seo_get_rank_results`、`seo_get_rank_history`，只读、免费，不能发起查询。
+
+表 `seo_rank_trackers`、`seo_rank_keywords`、`seo_rank_runs`、`seo_rank_snapshots` 追加在 `seo_workbench.sql` / `.pg.sql`，版本号不变。

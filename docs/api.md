@@ -413,7 +413,7 @@ discovery.
 
 ## SEO workbench
 
-Admin only. Paid DataForSEO calls (`research`, `serps`, `lookups`) require
+Admin only. Paid DataForSEO calls (`research`, `serps`, `lookups`, rank `checks`) require
 `confirm_paid: true` and an `idempotency_key`; the same key with the same
 input returns the earlier result instead of paying again. Deleting the bound
 expert keeps the project and its evidence with `agent_id: null` until it is
@@ -433,6 +433,13 @@ rebound.
 | `POST`   | `/seo/projects/{id}/lookups` | admin | body `{kind: domain, domain}` (organic footprint + top 100 ranked keywords by traffic) or `{kind: competitors, keywords: [1-200]}` (top 50 domains ranking for them) — paid DataForSEO Labs; a repeat within 12 h is served from the saved copy at no charge |
 | `GET`    | `/seo/projects/{id}/lookups?kind=` | admin | lookup summaries, newest first |
 | `GET`    | `/seo/projects/{id}/lookups/{lookup_id}` | admin | one lookup with its rows |
+| `GET`/`POST` | `/seo/projects/{id}/rank-trackers` | admin | trackers / create one `{domain?, devices: both\|desktop\|mobile, depth: 10-100 in tens, keywords}` (free; the project's own domain when omitted; 20 per project, 200 keywords each) |
+| `GET`    | `/seo/projects/{id}/rank-trackers/{tracker_id}?compare=7d` | admin | positions per keyword and device against the newest check older than `compare` (`1d`/`7d`/`30d`/`90d`, else the first check), the newest run and `estimate_usd` |
+| `PATCH`/`DELETE` | `/seo/projects/{id}/rank-trackers/{tracker_id}` | admin | change `{devices, depth}` / delete with its history (409 while a check runs) |
+| `POST`   | `/seo/projects/{id}/rank-trackers/{tracker_id}/keywords` | admin | body `{keywords}` → `{added}` |
+| `DELETE` | `/seo/projects/{id}/rank-trackers/{tracker_id}/keywords/{keyword_id}` | admin | stop tracking; its history stays |
+| `GET`    | `/seo/projects/{id}/rank-trackers/{tracker_id}/keywords/{keyword_id}/history` | admin | newest 200 saved positions, oldest first |
+| `POST`   | `/seo/projects/{id}/rank-trackers/{tracker_id}/checks` | admin | body `{max_cost_usd}` (≥ the tracker's `estimate_usd`) — paid: one live Google SERP per keyword and device, stopping at the domain's page, in the background → 202 run; one check at a time per tracker |
 | `GET`/`PATCH` | `/seo/projects/{id}/context` | admin | project background; `PATCH {updates: [...]}` applies all ops or none |
 | `GET`/`POST` | `/seo/projects/{id}/keywords` | admin | saved keywords (paged) / save rows from a run |
 | `GET`    | `/seo/projects/{id}/report-context?run_id=` | admin | evidence and `context_hash` for an agent report |

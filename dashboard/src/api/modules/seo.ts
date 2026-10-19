@@ -134,6 +134,74 @@ export interface LookupSummary {
 export interface Lookup extends LookupSummary {
   items: RankedKeyword[] | SerpCompetitor[];
 }
+export type RankDevices = "both" | "desktop" | "mobile";
+export type RankCompare = "1d" | "7d" | "30d" | "90d";
+export interface RankTrackerSummary {
+  tracker_id: string;
+  project_id: string;
+  domain: string;
+  location_code: number;
+  language_code: string;
+  devices: RankDevices;
+  /** Results crawled per check, 10-100. */
+  depth: number;
+  created_at: string;
+  keyword_count: number;
+  last_checked_at: string | null;
+}
+export interface RankTracker extends RankTrackerSummary {
+  /** The most the next check can cost; sent back as max_cost_usd to approve it. */
+  estimate_usd: number;
+}
+export interface RankRun {
+  run_id: string;
+  status: "running" | "completed" | "failed" | "unknown";
+  started_at: string;
+  completed_at: string | null;
+  devices: RankDevices;
+  depth: number;
+  keywords_total: number;
+  checks_total: number;
+  checks_done: number;
+  checks_failed: number;
+  cost_usd: number | null;
+  cost_known_usd: number;
+  estimate_usd: number;
+  error: string | null;
+}
+export interface RankCell {
+  /** Place among organic results; null when not found within the depth. */
+  position: number | null;
+  url: string | null;
+  serp_features: string[];
+  /** Null when this device was never checked. */
+  checked_at: string | null;
+  previous_position: number | null;
+  previous_checked_at: string | null;
+}
+export interface RankRow {
+  keyword_id: string;
+  keyword: string;
+  desktop: RankCell;
+  mobile: RankCell;
+}
+export interface RankResults {
+  tracker: RankTracker;
+  run: RankRun | null;
+  compare: RankCompare;
+  rows: RankRow[];
+}
+export interface RankSnapshot {
+  run_id: string;
+  keyword_id: string;
+  keyword: string;
+  device: "desktop" | "mobile";
+  position: number | null;
+  url: string | null;
+  serp_features: string[];
+  cost_usd: number | null;
+  checked_at: string;
+}
 export const SECTION_KEYS = [
   "business_overview",
   "current_goal",
@@ -413,6 +481,8 @@ export interface GscInspection {
   error?: string | null;
 }
 const projectPath = (id: string) => `/seo/projects/${encodeURIComponent(id)}`;
+const trackerPath = (id: string, trackerId: string) =>
+  `${projectPath(id)}/rank-trackers/${encodeURIComponent(trackerId)}`;
 const auditPath = (id: string, auditId: string) =>
   `${projectPath(id)}/audits/${encodeURIComponent(auditId)}`;
 export const seoApi = {
@@ -484,6 +554,65 @@ export const seoApi = {
     request<Lookup>(
       `${projectPath(id)}/lookups/${encodeURIComponent(lookupId)}`,
     ),
+  rankTrackers: (id: string) =>
+    request<RankTrackerSummary[]>(`${projectPath(id)}/rank-trackers`),
+  createRankTracker: (
+    id: string,
+    data: {
+      domain?: string;
+      devices: RankDevices;
+      depth: number;
+      keywords: string[];
+    },
+  ) =>
+    request<RankResults>(`${projectPath(id)}/rank-trackers`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  rankResults: (id: string, trackerId: string, compare: RankCompare) =>
+    request<RankResults>(
+      `${trackerPath(id, trackerId)}?${new URLSearchParams({ compare })}`,
+    ),
+  updateRankTracker: (
+    id: string,
+    trackerId: string,
+    data: { devices?: RankDevices; depth?: number },
+  ) =>
+    request<RankResults>(trackerPath(id, trackerId), {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    }),
+  deleteRankTracker: (id: string, trackerId: string) =>
+    request<void>(trackerPath(id, trackerId), { method: "DELETE" }),
+  addRankKeywords: (id: string, trackerId: string, keywords: string[]) =>
+    request<{ added: number }>(`${trackerPath(id, trackerId)}/keywords`, {
+      method: "POST",
+      body: JSON.stringify({ keywords }),
+    }),
+  removeRankKeyword: (id: string, trackerId: string, keywordId: string) =>
+    request<void>(
+      `${trackerPath(id, trackerId)}/keywords/${encodeURIComponent(keywordId)}`,
+      { method: "DELETE" },
+    ),
+  rankHistory: (id: string, trackerId: string, keywordId: string) =>
+    request<RankSnapshot[]>(
+      `${trackerPath(id, trackerId)}/keywords/${encodeURIComponent(
+        keywordId,
+      )}/history`,
+    ),
+  startRankCheck: (
+    id: string,
+    trackerId: string,
+    data: {
+      idempotency_key: string;
+      confirm_paid: true;
+      max_cost_usd: number;
+    },
+  ) =>
+    request<RankRun>(`${trackerPath(id, trackerId)}/checks`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
   context: (id: string) =>
     request<ProjectContext>(`${projectPath(id)}/context`),
   updateContext: (id: string, updates: ContextOp[]) =>

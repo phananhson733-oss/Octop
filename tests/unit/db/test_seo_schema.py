@@ -28,6 +28,10 @@ SEO_TABLES = {
     "seo_gsc_connections",
     "seo_ga4_connections",
     "seo_lookups",
+    "seo_rank_trackers",
+    "seo_rank_keywords",
+    "seo_rank_runs",
+    "seo_rank_snapshots",
 }
 
 

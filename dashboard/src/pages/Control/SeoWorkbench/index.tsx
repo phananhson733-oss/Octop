@@ -42,6 +42,7 @@ import { staticReportHtml } from "./reportPreview";
 import { attemptKey } from "./attemptKey";
 import { AuditPanel } from "./AuditPanel";
 import { CompetitorsPanel } from "./CompetitorsPanel";
+import { RankTrackingPanel } from "./RankTrackingPanel";
 import { ProjectContextPanel } from "./ProjectContextPanel";
 import { SearchPerformancePanel } from "./SearchPerformancePanel";
 import { SerpPanel } from "./SerpPanel";
@@ -664,6 +665,7 @@ function ProjectWorkspace({
             "audit",
             "search",
             "competitors",
+            "rank",
             "context",
           ].includes(view)
             ? view
@@ -1019,6 +1021,19 @@ function ProjectWorkspace({
                 projectId={id}
                 domain={project.domain}
                 configured={configured}
+              />
+            ),
+          },
+          {
+            key: "rank",
+            label: t("seo.rank"),
+            children: (
+              <RankTrackingPanel
+                key={id}
+                projectId={id}
+                domain={project.domain}
+                configured={configured}
+                isVisible={isVisible && view === "rank"}
               />
             ),
           },

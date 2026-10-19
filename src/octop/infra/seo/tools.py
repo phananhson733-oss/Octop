@@ -42,7 +42,8 @@ research_rows_preview or project_context has more entries than shown, read the r
 seo_list_saved_keywords, seo_list_research_rows and seo_get_project_context, passing
 next_offset until it is null. SERP snapshots already bought are read with seo_list_serps and
 seo_get_serp, competitor lookups with seo_list_competitor_lookups and
-seo_get_competitor_lookup; you cannot buy new ones. Trend entries are [year, month, search_volume]. Use inline CSS and static HTML/SVG only: no
+seo_get_competitor_lookup, tracked rankings with seo_list_rank_trackers,
+seo_get_rank_results and seo_get_rank_history; you cannot buy new ones. Trend entries are [year, month, search_volume]. Use inline CSS and static HTML/SVG only: no
 scripts, forms, remote images, remote CSS, or external data fetches. The document must contain
 <html and end with </html>, under 500000 UTF-8 bytes (aim below 80000). Write the actual
 analysis, then call seo_save_report with this exact run_id and context_hash, a title <=120
@@ -181,6 +182,23 @@ def _lookup_summary(lookup: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _rank_run(run: dict[str, Any] | None) -> dict[str, Any] | None:
+    keys = (
+        "run_id",
+        "status",
+        "started_at",
+        "completed_at",
+        "devices",
+        "depth",
+        "checks_total",
+        "checks_done",
+        "checks_failed",
+        "cost_usd",
+        "error",
+    )
+    return {key: run.get(key) for key in keys} if run else None
+
+
 def _audit_summary(audit: dict[str, Any]) -> dict[str, Any]:
     keys = (
         "audit_id",
@@ -234,9 +252,11 @@ def build_seo_tools(
     from octop.infra.seo.audit.inspect import trim_texts  # noqa: PLC0415
     from octop.infra.seo.audit.service import SeoAuditService  # noqa: PLC0415
     from octop.infra.seo.google.service import SeoGoogleService  # noqa: PLC0415
+    from octop.infra.seo.rank import SeoRankService  # noqa: PLC0415
 
     audits = SeoAuditService(service)
     google = SeoGoogleService(service)
+    ranks = SeoRankService(service)
 
     async def context() -> tuple[int, str, str]:
         try:
@@ -364,6 +384,21 @@ def build_seo_tools(
         user_id, project_id, _thread_id = await context()
         found = await service.get_lookup(user_id, project_id, lookup_id)
         return _page(found["items"], offset, "items", _lookup_summary(found))
+
+    async def rank_trackers(offset: int = 0) -> str:
+        user_id, project_id, _thread_id = await context()
+        return _page(await ranks.list_trackers(user_id, project_id), offset, "trackers")
+
+    async def rank_results(tracker_id: str, compare: str = "7d", offset: int = 0) -> str:
+        user_id, project_id, _thread_id = await context()
+        found = await ranks.results(user_id, project_id, tracker_id, compare=compare)
+        head = {"tracker": found["tracker"], "run": _rank_run(found["run"]), "compare": compare}
+        return _page(found["rows"], offset, "rows", head)
+
+    async def rank_history(tracker_id: str, keyword_id: str, offset: int = 0) -> str:
+        user_id, project_id, _thread_id = await context()
+        rows = await ranks.history(user_id, project_id, tracker_id, keyword_id)
+        return _page(rows, offset, "snapshots")
 
     async def save_report(
         run_id: str, context_hash: str, title: str, summary: str, html: str
@@ -658,6 +693,32 @@ def build_seo_tools(
             "avg_position, median_position, etv, keywords_count and keywords_positions (each "
             "keyword it ranks for). Third-party estimates, not the site's real traffic. Free. "
             "Pass next_offset as offset to read more.",
+        ),
+        (
+            "seo_list_rank_trackers",
+            rank_trackers,
+            "List this agent's project rank trackers: a domain (subdomains count) tracked for "
+            "a keyword list in the project's market, with devices, depth (results crawled per "
+            "check), keyword_count and last_checked_at. Free; you cannot run checks, the user "
+            "runs them on the Rank tracking tab. Pass next_offset as offset to read more.",
+        ),
+        (
+            "seo_get_rank_results",
+            rank_results,
+            "Read a rank tracker's positions: per keyword and device (desktop, mobile) the "
+            "newest position (place among organic results; null means not found within depth "
+            "when checked_at is set, never checked when it is null), the ranking url, the "
+            "SERP's result types, and previous_position from the newest check older than "
+            "compare (1d, 7d, 30d or 90d; the first check when none is that old). run is the "
+            "newest check: partial when status is not completed or checks_failed > 0. Free. "
+            "Pass next_offset as offset to read more.",
+        ),
+        (
+            "seo_get_rank_history",
+            rank_history,
+            "Read one tracked keyword's saved positions oldest first (newest 200), both "
+            "devices, kept after the keyword is removed. Free. Pass next_offset as offset to "
+            "read more.",
         ),
         (
             "seo_save_report",

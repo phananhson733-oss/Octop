@@ -12,6 +12,7 @@ import SeoWorkbench from "./index";
 import {
   seoApi,
   type ProjectContext,
+  type RankResults,
   type ResearchRun,
   type RunSummary,
   type SeoAuditDetail,
@@ -71,6 +72,15 @@ vi.mock("../../../api/modules/seo", async (importOriginal) => ({
     bindGa4: vi.fn(),
     unbindGa4: vi.fn(),
     ga4Overview: vi.fn(),
+    rankTrackers: vi.fn(),
+    createRankTracker: vi.fn(),
+    rankResults: vi.fn(),
+    updateRankTracker: vi.fn(),
+    deleteRankTracker: vi.fn(),
+    addRankKeywords: vi.fn(),
+    removeRankKeyword: vi.fn(),
+    rankHistory: vi.fn(),
+    startRankCheck: vi.fn(),
   },
 }));
 vi.mock("../../../api/modules/octopThreads", () => ({
@@ -1252,6 +1262,118 @@ describe("competitors", () => {
     ]);
     expect(await within(rival).findByText("seo.lookupSaved")).toBeVisible();
     expect(within(rival).queryByRole("button")).toBeNull();
+  });
+});
+describe("rank tracking", () => {
+  const cell = {
+    position: null,
+    url: null,
+    serp_features: [],
+    checked_at: null,
+    previous_position: null,
+    previous_checked_at: null,
+  };
+  const results: RankResults = {
+    tracker: {
+      tracker_id: "t1",
+      project_id: "p1",
+      domain: "example.com",
+      location_code: 2840,
+      language_code: "en",
+      devices: "both",
+      depth: 20,
+      created_at: "2026-10-19T08:00:00Z",
+      keyword_count: 2,
+      last_checked_at: null,
+      estimate_usd: 0.014,
+    },
+    run: null,
+    compare: "7d",
+    rows: [
+      {
+        keyword_id: "k1",
+        keyword: "short drama",
+        desktop: {
+          ...cell,
+          position: 3,
+          url: "https://example.com/top",
+          checked_at: "2026-10-19T09:00:00Z",
+          previous_position: 5,
+          previous_checked_at: "2026-10-10T09:00:00Z",
+        },
+        mobile: { ...cell, checked_at: "2026-10-19T09:00:00Z" },
+      },
+      { keyword_id: "k2", keyword: "reelshort", desktop: cell, mobile: cell },
+    ],
+  };
+  it("creates a tracker for free and checks rankings only on a confirmed click at the shown maximum", async () => {
+    vi.mocked(seoApi.rankTrackers).mockResolvedValue([]);
+    vi.mocked(seoApi.createRankTracker).mockResolvedValue(results);
+    vi.mocked(seoApi.rankResults).mockResolvedValue(results);
+    const started = {
+      run_id: "r1",
+      status: "running",
+      started_at: "2026-10-19T10:00:00Z",
+      completed_at: null,
+      devices: "both",
+      depth: 20,
+      keywords_total: 2,
+      checks_total: 4,
+      checks_done: 1,
+      checks_failed: 0,
+      cost_usd: 0.002,
+      cost_known_usd: 0.002,
+      estimate_usd: 0.014,
+      error: null,
+    } as const;
+    vi.mocked(seoApi.startRankCheck).mockImplementation(async () => {
+      // The server's tracker read shows the running check from now on.
+      vi.mocked(seoApi.rankResults).mockResolvedValue({
+        ...results,
+        run: started,
+      });
+      return started;
+    });
+    setup("/workbench/seo-workbench.main?project=p1&view=rank");
+    expect(await screen.findByText("seo.rankNone")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "seo.rankNew" }));
+    fireEvent.change(screen.getByLabelText("seo.rankKeywords"), {
+      target: { value: "Short Drama\nreelshort\nshort drama" },
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "seo.rankCreate" }));
+    });
+    expect(seoApi.createRankTracker).toHaveBeenCalledWith("p1", {
+      devices: "both",
+      depth: 20,
+      keywords: ["short drama", "reelshort"],
+    });
+    const ranked = (await screen.findByText("short drama")).closest("tr")!;
+    expect(within(ranked).getByText("3")).toBeVisible();
+    expect(within(ranked).getByText("↑2")).toBeVisible();
+    expect(within(ranked).getByText("seo.rankNotRanked")).toBeVisible();
+    expect(within(ranked).getByRole("link")).toHaveAttribute(
+      "href",
+      "https://example.com/top",
+    );
+    expect(seoApi.startRankCheck).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "seo.rankCheck" }));
+    const confirm = await screen.findAllByRole("button", {
+      name: "seo.serpConfirmBuy",
+    });
+    await act(async () => {
+      fireEvent.click(confirm[confirm.length - 1]);
+    });
+    expect(seoApi.startRankCheck).toHaveBeenCalledWith("p1", "t1", {
+      idempotency_key: expect.any(String),
+      confirm_paid: true,
+      max_cost_usd: 0.014,
+    });
+    expect(await screen.findByText("seo.rankRunning")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "seo.rankCheck" }),
+    ).toBeDisabled();
   });
 });
 describe("static private report preview", () => {

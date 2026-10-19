@@ -50,6 +50,14 @@ def tool_env(monkeypatch):
         list_runs=AsyncMock(return_value=[]),
         list_reports=AsyncMock(return_value=[]),
     )
+    service.ranks = SimpleNamespace(
+        list_trackers=AsyncMock(return_value=[]),
+        results=AsyncMock(
+            return_value={"tracker": {"tracker_id": "t"}, "run": None, "compare": "7d", "rows": []}
+        ),
+        history=AsyncMock(return_value=[]),
+    )
+    monkeypatch.setattr("octop.infra.seo.rank.SeoRankService", lambda seo: seo.ranks)
     tools = {tool.name: tool for tool in build_seo_tools(service, "agent-a", threads)}
     return configurable, threads, service, tools
 
@@ -115,7 +123,11 @@ async def test_agent_context_writes_are_attributed_and_serps_are_read_only(tool_
     service.list_lookups.assert_awaited_once_with(7, "project-a", kind="domain")
     with pytest.raises(OctopError):
         await tools["seo_list_competitor_lookups"].ainvoke({"kind": "backlinks"})
-    assert not any("buy" in name or "fetch" in name for name in tools)
+    await tools["seo_get_rank_results"].ainvoke({"tracker_id": "t", "compare": "30d"})
+    service.ranks.results.assert_awaited_once_with(7, "project-a", "t", compare="30d")
+    await tools["seo_get_rank_history"].ainvoke({"tracker_id": "t", "keyword_id": "k"})
+    service.ranks.history.assert_awaited_once_with(7, "project-a", "t", "k")
+    assert not any(word in name for name in tools for word in ("buy", "fetch", "check"))
 
 
 def _row(keyword: str, volume: int | None) -> dict:
@@ -254,6 +266,31 @@ async def test_every_tool_result_stays_readable_at_maximum_size(tool_env):
         | {"lookup_id": f"l{i}", "item_count": 100, "keywords": [long] * 200}
         for i in range(50)
     ]
+    cell = {
+        "position": 3,
+        "url": f"https://example.com/{'u' * 2000}",
+        "serp_features": ["organic", "people_also_ask", "ai_overview", "video"],
+        "checked_at": run["observed_at"],
+        "previous_position": 5,
+        "previous_checked_at": run["observed_at"],
+    }
+    tracker = {"tracker_id": "t", "domain": "example.com", "keyword_count": 200}
+    service.ranks.results.return_value = {
+        "tracker": tracker,
+        "run": {"run_id": "r", "status": "completed", "idempotency_key": "k"},
+        "compare": "7d",
+        "rows": [
+            {"keyword_id": f"k{i}", "keyword": f"{long}{i}", "desktop": cell, "mobile": cell}
+            for i in range(200)
+        ],
+    }
+    service.ranks.history.return_value = [
+        cell | {"run_id": f"r{i}", "keyword_id": "k", "keyword": long, "device": "desktop"}
+        for i in range(200)
+    ]
+    service.ranks.list_trackers.return_value = [
+        tracker | {"tracker_id": f"t{i}", "domain": "d" * 253} for i in range(20)
+    ]
     service.get_run.return_value = run
     service.keyword_rows.return_value = saved
     service.list_runs.return_value = [run] * 300
@@ -281,6 +318,15 @@ async def test_every_tool_result_stays_readable_at_maximum_size(tool_env):
         ("seo_get_serp", {"serp_id": "serp-a"}, "items", 100, "url"),
         ("seo_list_competitor_lookups", {}, "lookups", 50, "lookup_id"),
         ("seo_get_competitor_lookup", {"lookup_id": "lookup-a"}, "items", 100, "keyword"),
+        ("seo_list_rank_trackers", {}, "trackers", 20, "tracker_id"),
+        ("seo_get_rank_results", {"tracker_id": "t"}, "rows", 200, "keyword_id"),
+        (
+            "seo_get_rank_history",
+            {"tracker_id": "t", "keyword_id": "k"},
+            "snapshots",
+            200,
+            "run_id",
+        ),
     ]:
         seen: list = []
         offset: int | None = 0
