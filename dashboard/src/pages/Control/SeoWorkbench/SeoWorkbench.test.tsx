@@ -53,6 +53,16 @@ vi.mock("../../../api/modules/seo", async (importOriginal) => ({
     auditPages: vi.fn(),
     cancelAudit: vi.fn(),
     deleteAudit: vi.fn(),
+    google: vi.fn(),
+    connectGoogle: vi.fn(),
+    disconnectGoogle: vi.fn(),
+    gsc: vi.fn(),
+    gscSites: vi.fn(),
+    bindGsc: vi.fn(),
+    unbindGsc: vi.fn(),
+    gscReport: vi.fn(),
+    gscTable: vi.fn(),
+    gscInspect: vi.fn(),
   },
 }));
 vi.mock("../../../api/modules/octopThreads", () => ({
@@ -692,6 +702,184 @@ describe("site audit", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+describe("search performance", () => {
+  const account = {
+    grant_id: "grant-one",
+    email: "owner@example.com",
+    search_console: true,
+    analytics: true,
+    updated_at: 1,
+  };
+  const connection = {
+    project_id: "p1",
+    grant_id: "grant-one",
+    site_url: "sc-domain:example.com",
+    permission_level: "siteOwner",
+    connected_at: 1,
+    email: "owner@example.com",
+  };
+  const totals = { clicks: 10, impressions: 100, ctr: 0.1, position: 8 };
+  beforeEach(() => {
+    vi.mocked(seoApi.google).mockResolvedValue({
+      configured: true,
+      redirect_uri: "https://octop.test/api/seo/google/callback",
+      accounts: [account],
+    });
+    vi.mocked(seoApi.gsc).mockResolvedValue({ connection: null });
+    vi.mocked(seoApi.gscSites).mockResolvedValue({
+      accounts: [
+        {
+          ...account,
+          requires_reconnect: false,
+          api_disabled: false,
+          sites: [
+            {
+              site_url: "sc-domain:example.com",
+              permission_level: "siteOwner",
+            },
+            {
+              site_url: "https://other.example/",
+              permission_level: "siteUnverifiedUser",
+            },
+          ],
+        },
+      ],
+    });
+    vi.mocked(seoApi.bindGsc).mockResolvedValue(connection);
+    vi.mocked(seoApi.gscReport).mockResolvedValue({
+      site_url: "sc-domain:example.com",
+      email: "owner@example.com",
+      range: {
+        start_date: "2026-09-18",
+        end_date: "2026-10-16",
+        prev_start_date: "2026-08-20",
+        prev_end_date: "2026-09-17",
+      },
+      totals,
+      prev_totals: { ...totals, clicks: 5, position: 9 },
+      daily: [],
+      striking_distance: [
+        {
+          query: "near query",
+          page: "https://example.com/a",
+          clicks: 1,
+          impressions: 50,
+          position: 7.4,
+        },
+      ],
+      countries: [
+        { key: "usa", clicks: 10, impressions: 100, ctr: 0.1, position: 8 },
+      ],
+    });
+    vi.mocked(seoApi.gscTable).mockResolvedValue({
+      dimension: "query",
+      page: 1,
+      page_size: 25,
+      has_next_page: true,
+      total_count: null,
+      rows: [
+        { key: "top query", clicks: 9, impressions: 90, ctr: 0.1, position: 2 },
+      ],
+    });
+  });
+  it("binds a verified property, then reads totals, queries and striking distance", async () => {
+    setup("/workbench/seo-workbench.main?project=p1&view=search");
+    const picker = await screen.findByRole("combobox", {
+      name: "seo.gscProperty",
+    });
+    await waitFor(() => expect(seoApi.gscSites).toHaveBeenCalledWith("p1"));
+    fireEvent.mouseDown(picker);
+    const unverified = await screen.findByText(
+      "https://other.example/ (seo.gscUnverified)",
+    );
+    expect(
+      unverified.closest(".ant-select-item-option-disabled"),
+    ).not.toBeNull();
+    fireEvent.click(screen.getByTitle("sc-domain:example.com"));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "seo.gscBind" }));
+    });
+    expect(seoApi.bindGsc).toHaveBeenCalledWith("p1", {
+      grant_id: "grant-one",
+      site_url: "sc-domain:example.com",
+    });
+    expect(await screen.findByText("top query")).toBeVisible();
+    expect(seoApi.gscReport).toHaveBeenCalledWith("p1", {
+      date_range: "last_28_days",
+    });
+    expect(seoApi.gscTable).toHaveBeenCalledWith("p1", {
+      date_range: "last_28_days",
+      dimension: "query",
+      page: 1,
+      page_size: 25,
+    });
+    // Clicks doubled against the previous period; position fell by one.
+    expect(screen.getByText("+100%")).toBeVisible();
+    expect(screen.getByText("-1.0")).toBeVisible();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "seo.gscNext" }));
+    });
+    expect(seoApi.gscTable).toHaveBeenLastCalledWith(
+      "p1",
+      expect.objectContaining({ page: 2 }),
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "seo.gscStriking" }));
+    expect(await screen.findByText("near query")).toBeVisible();
+  });
+  it("starts Google consent with the page to come back to", async () => {
+    vi.mocked(seoApi.google).mockResolvedValue({
+      configured: true,
+      redirect_uri: "https://octop.test/api/seo/google/callback",
+      accounts: [],
+    });
+    vi.mocked(seoApi.connectGoogle).mockResolvedValue({
+      authorize_url: "https://accounts.google.com/o/oauth2/v2/auth?state=s",
+    });
+    const original = window.location;
+    const assign = vi.fn();
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...original, assign },
+    });
+    try {
+      setup("/workbench/seo-workbench.main?project=p1&view=search");
+      const connect = await screen.findByRole("button", {
+        name: "seo.gscConnect",
+      });
+      expect(screen.getByText("seo.gscConnectFirst")).toBeVisible();
+      await act(async () => {
+        fireEvent.click(connect);
+      });
+      expect(seoApi.connectGoogle).toHaveBeenCalledWith(
+        "/workbench/seo-workbench.main?project=p1&view=search",
+      );
+      expect(assign).toHaveBeenCalledWith(
+        "https://accounts.google.com/o/oauth2/v2/auth?state=s",
+      );
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: original,
+      });
+    }
+  });
+  it("explains the callback outcome and shows the redirect URI when unconfigured", async () => {
+    vi.mocked(seoApi.google).mockResolvedValue({
+      configured: false,
+      redirect_uri: "https://octop.test/api/seo/google/callback",
+      accounts: [],
+    });
+    setup(
+      "/workbench/seo-workbench.main?project=p1&view=search&seo_google_error=scope_not_granted",
+    );
+    expect(
+      await screen.findByText("seo.gscCallback_scope_not_granted"),
+    ).toBeVisible();
+    expect(screen.getByText("seo.gscNotConfigured")).toBeVisible();
+    expect(screen.getByText("seo.gscRedirectHelp")).toBeVisible();
+    expect(screen.queryByRole("button", { name: "seo.gscConnect" })).toBeNull();
   });
 });
 describe("static private report preview", () => {

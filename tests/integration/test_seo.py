@@ -340,3 +340,113 @@ async def test_site_audit_over_http(env_with_agent, monkeypatch):
     assert (await client.get(f"{base}/{second}", headers=auth)).json()["status"] == "cancelled"
     assert (await client.delete(f"{base}/{audit_id}", headers=auth)).status_code == 204
     assert (await client.get(f"{base}/{audit_id}", headers=auth)).status_code == 404
+
+
+async def test_search_console_over_http(env_with_agent, monkeypatch):
+    from urllib.parse import parse_qs, urlsplit
+
+    import octop.api.routers.seo_google as router_module
+    from octop.infra.seo.google import oauth
+    from octop.infra.seo.google.service import SeoGoogleService
+    from tests.unit.seo.google.fakegoogle import SITE, FakeGoogle
+
+    client, _server, auth, agent_id = env_with_agent
+    monkeypatch.setenv(oauth.CLIENT_ID_ENV, "client-1")
+    monkeypatch.setenv(oauth.CLIENT_SECRET_ENV, "secret-1")
+    status = (await client.get("/api/seo/google", headers=auth)).json()
+    assert status["configured"] and status["accounts"] == []
+    fake = FakeGoogle(base=status["redirect_uri"].removesuffix(oauth.CALLBACK_PATH))
+    monkeypatch.setattr(
+        router_module,
+        "SeoGoogleService",
+        functools.partial(SeoGoogleService, transport=httpx.MockTransport(fake.handler)),
+    )
+    other = await create_user(client, auth, username="gsc-other")
+    refused = await client.post("/api/seo/google/connect", headers=other, json={})
+    assert refused.status_code == 403
+
+    started = await client.post(
+        "/api/seo/google/connect",
+        headers=auth,
+        json={"return_path": "/workbench/seo-workbench.main"},
+    )
+    assert started.status_code == 200, started.text
+    query = parse_qs(urlsplit(started.json()["authorize_url"]).query)
+    fake.verifiers["code-1"] = query["code_challenge"][0]
+    # Google's redirect carries no JWT.
+    back = await client.get(
+        "/api/seo/google/callback", params={"state": query["state"][0], "code": "code-1"}
+    )
+    assert back.status_code == 303, back.text
+    assert back.headers["location"] == "/workbench/seo-workbench.main?seo_google=connected"
+    accounts = (await client.get("/api/seo/google", headers=auth)).json()["accounts"]
+    assert [a["email"] for a in accounts] == ["owner@example.com"]
+    grant_id = accounts[0]["grant_id"]
+
+    created = await client.post(
+        "/api/seo/projects",
+        headers=auth,
+        json={"name": "Example", "domain": "example.com", "agent_id": agent_id},
+    )
+    base = f"/api/seo/projects/{created.json()['project_id']}/gsc"
+    assert (await client.get(base, headers=auth)).json() == {"connection": None}
+    sites = (await client.get(f"{base}/sites", headers=auth)).json()
+    assert sites["accounts"][0]["sites"][0] == {"site_url": SITE, "permission_level": "siteOwner"}
+    not_bound = await client.post(f"{base}/report", headers=auth, json={})
+    assert not_bound.status_code == 409
+    assert not_bound.json()["error"]["code"] == "SEO_GOOGLE_NOT_CONNECTED"
+    bound = await client.put(base, headers=auth, json={"grant_id": grant_id, "site_url": SITE})
+    assert bound.status_code == 200, bound.text
+    assert bound.json()["email"] == "owner@example.com"
+
+    fake.rows = {
+        ("date",): [
+            {"keys": ["2027-01-01"], "clicks": 3, "impressions": 30, "ctr": 0.1, "position": 6}
+        ],
+        ("query", "page"): [
+            {
+                "keys": ["kw", "https://example.com/a"],
+                "clicks": 1,
+                "impressions": 20,
+                "ctr": 0.05,
+                "position": 9,
+            }
+        ],
+        ("country",): [
+            {"keys": ["usa"], "clicks": 3, "impressions": 30, "ctr": 0.1, "position": 6}
+        ],
+        ("page",): [
+            {
+                "keys": ["https://example.com/a"],
+                "clicks": 3,
+                "impressions": 30,
+                "ctr": 0.1,
+                "position": 6,
+            }
+        ],
+    }
+    report = await client.post(
+        f"{base}/report", headers=auth, json={"date_range": "last_7_days", "device": "MOBILE"}
+    )
+    assert report.status_code == 200, report.text
+    assert report.json()["striking_distance"][0]["query"] == "kw"
+    assert report.json()["totals"]["clicks"] == 3
+    bad = await client.post(f"{base}/report", headers=auth, json={"device": "WATCH"})
+    assert bad.status_code == 422
+    table = await client.post(f"{base}/table", headers=auth, json={"dimension": "page"})
+    assert table.status_code == 200, table.text
+    assert (table.json()["total_count"], table.json()["rows"][0]["key"]) == (
+        1,
+        "https://example.com/a",
+    )
+    inspected = await client.post(
+        f"{base}/inspect", headers=auth, json={"urls": ["https://example.com/a"]}
+    )
+    assert inspected.status_code == 200, inspected.text
+    assert inspected.json()["results"][0]["result"]["indexStatusResult"]["verdict"] == "PASS"
+
+    assert (await client.delete(base, headers=auth)).status_code == 204
+    assert (await client.get(base, headers=auth)).json() == {"connection": None}
+    gone = await client.delete(f"/api/seo/google/accounts/{grant_id}", headers=auth)
+    assert gone.status_code == 204
+    assert (await client.get("/api/seo/google", headers=auth)).json()["accounts"] == []

@@ -442,12 +442,27 @@ rebound.
 | `GET`    | `/seo/projects/{id}/audits/{audit_id}/pages?fetch_class=&status_code=&url_contains=` | admin | crawled pages |
 | `POST`   | `/seo/projects/{id}/audits/{audit_id}/cancel` | admin | queued: cancelled at once; running: stops after the current page, results so far kept |
 | `DELETE` | `/seo/projects/{id}/audits/{audit_id}` | admin | delete the audit and its results (`204`) |
+| `GET`    | `/seo/google` | admin | `{configured, redirect_uri, accounts}` — the callback URI to register and the admin's connected Google accounts |
+| `POST`   | `/seo/google/connect` | admin | body `{return_path?}` → `{authorize_url}`; one consent covers read-only Search Console and Analytics |
+| `GET`    | `/seo/google/callback` | public | Google's redirect; the single-use state (10 min) names the admin. `303` back to `return_path` with `seo_google=connected` or `seo_google_error=<reason>` |
+| `DELETE` | `/seo/google/accounts/{grant_id}` | admin | disconnect; projects bound through it lose their property (`204`) |
+| `GET`/`PUT`/`DELETE` | `/seo/projects/{id}/gsc` | admin | the bound Search Console property; `PUT {grant_id, site_url}` needs a verified property on that grant |
+| `GET`    | `/seo/projects/{id}/gsc/sites` | admin | properties per connected account, with `requires_reconnect` / `api_disabled` |
+| `POST`   | `/seo/projects/{id}/gsc/report` | admin | body `{date_range, device?, country?, page_filter?, query_filter?}` — totals vs the previous period, daily series, striking-distance queries (best page 5–20), countries |
+| `POST`   | `/seo/projects/{id}/gsc/table` | admin | report filters plus `{dimension: query\|page, page, page_size ≤ 100}`; `has_next_page` from one extra row |
+| `POST`   | `/seo/projects/{id}/gsc/inspect` | admin | body `{urls: 1–10, language_code?}` — Google's stored index status; one URL's error is reported next to it |
 
 Site audits crawl on the server as `Octop-SEO-Audit/1.0`: robots.txt and its sitemaps are
 followed, one page at a time (1 s apart, backing off on `429`), without running JavaScript, and
 only to public addresses (every DNS answer is checked; redirects are not followed blindly). The
 crawl is stored as it runs, so an audit interrupted by a restart or deploy resumes where it
 stopped.
+
+Search Console needs `OCTOP_SEO_GOOGLE_CLIENT_ID` and `OCTOP_SEO_GOOGLE_CLIENT_SECRET` (a Google
+OAuth web client with `GET /seo/google`'s `redirect_uri` registered). Tokens are stored
+encrypted per admin and refreshed on use; data is read live from Google on every call and
+nothing else is stored. `409 SEO_GOOGLE_NOT_CONFIGURED`, `SEO_GOOGLE_NOT_CONNECTED` or
+`SEO_GOOGLE_RECONNECT` say what to set up; `502 SEO_GOOGLE_API` carries Google's status.
 
 ## Internal MCP (octop-harness agents)
 

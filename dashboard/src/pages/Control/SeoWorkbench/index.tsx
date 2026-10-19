@@ -42,6 +42,7 @@ import { staticReportHtml } from "./reportPreview";
 import { attemptKey } from "./attemptKey";
 import { AuditPanel } from "./AuditPanel";
 import { ProjectContextPanel } from "./ProjectContextPanel";
+import { SearchPerformancePanel } from "./SearchPerformancePanel";
 import { SerpPanel } from "./SerpPanel";
 import { useSearchTabs } from "./searchTabs";
 import styles from "./index.module.less";
@@ -632,7 +633,14 @@ function ProjectWorkspace({
       {notice && <Alert type="info" showIcon message={notice} />}
       <Tabs
         activeKey={
-          ["research", "saved", "reports", "audit", "context"].includes(view)
+          [
+            "research",
+            "saved",
+            "reports",
+            "audit",
+            "search",
+            "context",
+          ].includes(view)
             ? view
             : "research"
         }
@@ -971,6 +979,11 @@ function ProjectWorkspace({
                 isVisible={isVisible && view === "audit"}
               />
             ),
+          },
+          {
+            key: "search",
+            label: t("seo.gsc"),
+            children: <SearchPerformancePanel key={id} projectId={id} />,
           },
           {
             key: "context",

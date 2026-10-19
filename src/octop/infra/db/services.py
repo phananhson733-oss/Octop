@@ -22,6 +22,7 @@ from octop.infra.db.repos.published_experts import PublishedExpertRepo
 from octop.infra.db.repos.secrets import SecretRepo
 from octop.infra.db.repos.seo import SeoRepo
 from octop.infra.db.repos.seo_audit import SeoAuditRepo
+from octop.infra.db.repos.seo_google import SeoGoogleRepo
 from octop.infra.db.repos.sessions import SessionRepo
 from octop.infra.db.repos.settings import SettingsRepo
 from octop.infra.db.repos.skill_packages import SkillPackageRepo
@@ -67,6 +68,7 @@ class RepoBundle:
     sso_repo: SsoRepo
     seo_repo: SeoRepo
     seo_audit_repo: SeoAuditRepo
+    seo_google_repo: SeoGoogleRepo
 
     @classmethod
     def from_pool(cls, db: DatabasePool) -> RepoBundle:
@@ -99,6 +101,7 @@ class RepoBundle:
             sso_repo=SsoRepo(db),
             seo_repo=SeoRepo(db),
             seo_audit_repo=SeoAuditRepo(db),
+            seo_google_repo=SeoGoogleRepo(db),
         )
 
 

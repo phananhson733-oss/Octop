@@ -500,7 +500,11 @@
     "SEO_INVALID_INPUT": "SEO 输入无效或市场不受支持。",
     "SEO_CONFLICT": "SEO 请求与现有数据冲突。",
     "SEO_PROVIDER_REQUIRED": "请先配置你的 DataForSEO 凭证。",
-    "SEO_REPORT_INTEGRITY": "已保存报告的完整性校验失败。"
+    "SEO_REPORT_INTEGRITY": "已保存报告的完整性校验失败。",
+    "SEO_GOOGLE_NOT_CONFIGURED": "这台服务器还没有配置 Google 登录。需要管理员设置 OCTOP_SEO_GOOGLE_CLIENT_ID 和 OCTOP_SEO_GOOGLE_CLIENT_SECRET。",
+    "SEO_GOOGLE_NOT_CONNECTED": "这个项目还没有连接 Search Console。",
+    "SEO_GOOGLE_RECONNECT": "Google 连接已过期、被撤销，或者没有这个资源的权限。请重新连接 Google。",
+    "SEO_GOOGLE_API": "Google 返回了错误（{google_status}）：{detail}"
   },
   "desktop": {
     "install_log_deps": "正在安装 Python 依赖…",

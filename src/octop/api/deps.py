@@ -51,6 +51,8 @@ _JWT_EXEMPT_EXACT = (
     "/api/auth/ldap/status",
     "/api/auth/invite/validate",
     "/api/auth/invite/redeem",
+    # Google's redirect after consent carries no JWT; the single-use state names the admin.
+    "/api/seo/google/callback",
     "/api/docs",
     "/api/openapi.json",
 )

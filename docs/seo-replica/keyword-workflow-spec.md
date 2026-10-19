@@ -129,3 +129,13 @@ balancebiketoddler.com 的审计只报了三类小问题，同一个站 ChatGPT 
 - **新增 9 类（都是抓取时逐页判断，不加列）：** 页面用 HTTP 提供（`http-page`，警告，对应 A8）；没有移动端 viewport（`missing-viewport`，警告，1.9）；首图被设成延迟加载（`first-image-lazy`，警告，5.4，和 nevermore 一样用文档里第一张图代替首屏图）；没有声明页面语言（`missing-html-lang`，2.7）、没有声明字符集（`missing-charset`，2.8，页面里的 meta 和响应头都算）、没有声明站点图标（`missing-favicon`，2.9）、Open Graph 标签不全（`incomplete-open-graph`，2.6）、没有结构化数据（`no-structured-data`，7.1）、没有面包屑标记（`missing-breadcrumb-schema`，7.5），这 6 类是提示。
 - **口径：** viewport、lang、字符集、图标在 JavaScript 空壳页上也判断（页头在空壳里也有）。Open Graph、结构化数据、面包屑只看可收录且 canonical 指向自己的页面；正文被截断时不报后两类；JSON-LD 解析失败时只报「结构化数据无效」，不再加报「没有结构化数据」；完全没有结构化数据时只报这一条，不再加报面包屑；首页（含 `/en/` 这类语言首页）不要求面包屑。结构化数据的类型同时看 JSON-LD 和 microdata 的 `itemtype`，用 microdata 写面包屑的站不会被误报。
 - **没加的：** 新窗口链接缺 `rel=noopener`（6.6）不加，现代浏览器对 `target=_blank` 默认就是 noopener，对 SEO 也没有影响；与站内其他页 70% 相似（4.5）要做相似度哈希和两两比较，Schema 类型与页面类型是否匹配（7.2）要先判断页面类型，这两项另做。
+
+## 2026-10-19 R2 补：Search Console（GSC）
+
+用户确认复用 GenGrowth 的 Google OAuth 客户端。移植自 OpenSEO d7ea785 的 `googleOAuth.ts`、`gscClient.ts`、`GscService.ts`、`searchAnalytics.ts`、`searchPerformanceReport.ts`，原有单元测试的用例逐条移到 `tests/unit/seo/google/test_gsc.py` 做对照。
+
+- **授权：** 每个管理员一份 Google 授权，一次同意同时拿 Search Console 和 Analytics 的只读权限（OpenSEO 分两次问）。OAuth 客户端读 `OCTOP_SEO_GOOGLE_CLIENT_ID` / `OCTOP_SEO_GOOGLE_CLIENT_SECRET`，没设时页面显示要登记的回调地址。回调 `/api/seo/google/callback` 不带 JWT，靠一次性 state（10 分钟过期，存 PKCE verifier 和回调地址）认出是哪个管理员；返回地址只接受站内路径。令牌和 DataForSEO 凭据一样用 fernet 加密存库，过期前 60 秒刷新；再次同意时 Google 不一定再给 refresh token，就沿用旧的。ID token 直接来自 Google 令牌端点（TLS），按 OpenID Connect Core 3.1.3.7 不验签名，但核对 aud、iss、exp。两个数据权限都没勾就不存授权，让管理员回去勾。
+- **绑定：** 一个项目绑一个资源，必须是所选账号下有验证权限的资源（未验证的列出但不可选）。断开账号时，经它绑定的项目一并解绑。
+- **页面：** 新标签「搜索表现」：连接 / 断开账号、选资源绑定、时间范围（7 天到 16 个月，截止约 3 天前，起点不早于 16 个月前）、设备、国家、查询词和网址包含筛选；点击、展示、CTR、平均排名对比上一个等长周期；每日曲线；热门查询和热门页面（每页 25 条，多取一条判断有没有下一页）；「差一点进前排」（查询词 × 页面取前 1000 行，每个词取排名最好的页面，落在第 5–20 名的按展示量排）；国家；网址检查（Google 保存的收录状态，最多 10 个，单个网址出错不影响其他）。数据每次实时向 Google 读，免费，不存库。
+- **专家工具：** `seo_gsc_performance`（任意维度和筛选；Google 只按点击排序、不能按排名筛，所以带排名或展示量条件时取窗口内前 1000 行在本地筛，翻页始终按 Google 的行号继续）和 `seo_gsc_inspect_urls`（站点地图和引用网址只给前 5 个加总数）。都只读、免费；项目没绑资源或授权失效时报错并提示重新连接。
+- **GA4 下一步做：** 授权里已经包含 `analytics.readonly`，不用重新同意。

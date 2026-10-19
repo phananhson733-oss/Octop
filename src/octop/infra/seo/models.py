@@ -2,7 +2,7 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 
 
 class Command(BaseModel):
@@ -155,3 +155,83 @@ class AuditCreate(Command):
     start_url: str | None = Field(default=None, max_length=2048)
     max_pages: int = Field(default=50, ge=10, le=AUDIT_MAX_PAGES)
     idempotency_key: str = Field(min_length=1, max_length=100)
+
+
+# Google Search Console, ported from OpenSEO d7ea785 searchAnalytics.ts and the
+# get_search_console_performance / inspect_urls MCP tool schemas.
+GscDimension = Literal["query", "page", "country", "device", "date", "searchAppearance"]
+GscDateRange = Literal[
+    "last_7_days",
+    "last_28_days",
+    "last_3_months",
+    "last_6_months",
+    "last_12_months",
+    "last_16_months",
+]
+GscDate = Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}$")]
+
+
+class GoogleConnect(Command):
+    # Dashboard path to come back to after Google's consent screen.
+    return_path: str | None = Field(default=None, max_length=2048)
+
+
+class GscBind(Command):
+    grant_id: str = Field(min_length=1, max_length=100)
+    site_url: str = Field(min_length=1, max_length=2048)
+
+
+class GscFilter(Command):
+    dimension: GscDimension
+    operator: Literal["equals", "notEquals", "contains", "notContains"] = "equals"
+    expression: str = Field(min_length=1, max_length=2000)
+
+
+class GscTextFilter(Command):
+    operator: Literal["contains", "equals"] = "contains"
+    expression: str = Field(min_length=1, max_length=2000)
+
+
+class GscReportQuery(Command):
+    date_range: GscDateRange = "last_28_days"
+    device: Literal["DESKTOP", "MOBILE", "TABLET"] | None = None
+    # ISO 3166-1 alpha-3, lower case, as Search Console reports countries.
+    country: str | None = Field(default=None, pattern=r"^[a-z]{3}$")
+    page_filter: GscTextFilter | None = None
+    query_filter: GscTextFilter | None = None
+
+
+class GscTableQuery(GscReportQuery):
+    dimension: Literal["query", "page"]
+    page: int = Field(default=1, ge=1, le=1000)
+    page_size: int = Field(default=25, ge=1, le=100)
+
+
+class GscInspect(Command):
+    urls: list[str] = Field(min_length=1, max_length=10)
+    language_code: str | None = Field(default=None, max_length=20)
+
+
+class GscPerformance(Command):
+    dimensions: list[GscDimension] | None = Field(default=None, min_length=1, max_length=4)
+    date_range: GscDateRange | None = None
+    start_date: GscDate | None = None
+    end_date: GscDate | None = None
+    filters: list[GscFilter] | None = Field(default=None, max_length=5)
+    row_limit: int = Field(default=250, ge=1, le=1000)
+    start_row: int = Field(default=0, ge=0)
+    min_position: float | None = Field(default=None, ge=1)
+    max_position: float | None = Field(default=None, ge=1)
+    min_impressions: int | None = Field(default=None, ge=0)
+    search_type: Literal["web", "image", "video", "news", "googleNews", "discover"] | None = None
+    data_state: Literal["all", "final"] | None = None
+
+    @model_validator(mode="after")
+    def _consistent(self) -> "GscPerformance":
+        # Search Console rejects searchAppearance next to another dimension, and a
+        # half-given explicit range would silently become the default window.
+        if self.dimensions and "searchAppearance" in self.dimensions and len(self.dimensions) > 1:
+            raise ValueError("searchAppearance must be the only dimension")
+        if bool(self.start_date) != bool(self.end_date):
+            raise ValueError("give both start_date and end_date, or neither")
+        return self

@@ -23,6 +23,9 @@ SEO_TABLES = {
     "seo_audit_frontier",
     "seo_audit_pages",
     "seo_audit_issues",
+    "seo_google_states",
+    "seo_google_grants",
+    "seo_gsc_connections",
 }
 
 

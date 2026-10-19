@@ -159,3 +159,28 @@ CREATE TABLE IF NOT EXISTS seo_audit_issues (
  issue_type TEXT NOT NULL, severity TEXT NOT NULL, page_url TEXT NOT NULL, details TEXT
 );
 CREATE INDEX IF NOT EXISTS seo_audit_issues_type ON seo_audit_issues(audit_id,issue_type);
+-- Google sign-in for Search Console and Analytics. A state is single-use and lives
+-- 10 minutes; the callback finds the admin through it, since Google's redirect has no JWT.
+CREATE TABLE IF NOT EXISTS seo_google_states (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ state TEXT NOT NULL UNIQUE,
+ user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ code_verifier TEXT NOT NULL, redirect_uri TEXT NOT NULL, return_path TEXT NOT NULL,
+ created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS seo_google_grants (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ grant_id TEXT NOT NULL UNIQUE,
+ user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+ google_account_id TEXT NOT NULL, email TEXT, scopes TEXT NOT NULL,
+ -- Fernet-encrypted JSON: access_token, refresh_token, expires_at.
+ credentials TEXT NOT NULL,
+ created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+ UNIQUE(user_id, google_account_id)
+);
+CREATE TABLE IF NOT EXISTS seo_gsc_connections (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ project_id TEXT NOT NULL UNIQUE REFERENCES seo_projects(project_id) ON DELETE CASCADE,
+ grant_id TEXT NOT NULL REFERENCES seo_google_grants(grant_id) ON DELETE CASCADE,
+ site_url TEXT NOT NULL, permission_level TEXT NOT NULL, connected_at INTEGER NOT NULL
+);

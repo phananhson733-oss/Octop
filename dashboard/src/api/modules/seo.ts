@@ -217,6 +217,99 @@ export interface AuditPage {
   crawl_depth: number | null;
   in_sitemap: boolean;
 }
+export interface GoogleAccount {
+  grant_id: string;
+  email: string | null;
+  search_console: boolean;
+  analytics: boolean;
+  updated_at: number;
+}
+export interface GoogleStatus {
+  configured: boolean;
+  /** Register exactly this on the Google OAuth client. */
+  redirect_uri: string;
+  accounts: GoogleAccount[];
+}
+export interface GscAccountSites extends GoogleAccount {
+  sites: { site_url: string; permission_level: string | null }[];
+  requires_reconnect: boolean;
+  api_disabled: boolean;
+}
+export interface GscConnection {
+  project_id: string;
+  grant_id: string;
+  site_url: string;
+  permission_level: string;
+  connected_at: number;
+  email: string | null;
+}
+export type GscDateRange =
+  | "last_7_days"
+  | "last_28_days"
+  | "last_3_months"
+  | "last_6_months"
+  | "last_12_months"
+  | "last_16_months";
+export interface GscTextFilter {
+  operator: "contains" | "notContains" | "equals" | "notEquals";
+  expression: string;
+}
+export interface GscReportQuery {
+  date_range: GscDateRange;
+  device?: "DESKTOP" | "MOBILE" | "TABLET";
+  /** ISO 3166-1 alpha-3, lowercase, as Search Console reports it. */
+  country?: string;
+  page_filter?: GscTextFilter;
+  query_filter?: GscTextFilter;
+}
+export interface GscTotals {
+  clicks: number;
+  impressions: number;
+  /** 0-1 fraction. */
+  ctr: number;
+  position: number;
+}
+export interface GscDimensionRow {
+  key: string;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number | null;
+}
+export interface GscReport {
+  site_url: string;
+  email: string | null;
+  range: {
+    start_date: string;
+    end_date: string;
+    prev_start_date: string;
+    prev_end_date: string;
+  };
+  totals: GscTotals;
+  prev_totals: GscTotals;
+  daily: { date: string; clicks: number | null; impressions: number | null }[];
+  striking_distance: {
+    query: string;
+    page: string;
+    clicks: number;
+    impressions: number;
+    position: number;
+  }[];
+  countries: GscDimensionRow[];
+}
+export interface GscTable {
+  dimension: "query" | "page";
+  page: number;
+  page_size: number;
+  has_next_page: boolean;
+  total_count: number | null;
+  rows: GscDimensionRow[];
+}
+export interface GscInspection {
+  url: string;
+  result: Record<string, unknown> | null;
+  error?: string | null;
+}
 const projectPath = (id: string) => `/seo/projects/${encodeURIComponent(id)}`;
 const auditPath = (id: string, auditId: string) =>
   `${projectPath(id)}/audits/${encodeURIComponent(auditId)}`;
@@ -327,5 +420,48 @@ export const seoApi = {
   report: (id: string, reportId: string) =>
     request<SeoReport & { html: string }>(
       `${projectPath(id)}/reports/${encodeURIComponent(reportId)}`,
+    ),
+  google: () => request<GoogleStatus>("/seo/google"),
+  connectGoogle: (returnPath: string) =>
+    request<{ authorize_url: string }>("/seo/google/connect", {
+      method: "POST",
+      body: JSON.stringify({ return_path: returnPath }),
+    }),
+  disconnectGoogle: (grantId: string) =>
+    request<void>(`/seo/google/accounts/${encodeURIComponent(grantId)}`, {
+      method: "DELETE",
+    }),
+  gsc: (id: string) =>
+    request<{ connection: GscConnection | null }>(`${projectPath(id)}/gsc`),
+  gscSites: (id: string) =>
+    request<{ accounts: GscAccountSites[] }>(`${projectPath(id)}/gsc/sites`),
+  bindGsc: (id: string, data: { grant_id: string; site_url: string }) =>
+    request<GscConnection>(`${projectPath(id)}/gsc`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    }),
+  unbindGsc: (id: string) =>
+    request<void>(`${projectPath(id)}/gsc`, { method: "DELETE" }),
+  gscReport: (id: string, data: GscReportQuery) =>
+    request<GscReport>(`${projectPath(id)}/gsc/report`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  gscTable: (
+    id: string,
+    data: GscReportQuery & {
+      dimension: "query" | "page";
+      page: number;
+      page_size: number;
+    },
+  ) =>
+    request<GscTable>(`${projectPath(id)}/gsc/table`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  gscInspect: (id: string, urls: string[]) =>
+    request<{ site_url: string; results: GscInspection[] }>(
+      `${projectPath(id)}/gsc/inspect`,
+      { method: "POST", body: JSON.stringify({ urls }) },
     ),
 };

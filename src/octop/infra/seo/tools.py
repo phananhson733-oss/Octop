@@ -206,8 +206,10 @@ def build_seo_tools(
     """Bind identity outside model arguments and revalidate it after every resume."""
     from octop.infra.seo.audit.inspect import trim_texts  # noqa: PLC0415
     from octop.infra.seo.audit.service import SeoAuditService  # noqa: PLC0415
+    from octop.infra.seo.google.service import SeoGoogleService  # noqa: PLC0415
 
     audits = SeoAuditService(service)
+    google = SeoGoogleService(service)
 
     async def context() -> tuple[int, str, str]:
         try:
@@ -371,6 +373,78 @@ def build_seo_tools(
             ensure_ascii=False,
         )
 
+    async def gsc_performance(
+        dimensions: list[str] | None = None,
+        date_range: str | None = None,
+        start_date: str | None = None,
+        end_date: str | None = None,
+        filters: list[dict[str, str]] | None = None,
+        row_limit: int = 250,
+        start_row: int = 0,
+        min_position: float | None = None,
+        max_position: float | None = None,
+        min_impressions: int | None = None,
+        search_type: str | None = None,
+        data_state: str | None = None,
+    ) -> str:
+        user_id, project_id, _thread_id = await context()
+        data = await google.gsc_performance(
+            user_id,
+            project_id,
+            dimensions=dimensions,
+            date_range=date_range,
+            start_date=start_date,
+            end_date=end_date,
+            filters=filters,
+            row_limit=row_limit,
+            start_row=start_row,
+            min_position=min_position,
+            max_position=max_position,
+            min_impressions=min_impressions,
+            search_type=search_type,
+            data_state=data_state,
+        )
+        pairs = data["rows"]
+        returned = pairs[: _prefix([row for _index, row in pairs], MAX_RESULT_CHARS - 2_000)]
+        request = data["request"]
+        first = request.get("startRow", 0)
+        truncated = data["kept"] > len(returned)
+        has_more = truncated or data["fetched"] >= data["fetch_limit"]
+        # Paging stays in Google's row space: continue right after the last row returned,
+        # which may be well past row_count when a metric filter dropped rows before it.
+        next_row = (
+            first + returned[-1][0] + 1 if truncated and returned else first + data["fetched"]
+        )
+        out: dict[str, Any] = {
+            "site_url": data["site_url"],
+            "start_date": request["startDate"],
+            "end_date": request["endDate"],
+            "dimensions": request["dimensions"],
+            "search_type": request["type"],
+            "row_count": len(returned),
+            "rows": [row for _index, row in returned],
+            "has_more": has_more,
+            "next_start_row": next_row if has_more else None,
+        }
+        if data["filtered"]:
+            out["filtered"] = f"{data['fetched']} rows fetched, {data['kept']} matched"
+        return json.dumps(out, ensure_ascii=False)
+
+    async def gsc_inspect_urls(urls: list[str], language_code: str = "") -> str:
+        user_id, project_id, _thread_id = await context()
+        data = await google.gsc_inspect(
+            user_id, project_id, urls=urls, language_code=language_code or None
+        )
+        for item in data["results"]:
+            index = (item.get("result") or {}).get("indexStatusResult") or {}
+            # Sitemap and referrer lists can be long; counts plus a few examples suffice.
+            for key in ("sitemap", "referringUrls"):
+                values = index.get(key)
+                if isinstance(values, list) and len(values) > 5:
+                    index[key] = values[:5]
+                    index[f"{key}_count"] = len(values)
+        return json.dumps(data, ensure_ascii=False)
+
     async def list_audits(offset: int = 0) -> str:
         user_id, project_id, _thread_id = await context()
         rows = await audits.list_audits(user_id, project_id)
@@ -521,6 +595,41 @@ def build_seo_tools(
             "headings, word count, indexability, links and response time. audit_id defaults to "
             "the newest audit; filter by fetch_class (ok|blocked|rate_limited|error) or a URL "
             "substring. Free. Pass next_offset as offset to read more.",
+        ),
+        (
+            "seo_gsc_performance",
+            gsc_performance,
+            "Query the Search Console property connected to this agent's project: clicks, "
+            "impressions, CTR and average position by query, page, country, device, date or "
+            "searchAppearance (that one alone). First-party data: use it for what already "
+            "ranks, near-ranking queries and pages with real demand. dimensions defaults to "
+            '["query"]; ["page"] for top pages, ["query","page"] to map queries to pages or spot '
+            'cannibalization, ["date"] for a time series. date_range: last_7_days, '
+            "last_28_days (default), last_3_months, last_6_months, last_12_months, "
+            "last_16_months, ending about 3 days ago (recent data lags); or start_date and "
+            "end_date (YYYY-MM-DD, Pacific Time, both). filters: up to 5 ANDed "
+            '{"dimension", "operator": equals|notEquals|contains|notContains, "expression"}, '
+            'e.g. [{"dimension": "page", "operator": "equals", "expression": "<url>"}] with '
+            '["query"] for one page\'s queries. Google sorts by clicks and cannot filter by '
+            "position, so min_position, max_position and min_impressions are applied here over "
+            "the top 1000 rows of the window (striking distance: 5, 20, 50). row_limit 1-1000 "
+            "(default 250); when has_more is true call again with start_row=next_start_row. "
+            "ctr is a 0-1 fraction; position is a 1-based average and is absent for discover "
+            "and googleNews. search_type: web (default), image, video, news, googleNews, "
+            "discover. Read-only and free. Fails with a reconnect hint when the project has no "
+            "property bound or the Google grant expired.",
+        ),
+        (
+            "seo_gsc_inspect_urls",
+            gsc_inspect_urls,
+            "Read Google Search Console's stored index status for 1-10 URLs of the connected "
+            "property: verdict and coverage state, robots.txt and indexing state, page fetch, "
+            "last crawl time, Google-selected vs declared canonical (a mismatch is the usual "
+            "answer to 'why is this not indexed'), mobile and rich-result verdicts, sitemaps "
+            "and referring URLs (first 5, with a count). This is not a live crawl: use "
+            "seo_inspect_page for what the page serves now. Each URL must belong to the "
+            "property; a failure for one URL is reported next to it. language_code is BCP-47, "
+            "e.g. en-US. Read-only and free.",
         ),
         (
             "seo_inspect_page",
