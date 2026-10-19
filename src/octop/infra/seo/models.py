@@ -61,6 +61,27 @@ class SerpCreate(Command):
     confirm_paid: Literal[True]
 
 
+class LookupCreate(Command):
+    """One competitor-research purchase: a domain's footprint, or who ranks for keywords."""
+
+    kind: Literal["domain", "competitors"]
+    domain: str | None = Field(default=None, min_length=1, max_length=253)
+    # DataForSEO serp_competitors takes up to 200 keywords.
+    keywords: list[Annotated[str, StringConstraints(max_length=200)]] | None = Field(
+        default=None, min_length=1, max_length=200
+    )
+    idempotency_key: str = Field(min_length=1, max_length=100)
+    confirm_paid: Literal[True]
+
+    @model_validator(mode="after")
+    def _one_target(self) -> "LookupCreate":
+        if (self.domain is None) != (self.kind == "competitors") or (self.keywords is None) != (
+            self.kind == "domain"
+        ):
+            raise ValueError("domain lookups take a domain, competitor lookups keywords")
+        return self
+
+
 # Project memory, ported from OpenSEO projectContext.ts. Each op is one strict
 # object, so a typo fails validation instead of matching another op.
 SECTION_KEYS = ("business_overview", "current_goal", "positioning", "writing_preferences")

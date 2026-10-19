@@ -41,7 +41,8 @@ rather than guessing them. This context shows previews only: when saved_keywords
 research_rows_preview or project_context has more entries than shown, read the rest with
 seo_list_saved_keywords, seo_list_research_rows and seo_get_project_context, passing
 next_offset until it is null. SERP snapshots already bought are read with seo_list_serps and
-seo_get_serp; you cannot buy new ones. Trend entries are [year, month, search_volume]. Use inline CSS and static HTML/SVG only: no
+seo_get_serp, competitor lookups with seo_list_competitor_lookups and
+seo_get_competitor_lookup; you cannot buy new ones. Trend entries are [year, month, search_volume]. Use inline CSS and static HTML/SVG only: no
 scripts, forms, remote images, remote CSS, or external data fetches. The document must contain
 <html and end with </html>, under 500000 UTF-8 bytes (aim below 80000). Write the actual
 analysis, then call seo_save_report with this exact run_id and context_hash, a title <=120
@@ -154,6 +155,30 @@ def _serp_summary(serp: dict[str, Any]) -> dict[str, Any]:
     )
     count = serp["item_count"] if "item_count" in serp else len(serp["items"])
     return {key: serp.get(key) for key in keys} | {"item_count": count}
+
+
+def _lookup_summary(lookup: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "lookup_id",
+        "kind",
+        "domain",
+        "keywords",
+        "status",
+        "observed_at",
+        "location_code",
+        "language_code",
+        "overview",
+        "cached",
+        "source_lookup_id",
+        "cost_usd",
+        "error",
+    )
+    count = lookup["item_count"] if "item_count" in lookup else len(lookup["items"])
+    # Not total_count: a page of rows uses that name for the rows it pages through.
+    return {key: lookup.get(key) for key in keys} | {
+        "item_count": count,
+        "domain_keyword_total": lookup.get("total_count"),
+    }
 
 
 def _audit_summary(audit: dict[str, Any]) -> dict[str, Any]:
@@ -327,6 +352,18 @@ def build_seo_tools(
         user_id, project_id, _thread_id = await context()
         snapshot = await service.get_serp(user_id, project_id, serp_id)
         return _page(snapshot["items"], offset, "items", _serp_summary(snapshot))
+
+    async def lookups(kind: str = "", offset: int = 0) -> str:
+        user_id, project_id, _thread_id = await context()
+        if kind not in ("", "domain", "competitors"):
+            raise OctopError.localized(ErrorCode.SEO_INVALID_INPUT)
+        rows = await service.list_lookups(user_id, project_id, kind=kind or None)
+        return _page([_lookup_summary(row) for row in rows], offset, "lookups")
+
+    async def lookup(lookup_id: str, offset: int = 0) -> str:
+        user_id, project_id, _thread_id = await context()
+        found = await service.get_lookup(user_id, project_id, lookup_id)
+        return _page(found["items"], offset, "items", _lookup_summary(found))
 
     async def save_report(
         run_id: str, context_hash: str, title: str, summary: str, html: str
@@ -599,6 +636,27 @@ def build_seo_tools(
             serp,
             "Read one SERP snapshot's results. rank counts every SERP element (ads, People Also "
             "Ask, ...); organic_rank counts organic results only, as rank trackers do. Free. "
+            "Pass next_offset as offset to read more.",
+        ),
+        (
+            "seo_list_competitor_lookups",
+            lookups,
+            "List competitor research already bought for this agent's project, newest first: "
+            "kind domain (one domain's organic footprint: estimated monthly organic traffic, "
+            "keyword count, top-3/top-10 counts, and its top 100 ranked keywords) and kind "
+            "competitors (the domains ranking for a keyword set). Filter with kind. Free; you "
+            "cannot buy new lookups, the user buys them on the Competitors tab. Pass "
+            "next_offset as offset to read more.",
+        ),
+        (
+            "seo_get_competitor_lookup",
+            lookup,
+            "Read one competitor lookup's rows. kind domain: ranked keywords with rank (all "
+            "SERP elements), organic_rank (organic only), url, etv (estimated monthly visits "
+            "from the keyword), search_volume, cpc, keyword_difficulty and intent; "
+            "domain_keyword_total counts every keyword the domain ranks for. kind competitors: domains with visibility, "
+            "avg_position, median_position, etv, keywords_count and keywords_positions (each "
+            "keyword it ranks for). Third-party estimates, not the site's real traffic. Free. "
             "Pass next_offset as offset to read more.",
         ),
         (

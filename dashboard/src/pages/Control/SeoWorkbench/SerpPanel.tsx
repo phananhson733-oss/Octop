@@ -26,7 +26,7 @@ import styles from "./index.module.less";
 const { Text } = Typography;
 
 /** Provider URLs are untrusted: only http(s) links become clickable. */
-function safeHttpUrl(url: string | null): string | null {
+export function safeHttpUrl(url: string | null): string | null {
   if (!url) return null;
   try {
     const parsed = new URL(url);

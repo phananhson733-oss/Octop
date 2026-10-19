@@ -27,6 +27,7 @@ SEO_TABLES = {
     "seo_google_grants",
     "seo_gsc_connections",
     "seo_ga4_connections",
+    "seo_lookups",
 }
 
 

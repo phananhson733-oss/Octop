@@ -518,3 +518,116 @@ async def test_analytics_over_http(env_with_agent, monkeypatch):
     assert wrong.status_code == 422
     assert (await client.delete(base, headers=auth)).status_code == 204
     assert (await client.get(base, headers=auth)).json() == {"connection": None}
+
+
+async def test_competitor_lookups_over_http(env_with_agent, monkeypatch):
+    import octop.infra.seo.service as module
+
+    client, server, auth, agent_id = env_with_agent
+    calls = []
+
+    def supplier(request):
+        calls.append(request.url.path)
+        if "domain_rank_overview" in request.url.path:
+            result = {"items": [{"metrics": {"organic": {"etv": 10.5, "count": 3}}}]}
+        elif "ranked_keywords" in request.url.path:
+            row = {
+                "keyword_data": {"keyword": "rival tips", "keyword_info": {"search_volume": 70}},
+                "ranked_serp_element": {"serp_item": {"rank_group": 1, "rank_absolute": 2}},
+            }
+            result = {"total_count": 3, "items": [row]}
+        else:
+            result = {"items": [{"domain": "rival.com", "visibility": 0.5}]}
+        task = {"status_code": 20000, "cost": 0.01, "result": [result]}
+        return httpx.Response(200, json={"status_code": 20000, "tasks": [task]})
+
+    monkeypatch.setattr(
+        module,
+        "DataForSeoClient",
+        functools.partial(DataForSeoClient, transport=httpx.MockTransport(supplier)),
+    )
+    created = await client.post(
+        "/api/seo/projects",
+        headers=auth,
+        json={"name": "Example", "domain": "example.com", "agent_id": agent_id},
+    )
+    base = f"/api/seo/projects/{created.json()['project_id']}"
+    await client.put(
+        "/api/seo/provider", headers=auth, json={"login": "fixture", "password": "secret"}
+    )
+    request = {
+        "kind": "domain",
+        "domain": "www.rival.com",
+        "idempotency_key": "d",
+        "confirm_paid": True,
+    }
+    bought = await client.post(base + "/lookups", headers=auth, json=request)
+    assert bought.status_code == 200, bought.text
+    domain = bought.json()
+    assert (domain["domain"], domain["overview"]["organic_keywords"], domain["total_count"]) == (
+        "rival.com",
+        3,
+        3,
+    )
+    assert domain["items"][0]["keyword"] == "rival tips" and "receipts" not in domain
+    assert domain["cost_usd"] == 0.02 and domain["item_count"] == 1
+    rivals = (
+        await client.post(
+            base + "/lookups",
+            headers=auth,
+            json={
+                "kind": "competitors",
+                "keywords": ["rival tips"],
+                "idempotency_key": "c",
+                "confirm_paid": True,
+            },
+        )
+    ).json()
+    assert rivals["items"] == [
+        {
+            "domain": "rival.com",
+            "visibility": 0.5,
+            "avg_position": None,
+            "median_position": None,
+            "etv": None,
+            "keywords_count": None,
+            "keywords_positions": {},
+        }
+    ]
+    for bad in (
+        request | {"idempotency_key": "x", "confirm_paid": False},
+        request | {"idempotency_key": "y", "keywords": ["a"]},
+        {"kind": "competitors", "keywords": [], "idempotency_key": "z", "confirm_paid": True},
+    ):
+        assert (await client.post(base + "/lookups", headers=auth, json=bad)).status_code == 422
+    summaries = (await client.get(base + "/lookups", headers=auth)).json()
+    assert [row["kind"] for row in summaries] == ["competitors", "domain"]
+    assert "items" not in summaries[0]
+    only = (await client.get(base + "/lookups", headers=auth, params={"kind": "domain"})).json()
+    assert [row["lookup_id"] for row in only] == [domain["lookup_id"]]
+    assert (
+        await client.get(base + "/lookups", headers=auth, params={"kind": "backlinks"})
+    ).status_code == 422
+    read = (await client.get(base + "/lookups/" + domain["lookup_id"], headers=auth)).json()
+    assert read["items"] == domain["items"]
+    assert (await client.get(base + "/lookups/nope", headers=auth)).status_code == 404
+    assert len(calls) == 3
+
+    other = await create_user(client, auth, username="seo-r3-other")
+    for method, path, body in [
+        ("post", base + "/lookups", request),
+        ("get", base + "/lookups", None),
+        ("get", base + "/lookups/" + domain["lookup_id"], None),
+    ]:
+        kwargs = {"headers": other} | ({"json": body} if body is not None else {})
+        assert (await getattr(client, method)(path, **kwargs)).status_code == 403, path
+
+    from octop.api.app import build_app
+
+    paths = build_app(server).openapi()["paths"]
+    for path, method in [
+        ("/api/seo/projects/{project_id}/lookups", "post"),
+        ("/api/seo/projects/{project_id}/lookups", "get"),
+        ("/api/seo/projects/{project_id}/lookups/{lookup_id}", "get"),
+    ]:
+        assert paths[path][method]["summary"], path

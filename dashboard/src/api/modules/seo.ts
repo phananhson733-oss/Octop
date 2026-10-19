@@ -86,6 +86,54 @@ export interface SerpSummary {
 export interface SerpSnapshot extends SerpSummary {
   items: SerpItem[];
 }
+export interface RankedKeyword {
+  keyword: string;
+  /** Position among all SERP elements. */
+  rank: number | null;
+  /** Position among organic results only. */
+  organic_rank: number | null;
+  url: string | null;
+  /** Estimated monthly visits from this keyword. */
+  etv: number | null;
+  search_volume: number | null;
+  cpc: number | null;
+  keyword_difficulty: number | null;
+  intent: string;
+}
+export interface SerpCompetitor {
+  domain: string;
+  visibility: number | null;
+  avg_position: number | null;
+  median_position: number | null;
+  etv: number | null;
+  keywords_count: number | null;
+  keywords_positions: Record<string, number[]>;
+}
+export interface LookupSummary {
+  lookup_id: string;
+  kind: "domain" | "competitors";
+  domain: string | null;
+  keywords: string[] | null;
+  status: ResearchRun["status"];
+  observed_at: string;
+  item_count: number;
+  overview: {
+    organic_traffic: number | null;
+    organic_keywords: number | null;
+    pos_1: number | null;
+    pos_2_3: number | null;
+    pos_4_10: number | null;
+  } | null;
+  /** Every keyword the domain ranks for; items holds the top 100. */
+  total_count: number | null;
+  cost_usd: number | null;
+  cached: boolean;
+  source_lookup_id?: string | null;
+  error?: string | null;
+}
+export interface Lookup extends LookupSummary {
+  items: RankedKeyword[] | SerpCompetitor[];
+}
 export const SECTION_KEYS = [
   "business_overview",
   "current_goal",
@@ -416,6 +464,25 @@ export const seoApi = {
   serp: (id: string, serpId: string) =>
     request<SerpSnapshot>(
       `${projectPath(id)}/serps/${encodeURIComponent(serpId)}`,
+    ),
+  buyLookup: (
+    id: string,
+    data: (
+      | { kind: "domain"; domain: string }
+      | { kind: "competitors"; keywords: string[] }
+    ) & { idempotency_key: string; confirm_paid: true },
+  ) =>
+    request<Lookup>(`${projectPath(id)}/lookups`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  lookups: (id: string, kind: LookupSummary["kind"]) =>
+    request<LookupSummary[]>(
+      `${projectPath(id)}/lookups?${new URLSearchParams({ kind })}`,
+    ),
+  lookup: (id: string, lookupId: string) =>
+    request<Lookup>(
+      `${projectPath(id)}/lookups/${encodeURIComponent(lookupId)}`,
     ),
   context: (id: string) =>
     request<ProjectContext>(`${projectPath(id)}/context`),

@@ -40,6 +40,9 @@ vi.mock("../../../api/modules/seo", async (importOriginal) => ({
     buySerp: vi.fn(),
     serps: vi.fn(),
     serp: vi.fn(),
+    buyLookup: vi.fn(),
+    lookups: vi.fn(),
+    lookup: vi.fn(),
     context: vi.fn(),
     updateContext: vi.fn(),
     keywords: vi.fn(),
@@ -1066,6 +1069,189 @@ describe("search performance", () => {
     expect(screen.getByText("seo.gscNotConfigured")).toBeVisible();
     expect(screen.getByText("seo.gscRedirectHelp")).toBeVisible();
     expect(screen.queryByRole("button", { name: "seo.gscConnect" })).toBeNull();
+  });
+});
+describe("competitors", () => {
+  const emptyContext: ProjectContext = {
+    sections: [],
+    missing_sections: [],
+    custom_sections: [],
+    competitors: [],
+    key_pages: [],
+    research_log: [],
+  };
+  const lookupBase = {
+    status: "completed" as const,
+    observed_at: "2026-10-19T08:00:00Z",
+    cost_usd: 0.03,
+    cached: false,
+    total_count: null,
+    overview: null,
+  };
+  async function confirmBuy(name: string) {
+    fireEvent.click(screen.getByRole("button", { name }));
+    const confirm = await screen.findAllByRole("button", {
+      name: "seo.serpConfirmBuy",
+    });
+    await act(async () => {
+      fireEvent.click(confirm[confirm.length - 1]);
+    });
+  }
+  it("reads saved lookups on open and buys a domain or competitor set only on a confirmed click", async () => {
+    vi.mocked(seoApi.context).mockResolvedValue(emptyContext);
+    vi.mocked(seoApi.lookups).mockResolvedValue([]);
+    vi.mocked(seoApi.keywords).mockResolvedValue({
+      rows: [
+        { ...row, keyword: "small", search_volume: 10, tags: [] },
+        { ...row, keyword: "big", search_volume: 900, tags: [] },
+      ] as never,
+      total_count: 2,
+    });
+    vi.mocked(seoApi.buyLookup).mockImplementation(async (_, data) =>
+      data.kind === "domain"
+        ? {
+            ...lookupBase,
+            lookup_id: "l-domain",
+            kind: "domain",
+            domain: "rival.com",
+            keywords: null,
+            item_count: 2,
+            total_count: 4321,
+            overview: {
+              organic_traffic: 5000.4,
+              organic_keywords: 4321,
+              pos_1: 2,
+              pos_2_3: 3,
+              pos_4_10: 5,
+            },
+            items: [
+              {
+                keyword: "rival guide",
+                rank: 3,
+                organic_rank: 2,
+                url: "https://rival.com/guide",
+                etv: 80,
+                search_volume: 1200,
+                cpc: null,
+                keyword_difficulty: 20,
+                intent: "informational",
+              },
+              {
+                keyword: "unsafe page",
+                rank: 9,
+                organic_rank: 8,
+                url: "javascript:alert(1)",
+                etv: 1,
+                search_volume: 10,
+                cpc: null,
+                keyword_difficulty: null,
+                intent: "unknown",
+              },
+            ],
+          }
+        : {
+            ...lookupBase,
+            lookup_id: "l-rivals",
+            kind: "competitors",
+            domain: null,
+            keywords: ["big", "small"],
+            item_count: 2,
+            items: [
+              {
+                domain: "www.example.com",
+                visibility: 0.4,
+                avg_position: 4,
+                median_position: 4,
+                etv: 30,
+                keywords_count: 1,
+                keywords_positions: { big: [4] },
+              },
+              {
+                domain: "rival.com",
+                visibility: 0.9,
+                avg_position: 1.5,
+                median_position: 1,
+                etv: 300,
+                keywords_count: 2,
+                keywords_positions: { big: [1], small: [2] },
+              },
+            ],
+          },
+    );
+    vi.mocked(seoApi.updateContext).mockResolvedValue({
+      ...emptyContext,
+      competitors: [
+        {
+          domain: "rival.com",
+          name: null,
+          notes: null,
+          updated_at: "2026-10-19T08:00:00Z",
+          updated_by: "user",
+        },
+      ],
+    });
+    setup("/workbench/seo-workbench.main?project=p1&view=competitors");
+    expect(await screen.findAllByText("seo.lookupNotBought")).toHaveLength(2);
+    expect(seoApi.lookups).toHaveBeenCalledWith("p1", "domain");
+    expect(seoApi.lookups).toHaveBeenCalledWith("p1", "competitors");
+    expect(seoApi.buyLookup).not.toHaveBeenCalled();
+
+    const domainBox = screen.getByRole("combobox", {
+      name: "seo.lookupDomain",
+    });
+    fireEvent.change(domainBox, {
+      target: { value: "https://www.Rival.com/blog" },
+    });
+    await confirmBuy("seo.lookupDomainBuy");
+    expect(await screen.findByText("rival guide")).toBeVisible();
+    expect(seoApi.buyLookup).toHaveBeenCalledWith("p1", {
+      kind: "domain",
+      domain: "rival.com",
+      idempotency_key: expect.any(String),
+      confirm_paid: true,
+    });
+    expect(screen.getByText("5,000")).toBeVisible();
+    const top10 = screen.getByText("seo.lookupTop10").closest(".ant-card");
+    expect(within(top10 as HTMLElement).getByText("10")).toBeVisible();
+    expect(screen.getByText("/guide")).toHaveAttribute(
+      "href",
+      "https://rival.com/guide",
+    );
+    expect(
+      within(screen.getByText("unsafe page").closest("tr")!).queryByRole(
+        "link",
+      ),
+    ).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "seo.lookupUseSaved" }));
+    await waitFor(() =>
+      expect(screen.getByLabelText("seo.lookupKeywords")).toHaveValue(
+        "big\nsmall",
+      ),
+    );
+    await confirmBuy("seo.lookupCompetitorsBuy");
+    expect(seoApi.buyLookup).toHaveBeenLastCalledWith("p1", {
+      kind: "competitors",
+      keywords: ["big", "small"],
+      idempotency_key: expect.any(String),
+      confirm_paid: true,
+    });
+    const own = (await screen.findByText("www.example.com")).closest("tr")!;
+    expect(within(own).getByText("seo.lookupOwn")).toBeVisible();
+    expect(within(own).queryByRole("button")).toBeNull();
+    const rival = screen
+      .getByText("rival.com", { selector: "span" })
+      .closest("tr")!;
+    await act(async () => {
+      fireEvent.click(
+        within(rival).getByRole("button", { name: "seo.lookupAddCompetitor" }),
+      );
+    });
+    expect(seoApi.updateContext).toHaveBeenCalledWith("p1", [
+      { add_competitors: [{ domain: "rival.com" }] },
+    ]);
+    expect(await within(rival).findByText("seo.lookupSaved")).toBeVisible();
+    expect(within(rival).queryByRole("button")).toBeNull();
   });
 });
 describe("static private report preview", () => {

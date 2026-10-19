@@ -41,6 +41,7 @@ import {
 import { staticReportHtml } from "./reportPreview";
 import { attemptKey } from "./attemptKey";
 import { AuditPanel } from "./AuditPanel";
+import { CompetitorsPanel } from "./CompetitorsPanel";
 import { ProjectContextPanel } from "./ProjectContextPanel";
 import { SearchPerformancePanel } from "./SearchPerformancePanel";
 import { SerpPanel } from "./SerpPanel";
@@ -662,6 +663,7 @@ function ProjectWorkspace({
             "reports",
             "audit",
             "search",
+            "competitors",
             "context",
           ].includes(view)
             ? view
@@ -1007,6 +1009,18 @@ function ProjectWorkspace({
             key: "search",
             label: t("seo.gsc"),
             children: <SearchPerformancePanel key={id} projectId={id} />,
+          },
+          {
+            key: "competitors",
+            label: t("seo.competitors"),
+            children: (
+              <CompetitorsPanel
+                key={id}
+                projectId={id}
+                domain={project.domain}
+                configured={configured}
+              />
+            ),
           },
           {
             key: "context",

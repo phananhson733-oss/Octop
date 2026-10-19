@@ -413,7 +413,7 @@ discovery.
 
 ## SEO workbench
 
-Admin only. Paid DataForSEO calls (`research`, `serps`) require
+Admin only. Paid DataForSEO calls (`research`, `serps`, `lookups`) require
 `confirm_paid: true` and an `idempotency_key`; the same key with the same
 input returns the earlier result instead of paying again. Deleting the bound
 expert keeps the project and its evidence with `agent_id: null` until it is
@@ -430,6 +430,9 @@ rebound.
 | `POST`   | `/seo/projects/{id}/serps` | admin | body `{keyword, device, depth: 20\|100}` — paid Google SERP; a repeat within 12 h is served from the saved copy at no charge |
 | `GET`    | `/seo/projects/{id}/serps?keyword=` | admin | snapshot summaries, newest first |
 | `GET`    | `/seo/projects/{id}/serps/{serp_id}` | admin | one snapshot with result rows |
+| `POST`   | `/seo/projects/{id}/lookups` | admin | body `{kind: domain, domain}` (organic footprint + top 100 ranked keywords by traffic) or `{kind: competitors, keywords: [1-200]}` (top 50 domains ranking for them) — paid DataForSEO Labs; a repeat within 12 h is served from the saved copy at no charge |
+| `GET`    | `/seo/projects/{id}/lookups?kind=` | admin | lookup summaries, newest first |
+| `GET`    | `/seo/projects/{id}/lookups/{lookup_id}` | admin | one lookup with its rows |
 | `GET`/`PATCH` | `/seo/projects/{id}/context` | admin | project background; `PATCH {updates: [...]}` applies all ops or none |
 | `GET`/`POST` | `/seo/projects/{id}/keywords` | admin | saved keywords (paged) / save rows from a run |
 | `GET`    | `/seo/projects/{id}/report-context?run_id=` | admin | evidence and `context_hash` for an agent report |

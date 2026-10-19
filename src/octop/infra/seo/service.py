@@ -29,6 +29,7 @@ from octop.infra.seo.models import (
     CustomSectionOp,
     DeleteCustomSectionOp,
     KeywordsSave,
+    LookupCreate,
     ProjectCreate,
     ProjectUpdate,
     ProviderPut,
@@ -60,6 +61,11 @@ def _error(code: ErrorCode = ErrorCode.SEO_INVALID_INPUT) -> OctopError:
 
 # OpenSEO serves a SERP from its cache for 12 hours (research/serp.ts).
 SERP_CACHE_SECONDS = 12 * 60 * 60
+# OpenSEO caches domain overviews and suggested keywords for 12 hours too (DomainService.ts),
+# buys the top 100 ranked keywords by traffic and lists 50 SERP competitors.
+LOOKUP_CACHE_SECONDS = 12 * 60 * 60
+DOMAIN_KEYWORDS_LIMIT = 100
+COMPETITORS_LIMIT = 50
 # Project memory caps from OpenSEO contextUpdateOps.ts / ProjectContextService.ts.
 PROSE_MAX_CHARS = 4000
 MAX_CUSTOM_SECTIONS = 20
@@ -718,6 +724,156 @@ class SeoService:
         if serp is None:
             raise _error(ErrorCode.NOT_FOUND)
         return await self._settle_serp(serp)
+
+    async def _settle_lookup(self, lookup: dict[str, Any]) -> dict[str, Any]:
+        # At most two live calls of at most 60s each.
+        if _stale(lookup, 5):
+            lookup.update(status="unknown", error="interrupted")
+            await _db(self.repo.update_lookup, lookup)
+        return lookup
+
+    async def lookup(self, user_id: int, project_id: str, **kwargs: Any) -> dict[str, Any]:
+        """Buy, or reuse within 12 hours, one competitor-research lookup for the market.
+
+        kind ``domain``: the domain's organic footprint and its top ranked keywords (two
+        calls); kind ``competitors``: the domains ranking for a keyword set (one call).
+        """
+        project = await self._project(user_id, project_id)
+        try:
+            command = LookupCreate.model_validate(kwargs)
+            if command.domain is not None:
+                domain: str | None = _bare_host(command.domain)
+                keywords: list[str] | None = None
+                target_key = domain
+            else:
+                domain = None
+                keywords = sorted({normalize_keyword(k) for k in command.keywords or []} - {""})
+                if not keywords:
+                    raise ValueError("no keywords")
+                target_key = hashlib.sha256("\n".join(keywords).encode()).hexdigest()
+        except ValueError as exc:
+            raise _error() from exc
+
+        async def replay() -> dict[str, Any] | None:
+            previous = await _db(self.repo.lookup_for_key, project_id, command.idempotency_key)
+            if previous is None:
+                return None
+            if (previous["kind"], previous["target_key"]) != (command.kind, target_key):
+                raise _error(ErrorCode.SEO_CONFLICT)
+            return await self._settle_lookup(previous)
+
+        if (previous := await replay()) is not None:
+            return previous
+        lookup: dict[str, Any] = {
+            "lookup_id": new_ulid(),
+            "project_id": project_id,
+            "kind": command.kind,
+            "target_key": target_key,
+            "domain": domain,
+            "keywords": keywords,
+            "location_code": project["location_code"],
+            "language_code": project["language_code"],
+            "status": "running",
+            "observed_at": _now(),
+            "overview": None,
+            "total_count": None,
+            "items": [],
+            "cost_usd": None,
+            "cost_known_usd": 0,
+            "cached": False,
+            "source_lookup_id": None,
+            "error": None,
+            "receipts": [],
+        }
+        # Empty lookups never answer from cache, like SERP snapshots.
+        cached = await _db(self.repo.cached_lookup, lookup, int(time.time()) - LOOKUP_CACHE_SECONDS)
+        client = None if cached else await self._client(user_id)
+        if cached:
+            lookup.update(
+                status="completed",
+                observed_at=cached["observed_at"],
+                overview=cached["overview"],
+                total_count=cached["total_count"],
+                items=cached["items"],
+                cost_usd=0,
+                cached=True,
+                source_lookup_id=cached["lookup_id"],
+                receipts=cached["receipts"],
+            )
+        if not await _db(self.repo.start_lookup, lookup, command.idempotency_key):
+            previous = await replay()
+            assert previous is not None
+            return previous
+        if cached:
+            return lookup
+        assert client is not None
+        try:
+            await self._buy_lookup(client, lookup)
+        except BaseException:
+            lookup.update(status="unknown", error="interrupted")
+            await asyncio.shield(_db(self.repo.update_lookup, lookup))
+            raise
+        await _db(self.repo.update_lookup, lookup)
+        return lookup
+
+    @staticmethod
+    async def _buy_lookup(client: DataForSeoClient, lookup: dict[str, Any]) -> None:
+        market = {
+            "location_code": lookup["location_code"],
+            "language_code": lookup["language_code"],
+        }
+        costs: list[float | None] = []
+
+        def spent(cost: float | None, receipt: dict[str, Any]) -> None:
+            costs.append(cost)
+            lookup["receipts"].append(receipt)
+
+        try:
+            if lookup["kind"] == "domain":
+                overview, cost, receipt = await client.domain_overview(
+                    target=lookup["domain"], **market
+                )
+                spent(cost, receipt)
+                lookup["overview"] = overview
+                ranked, cost, receipt = await client.ranked_keywords(
+                    target=lookup["domain"], limit=DOMAIN_KEYWORDS_LIMIT, **market
+                )
+                spent(cost, receipt)
+                lookup.update(total_count=ranked["total_count"], items=ranked["rows"])
+            else:
+                rows, cost, receipt = await client.serp_competitors(
+                    keywords=lookup["keywords"], limit=COMPETITORS_LIMIT, **market
+                )
+                spent(cost, receipt)
+                lookup["items"] = rows
+            lookup["status"] = "completed"
+        except ProviderFailure as exc:
+            spent(exc.cost, exc.receipt)
+            lookup.update(status="unknown" if exc.unknown else "failed", error=str(exc))
+        finally:
+            known = [c for c in costs if c is not None]
+            lookup["cost_known_usd"] = sum(known)
+            lookup["cost_usd"] = sum(known) if costs and len(known) == len(costs) else None
+
+    async def list_lookups(
+        self, user_id: int, project_id: str, *, kind: str | None = None
+    ) -> list[dict[str, Any]]:
+        """Lookup summaries newest first, without result rows."""
+        await self._project(user_id, project_id)
+        lookups = await _db(self.repo.lookups, project_id, kind)
+        stale = [lookup["lookup_id"] for lookup in lookups if _stale(lookup, 5)]
+        for lookup_id in stale:
+            full = await _db(self.repo.lookup, project_id, lookup_id)
+            if full is not None:
+                await self._settle_lookup(full)
+        return await _db(self.repo.lookups, project_id, kind) if stale else lookups
+
+    async def get_lookup(self, user_id: int, project_id: str, lookup_id: str) -> dict[str, Any]:
+        await self._project(user_id, project_id)
+        lookup = await _db(self.repo.lookup, project_id, lookup_id)
+        if lookup is None:
+            raise _error(ErrorCode.NOT_FOUND)
+        return await self._settle_lookup(lookup)
 
     async def project_context(self, user_id: int, project_id: str) -> dict[str, Any]:
         await self._project(user_id, project_id)

@@ -341,6 +341,84 @@ class SeoRepo:
             rows = conn.execute(sql + " ORDER BY id DESC", args).fetchall()
         return [json.loads(row["payload"]) | {"item_count": row["item_count"]} for row in rows]
 
+    def start_lookup(self, lookup: dict[str, Any], key: str) -> bool:
+        with self._db.transaction() as conn:
+            cur = conn.execute(
+                "INSERT INTO seo_lookups(lookup_id,project_id,idempotency_key,kind,target_key,"
+                "location_code,language_code,created_at,status,item_count,cached,payload,items)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)"
+                " ON CONFLICT(project_id,idempotency_key) DO NOTHING",
+                (
+                    lookup["lookup_id"],
+                    lookup["project_id"],
+                    key,
+                    lookup["kind"],
+                    lookup["target_key"],
+                    lookup["location_code"],
+                    lookup["language_code"],
+                    int(time.time()),
+                    lookup["status"],
+                    len(lookup["items"]),
+                    int(lookup["cached"]),
+                    json.dumps({k: v for k, v in lookup.items() if k != "items"}),
+                    json.dumps(lookup["items"]),
+                ),
+            )
+            return bool(cur.rowcount == 1)
+
+    def update_lookup(self, lookup: dict[str, Any]) -> None:
+        with self._db.transaction() as conn:
+            conn.execute(
+                "UPDATE seo_lookups SET status=?,item_count=?,payload=?,items=? WHERE lookup_id=?",
+                (
+                    lookup["status"],
+                    len(lookup["items"]),
+                    json.dumps({k: v for k, v in lookup.items() if k != "items"}),
+                    json.dumps(lookup["items"]),
+                    lookup["lookup_id"],
+                ),
+            )
+
+    def _lookup_where(self, where: str, args: tuple[Any, ...]) -> dict[str, Any] | None:
+        with self._db.connect() as conn:
+            row = conn.execute(
+                "SELECT payload,items FROM seo_lookups WHERE " + where, args
+            ).fetchone()
+        return {**json.loads(row["payload"]), "items": json.loads(row["items"])} if row else None
+
+    def lookup_for_key(self, project_id: str, key: str) -> dict[str, Any] | None:
+        return self._lookup_where("project_id=? AND idempotency_key=?", (project_id, key))
+
+    def lookup(self, project_id: str, lookup_id: str) -> dict[str, Any] | None:
+        return self._lookup_where("project_id=? AND lookup_id=?", (project_id, lookup_id))
+
+    def cached_lookup(self, lookup: dict[str, Any], since: int) -> dict[str, Any] | None:
+        """Newest bought, non-empty lookup of the same target and market after ``since``."""
+        return self._lookup_where(
+            "project_id=? AND kind=? AND target_key=? AND location_code=? AND language_code=?"
+            " AND status='completed' AND cached=0 AND item_count>0 AND created_at>?"
+            " ORDER BY id DESC LIMIT 1",
+            (
+                lookup["project_id"],
+                lookup["kind"],
+                lookup["target_key"],
+                lookup["location_code"],
+                lookup["language_code"],
+                since,
+            ),
+        )
+
+    def lookups(self, project_id: str, kind: str | None = None) -> list[dict[str, Any]]:
+        """Lookup summaries newest first, without their result rows."""
+        sql = "SELECT payload,item_count FROM seo_lookups WHERE project_id=?"
+        args: list[Any] = [project_id]
+        if kind is not None:
+            sql += " AND kind=?"
+            args.append(kind)
+        with self._db.connect() as conn:
+            rows = conn.execute(sql + " ORDER BY id DESC", args).fetchall()
+        return [json.loads(row["payload"]) | {"item_count": row["item_count"]} for row in rows]
+
     def context(self, project_id: str, log_limit: int) -> dict[str, list[dict[str, Any]]]:
         with self._db.connect() as conn:
             sections = conn.execute(

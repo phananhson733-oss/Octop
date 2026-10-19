@@ -42,6 +42,8 @@ def tool_env(monkeypatch):
         update_context=AsyncMock(return_value=background),
         list_serps=AsyncMock(return_value=[]),
         get_serp=AsyncMock(return_value={"serp_id": "serp-a", "items": []}),
+        list_lookups=AsyncMock(return_value=[]),
+        get_lookup=AsyncMock(return_value={"lookup_id": "lookup-a", "items": []}),
         save_report=AsyncMock(return_value={"report_id": "report-a"}),
         keyword_rows=AsyncMock(return_value=[]),
         get_run=AsyncMock(return_value=run),
@@ -109,6 +111,10 @@ async def test_agent_context_writes_are_attributed_and_serps_are_read_only(tool_
     assert result["applied"] == 1 and result["counts"]["research_log"] == 0
     await tools["seo_list_serps"].ainvoke({"keyword": "crm"})
     service.list_serps.assert_awaited_once_with(7, "project-a", keyword="crm")
+    await tools["seo_list_competitor_lookups"].ainvoke({"kind": "domain"})
+    service.list_lookups.assert_awaited_once_with(7, "project-a", kind="domain")
+    with pytest.raises(OctopError):
+        await tools["seo_list_competitor_lookups"].ainvoke({"kind": "backlinks"})
     assert not any("buy" in name or "fetch" in name for name in tools)
 
 
@@ -218,6 +224,36 @@ async def test_every_tool_result_stays_readable_at_maximum_size(tool_env):
         | {"serp_id": f"s{i}", "item_count": 100}
         for i in range(300)
     ]
+    lookup = {
+        "lookup_id": "lookup-a",
+        "kind": "domain",
+        "domain": "rival.com",
+        "keywords": None,
+        "status": "completed",
+        "observed_at": run["observed_at"],
+        "overview": {"organic_traffic": 1.5, "organic_keywords": 9000},
+        "total_count": 9000,
+        "items": [
+            {
+                "keyword": f"{long}{i}",
+                "rank": i + 1,
+                "organic_rank": i + 1,
+                "url": f"https://rival.com/{'u' * 2000}{i}",
+                "etv": 1.0,
+                "search_volume": 10,
+                "cpc": 0.1,
+                "keyword_difficulty": 5,
+                "intent": "informational",
+            }
+            for i in range(100)
+        ],
+    }
+    service.get_lookup.return_value = lookup
+    service.list_lookups.return_value = [
+        {k: v for k, v in lookup.items() if k != "items"}
+        | {"lookup_id": f"l{i}", "item_count": 100, "keywords": [long] * 200}
+        for i in range(50)
+    ]
     service.get_run.return_value = run
     service.keyword_rows.return_value = saved
     service.list_runs.return_value = [run] * 300
@@ -243,6 +279,8 @@ async def test_every_tool_result_stays_readable_at_maximum_size(tool_env):
         ("seo_get_project_context", {}, "entries", 244, None),
         ("seo_list_serps", {}, "serps", 300, "serp_id"),
         ("seo_get_serp", {"serp_id": "serp-a"}, "items", 100, "url"),
+        ("seo_list_competitor_lookups", {}, "lookups", 50, "lookup_id"),
+        ("seo_get_competitor_lookup", {"lookup_id": "lookup-a"}, "items", 100, "keyword"),
     ]:
         seen: list = []
         offset: int | None = 0

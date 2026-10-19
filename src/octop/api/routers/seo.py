@@ -13,6 +13,7 @@ from octop.infra.seo.models import (
     AuditCreate,
     ContextUpdate,
     KeywordsSave,
+    LookupCreate,
     ProjectCreate,
     ProjectUpdate,
     ProviderPut,
@@ -138,6 +139,68 @@ class SerpSummary(BaseModel):
 
 class SerpSnapshot(SerpSummary):
     items: list[SerpItem]
+
+
+class DomainOverview(BaseModel):
+    organic_traffic: float | None = Field(
+        description="Estimated monthly organic visits (DataForSEO etv), all subdomains included."
+    )
+    organic_keywords: int | None = Field(description="Keywords the domain ranks for organically.")
+    pos_1: int | None = None
+    pos_2_3: int | None = None
+    pos_4_10: int | None = None
+
+
+class RankedKeyword(BaseModel):
+    keyword: str
+    rank: int | None = Field(description="Position among all SERP elements.")
+    organic_rank: int | None = Field(description="Position among organic results only.")
+    url: str | None = None
+    etv: float | None = Field(description="Estimated monthly visits from this keyword.")
+    search_volume: int | None = None
+    cpc: float | None = None
+    keyword_difficulty: int | None = None
+    intent: str
+
+
+class SerpCompetitor(BaseModel):
+    domain: str
+    visibility: float | None = Field(description="DataForSEO visibility over the keyword set.")
+    avg_position: float | None = None
+    median_position: float | None = None
+    etv: float | None = Field(description="Estimated monthly visits from these keywords.")
+    keywords_count: int | None = Field(description="How many of the keywords it ranks for.")
+    keywords_positions: dict[str, list[int]] = Field(
+        description="Each keyword it ranks for, with its positions."
+    )
+
+
+class LookupSummary(BaseModel):
+    lookup_id: str
+    project_id: str
+    kind: str = Field(description="domain or competitors.")
+    domain: str | None = Field(description="The domain looked up (kind domain).")
+    keywords: list[str] | None = Field(description="The keyword set (kind competitors).")
+    location_code: int
+    language_code: str
+    status: str
+    observed_at: str
+    item_count: int
+    overview: DomainOverview | None = None
+    total_count: int | None = Field(
+        default=None, description="All keywords the domain ranks for; items holds the top 100."
+    )
+    cost_usd: float | None
+    cost_known_usd: float = 0
+    cached: bool = Field(description="Reused within 12 hours at no charge.")
+    source_lookup_id: str | None = None
+    error: str | None = None
+
+
+class Lookup(LookupSummary):
+    items: list[RankedKeyword] | list[SerpCompetitor] = Field(
+        description="Ranked keywords (domain) or competitor domains (competitors)."
+    )
 
 
 class ContextSection(BaseModel):
@@ -501,6 +564,54 @@ async def serp(
     service: SeoService = Depends(seo_service),
 ) -> Any:
     return _snapshot(await service.get_serp(user.id, project_id, serp_id))
+
+
+@router.post(
+    "/projects/{project_id}/lookups",
+    response_model=Lookup,
+    summary="Buy a competitor-research lookup",
+    description="Requires explicit paid confirmation. kind domain with a domain buys DataForSEO "
+    "Labs domain_rank_overview and the top 100 ranked_keywords by traffic; kind competitors "
+    "with 1-200 keywords buys serp_competitors (top 50 domains). No retries. The same target "
+    "and market within 12 hours is served from a non-empty lookup at no charge. Reuse the "
+    "idempotency key to read an existing attempt.",
+)
+async def buy_lookup(
+    project_id: str,
+    body: LookupCreate,
+    user: User = Depends(current_user),
+    service: SeoService = Depends(seo_service),
+) -> Any:
+    return _snapshot(await service.lookup(user.id, project_id, **body.model_dump()))
+
+
+@router.get(
+    "/projects/{project_id}/lookups",
+    response_model=list[LookupSummary],
+    summary="List competitor-research lookups",
+    description="Newest first, without result rows. No supplier request is made.",
+)
+async def lookups(
+    project_id: str,
+    kind: str | None = Query(default=None, pattern="^(domain|competitors)$"),
+    user: User = Depends(current_user),
+    service: SeoService = Depends(seo_service),
+) -> Any:
+    return await service.list_lookups(user.id, project_id, kind=kind)
+
+
+@router.get(
+    "/projects/{project_id}/lookups/{lookup_id}",
+    response_model=Lookup,
+    summary="Read a competitor-research lookup",
+)
+async def lookup(
+    project_id: str,
+    lookup_id: str,
+    user: User = Depends(current_user),
+    service: SeoService = Depends(seo_service),
+) -> Any:
+    return _snapshot(await service.get_lookup(user.id, project_id, lookup_id))
 
 
 @router.get(

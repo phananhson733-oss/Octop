@@ -1,7 +1,9 @@
 """Direct DataForSEO transport. One POST per call; never retry a charged request.
 
 Labs mapping follows OpenSEO d7ea785 research-data.ts/helpers.ts, SERP mapping
-follows lib/dataforseo/serp.ts and mcp/tools/get-serp-results.ts (MIT).
+follows lib/dataforseo/serp.ts and mcp/tools/get-serp-results.ts, competitor research
+follows lib/dataforseo/labs.ts, features/domain/services and mcp/tools/
+dataforseo-research-tools.ts (MIT).
 """
 
 from __future__ import annotations
@@ -134,6 +136,79 @@ def map_serp(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rows
 
 
+class _MalformedResult(Exception):
+    """The task succeeded but its result does not have the documented shape."""
+
+
+def _item_list(result: dict[str, Any]) -> list[dict[str, Any]]:
+    items = result.get("items") or []
+    if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+        raise _MalformedResult
+    return items
+
+
+def map_domain_overview(result: dict[str, Any]) -> dict[str, Any]:
+    """Organic footprint from domain_rank_overview; backlinks are not bought here."""
+    items = _item_list(result)
+    organic = ((items[0] if items else {}).get("metrics") or {}).get("organic") or {}
+    return {
+        "organic_traffic": organic.get("etv"),
+        "organic_keywords": organic.get("count"),
+        "pos_1": organic.get("pos_1"),
+        "pos_2_3": organic.get("pos_2_3"),
+        "pos_4_10": organic.get("pos_4_10"),
+    }
+
+
+def map_ranked_keywords(result: dict[str, Any]) -> dict[str, Any]:
+    """ranked_keywords rows (domainKeywordMapper.ts) and the domain's total keyword count."""
+    rows: list[dict[str, Any]] = []
+    for item in _item_list(result):
+        data = item.get("keyword_data") or {}
+        keyword = normalize_keyword(data.get("keyword") or item.get("keyword") or "")
+        if not keyword:
+            continue
+        info = data.get("keyword_info") or {}
+        element = item.get("ranked_serp_element") or {}
+        serp_item = element.get("serp_item") or {}
+        rows.append(
+            {
+                "keyword": keyword,
+                "rank": serp_item.get("rank_absolute"),
+                "organic_rank": serp_item.get("rank_group"),
+                "url": serp_item.get("url"),
+                "etv": serp_item.get("etv"),
+                "search_volume": info.get("search_volume"),
+                "cpc": info.get("cpc"),
+                "keyword_difficulty": (data.get("keyword_properties") or {}).get(
+                    "keyword_difficulty"
+                ),
+                "intent": normalize_intent(
+                    (data.get("search_intent_info") or {}).get("main_intent")
+                ),
+            }
+        )
+    return {"total_count": result.get("total_count"), "rows": rows}
+
+
+def map_serp_competitors(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """serp_competitors rows, most visible first like find_serp_competitors' default sort."""
+    rows = [
+        {
+            "domain": item["domain"],
+            "visibility": item.get("visibility"),
+            "avg_position": item.get("avg_position"),
+            "median_position": item.get("median_position"),
+            "etv": item.get("etv"),
+            "keywords_count": item.get("keywords_count"),
+            "keywords_positions": item.get("keywords_positions") or {},
+        }
+        for item in _item_list(result)
+        if isinstance(item.get("domain"), str) and item["domain"]
+    ]
+    return sorted(rows, key=lambda row: -(row["visibility"] or 0))
+
+
 class DataForSeoClient:
     def __init__(
         self, login: str, password: str, *, transport: httpx.AsyncBaseTransport | None = None
@@ -204,6 +279,49 @@ class DataForSeoClient:
             "serp/google/organic/live/advanced", payload, map_serp, no_results_ok=True
         )
 
+    async def domain_overview(
+        self, *, target: str, location_code: int, language_code: str
+    ) -> tuple[dict[str, Any], float | None, dict[str, Any]]:
+        payload = {
+            "target": target,
+            "location_code": location_code,
+            "language_code": language_code,
+            "limit": 1,
+        }
+        return await self._result(
+            "dataforseo_labs/google/domain_rank_overview/live", payload, map_domain_overview
+        )
+
+    async def ranked_keywords(
+        self, *, target: str, location_code: int, language_code: str, limit: int
+    ) -> tuple[dict[str, Any], float | None, dict[str, Any]]:
+        # A domain target covers the host and its subdomains; organic rankings only.
+        payload = {
+            "target": target,
+            "location_code": location_code,
+            "language_code": language_code,
+            "limit": limit,
+            "order_by": ["ranked_serp_element.serp_item.etv,desc"],
+            "item_types": ["organic"],
+        }
+        return await self._result(
+            "dataforseo_labs/google/ranked_keywords/live", payload, map_ranked_keywords
+        )
+
+    async def serp_competitors(
+        self, *, keywords: list[str], location_code: int, language_code: str, limit: int
+    ) -> tuple[list[dict[str, Any]], float | None, dict[str, Any]]:
+        payload = {
+            "keywords": keywords,
+            "location_code": location_code,
+            "language_code": language_code,
+            "item_types": ["organic"],
+            "limit": limit,
+        }
+        return await self._result(
+            "dataforseo_labs/google/serp_competitors/live", payload, map_serp_competitors
+        )
+
     async def _items(
         self,
         path: str,
@@ -212,6 +330,19 @@ class DataForSeoClient:
         *,
         no_results_ok: bool = False,
     ) -> tuple[list[dict[str, Any]], float | None, dict[str, Any]]:
+        return await self._result(
+            path, payload, lambda result: mapper(_item_list(result)), no_results_ok=no_results_ok
+        )
+
+    async def _result[T](
+        self,
+        path: str,
+        payload: dict[str, Any],
+        mapper: Callable[[dict[str, Any]], T],
+        *,
+        no_results_ok: bool = False,
+    ) -> tuple[T, float | None, dict[str, Any]]:
+        """One charged task; ``mapper`` reads its first result (``{}`` when there is none)."""
         try:
             async with httpx.AsyncClient(
                 transport=self._transport, timeout=60, follow_redirects=False
@@ -246,7 +377,7 @@ class DataForSeoClient:
                 and task is not None
                 and "no search results" in str(task.get("status_message") or "").lower()
             ):
-                return [], cost, receipt
+                return mapper({}), cost, receipt
             if (
                 not response.is_success
                 or data.get("status_code") != 20000
@@ -256,13 +387,12 @@ class DataForSeoClient:
                 raise ProviderFailure("provider_rejected", cost=cost, receipt=receipt)
             result = task.get("result")
             if result is None or result == []:
-                return [], cost, receipt
+                return mapper({}), cost, receipt
             if not isinstance(result, list) or not isinstance(result[0], dict):
                 raise ProviderFailure("malformed_result", cost=cost, receipt=receipt)
-            items = result[0].get("items") or []
-            if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
-                raise ProviderFailure("malformed_result", cost=cost, receipt=receipt)
-            return mapper(items), cost, receipt
+            return mapper(result[0]), cost, receipt
+        except _MalformedResult as exc:
+            raise ProviderFailure("malformed_result", cost=cost, receipt=receipt) from exc
         except (ValueError, TypeError, AttributeError) as exc:
             raise ProviderFailure(
                 "malformed_response", cost=cost, unknown=cost is None, receipt=receipt
