@@ -946,6 +946,12 @@ describe("search performance", () => {
       }),
     );
   });
+  it("keeps the Analytics card and its error when the binding fails to load", async () => {
+    vi.mocked(seoApi.ga4).mockRejectedValue(new Error("ga4 unavailable"));
+    setup("/workbench/seo-workbench.main?project=p1&view=search");
+    expect(await screen.findByText("ga4 unavailable")).toBeVisible();
+    expect(screen.getByText("seo.ga4Title")).toBeVisible();
+  });
   it("starts Google consent with the page to come back to", async () => {
     vi.mocked(seoApi.google).mockResolvedValue({
       configured: true,

@@ -166,7 +166,8 @@ export function AnalyticsCard({
       setConnection(null);
     });
 
-  if (!accountCount || connection === undefined) return null;
+  if (!accountCount) return null;
+  if (connection === undefined && !error) return <Card loading size="small" />;
 
   const picker = connection === null && (
     <div className={styles.stack}>
