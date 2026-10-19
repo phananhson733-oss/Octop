@@ -343,7 +343,27 @@ export function SearchPerformancePanel({ projectId }: { projectId: string }) {
     },
   ];
 
-  if (!google) return <Card loading size="small" />;
+  if (!google)
+    return error ? (
+      <Alert
+        type="error"
+        showIcon
+        message={error}
+        action={
+          <Button
+            size="small"
+            onClick={() => {
+              setError("");
+              setVersion((v) => v + 1);
+            }}
+          >
+            {t("seo.gscRetry")}
+          </Button>
+        }
+      />
+    ) : (
+      <Card loading size="small" />
+    );
 
   const accounts = (
     <Card size="small" title={t("seo.gscAccounts")}>

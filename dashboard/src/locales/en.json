@@ -6784,6 +6784,7 @@
     "gscQueryContains": "Query contains",
     "gscPageContains": "URL contains",
     "gscApply": "Apply",
+    "gscRetry": "Retry",
     "gscClicks": "Clicks",
     "gscImpressions": "Impressions",
     "gscPosition": "Avg. position",

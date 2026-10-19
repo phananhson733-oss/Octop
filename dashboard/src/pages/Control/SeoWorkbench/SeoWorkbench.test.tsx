@@ -990,6 +990,24 @@ describe("search performance", () => {
       }),
     );
   });
+  it("shows a failed Google status load with a retry instead of spinning", async () => {
+    vi.mocked(seoApi.google)
+      .mockRejectedValueOnce(new Error("database restarting"))
+      .mockResolvedValue({
+        configured: true,
+        redirect_uri: "https://octop.test/api/seo/google/callback",
+        accounts: [],
+      });
+    setup("/workbench/seo-workbench.main?project=p1&view=search");
+    expect(await screen.findByText("database restarting")).toBeVisible();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "seo.gscRetry" }));
+    });
+    expect(
+      await screen.findByRole("button", { name: "seo.gscConnect" }),
+    ).toBeVisible();
+    expect(screen.queryByText("database restarting")).toBeNull();
+  });
   it("keeps the Analytics card and its error when the binding fails to load", async () => {
     vi.mocked(seoApi.ga4).mockRejectedValue(new Error("ga4 unavailable"));
     setup("/workbench/seo-workbench.main?project=p1&view=search");
