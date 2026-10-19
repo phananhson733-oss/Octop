@@ -28,6 +28,7 @@ import { useServerTimezone } from "../../../hooks/useServerTimezone";
 import { formatServerIsoDateTime } from "../../../utils/formatMessageTime";
 import { apiErrorMessage } from "../../../utils/apiError";
 import { attemptKey } from "./attemptKey";
+import { isServerUnreachable } from "./serverUnreachable";
 import styles from "./index.module.less";
 
 const { Text, Paragraph } = Typography;
@@ -82,6 +83,10 @@ export function AuditPanel({
   const [urlFilter, setUrlFilter] = useState("");
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
+  // Background reads (progress poll, results reread) keep their own failure
+  // so the next successful read clears it instead of leaving a stale banner.
+  const [pollError, setPollError] = useState<unknown>();
+  const [resultsError, setResultsError] = useState<unknown>();
   const attempt = useRef<{ input: string; key: string }>();
   const date = (value: string) => formatServerIsoDateTime(value, timeZone);
   const fail = useCallback(
@@ -117,6 +122,7 @@ export function AuditPanel({
         .audit(projectId, auditId)
         .then((value) => {
           if (!live) return;
+          setPollError(undefined);
           setDetail(value);
           setAudits((list) =>
             list.map((item) =>
@@ -125,7 +131,7 @@ export function AuditPanel({
           );
         })
         .catch((err) => {
-          if (live) fail(err);
+          if (live) setPollError(err);
         });
     void load();
     const timer = running ? window.setInterval(load, POLL_MS) : undefined;
@@ -133,7 +139,7 @@ export function AuditPanel({
       live = false;
       window.clearInterval(timer);
     };
-  }, [projectId, auditId, isVisible, running, fail]);
+  }, [projectId, auditId, isVisible, running]);
 
   // Results are reread when the crawl moves on or ends, not on every poll.
   const progressKey =
@@ -149,17 +155,18 @@ export function AuditPanel({
     ])
       .then(([issueResult, pageResult]) => {
         if (!live) return;
+        setResultsError(undefined);
         setSummary(issueResult.summary);
         setIssues(issueResult.issues);
         setPages(pageResult.pages);
       })
       .catch((err) => {
-        if (live) fail(err);
+        if (live) setResultsError(err);
       });
     return () => {
       live = false;
     };
-  }, [projectId, auditId, progressKey, fail]);
+  }, [projectId, auditId, progressKey]);
 
   const busyAudit = audits.find((audit) => isActive(audit));
   async function start() {
@@ -188,6 +195,8 @@ export function AuditPanel({
   }
   function select(next: string) {
     setAuditId(next);
+    setPollError(undefined);
+    setResultsError(undefined);
     setDetail(undefined);
     setSummary([]);
     setIssues([]);
@@ -235,6 +244,8 @@ export function AuditPanel({
   );
   const shownPages = pages.filter((page) => page.url.includes(urlFilter));
   const notices = detail ? auditNotices(detail, pages, t) : [];
+  const readError = pollError ?? resultsError;
+  const serverAway = readError !== undefined && isServerUnreachable(readError);
 
   return (
     <div className={styles.stack}>
@@ -277,6 +288,22 @@ export function AuditPanel({
           message={error}
           closable
           onClose={() => setError("")}
+        />
+      )}
+      {readError !== undefined && (
+        <Alert
+          type={serverAway ? "warning" : "error"}
+          showIcon
+          message={
+            serverAway
+              ? t(running ? "seo.auditServerRestarting" : "seo.serverAway")
+              : apiErrorMessage(readError, t("seo.loadError"), t)
+          }
+          closable
+          onClose={() => {
+            setPollError(undefined);
+            setResultsError(undefined);
+          }}
         />
       )}
       {audits.length ? (

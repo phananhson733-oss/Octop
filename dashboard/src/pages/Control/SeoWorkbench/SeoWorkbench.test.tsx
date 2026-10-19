@@ -652,6 +652,47 @@ describe("site audit", () => {
     expect(await screen.findByText("seo.auditCancelling")).toBeVisible();
     expect(seoApi.startAudit).not.toHaveBeenCalled();
   });
+  it("says the server is restarting while polls fail and clears it once a poll answers", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    try {
+      const running = {
+        ...audit,
+        status: "running" as const,
+        phase: "crawl" as const,
+        pages_crawled: 54,
+      };
+      vi.mocked(seoApi.audits).mockResolvedValue([running]);
+      vi.mocked(seoApi.audit)
+        .mockResolvedValueOnce(running)
+        .mockRejectedValueOnce(
+          new Error(
+            'Request failed: 502 Bad Gateway - {"status":"error","code":502,"message":"Application failed to respond","request_id":"r1"}',
+          ),
+        )
+        .mockResolvedValue({ ...running, pages_crawled: 60 });
+      // The first read finds the audit running, which starts polling with an
+      // immediate second read; that one hits the restart.
+      setup("/workbench/seo-workbench.main?project=p1&view=audit");
+      expect(
+        await screen.findByText("seo.auditServerRestarting"),
+      ).toBeVisible();
+      expect(seoApi.audit).toHaveBeenCalledTimes(2);
+      expect(
+        screen.queryByText("Application failed to respond"),
+      ).not.toBeInTheDocument();
+      await act(async () => {
+        vi.advanceTimersByTime(3000);
+      });
+      await waitFor(() =>
+        expect(
+          screen.queryByText("seo.auditServerRestarting"),
+        ).not.toBeInTheDocument(),
+      );
+      expect(seoApi.audit).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });
 describe("static private report preview", () => {
   it("strips active/navigation content and prepends network-blocking CSP", () => {
