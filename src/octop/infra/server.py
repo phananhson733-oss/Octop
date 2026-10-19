@@ -223,6 +223,7 @@ class AppRuntime:
     bridge_manager: Any | None = None
     seo_audits: Any | None = None
     page_runs: Any | None = None
+    memory_idle_release: Any | None = None
 
     def replace_services(self, services: SharedServices, config: OctopConfig) -> None:
         """Retarget all runtime singletons onto a new SharedServices / config.
@@ -581,6 +582,17 @@ class OctopServer:
             self.services.repos, renderer_factory=open_chromium_renderer
         )
         self.app_runtime.seo_audits.start()
+        if self.services.config.database.is_postgresql:
+            from octop.infra.agents.memory.idle_release import (  # noqa: PLC0415
+                IdleConnectionRelease,
+                running_agent_memories,
+            )
+
+            # Idle agents would otherwise each pin a pooler connection for their memory.
+            self.app_runtime.memory_idle_release = IdleConnectionRelease(
+                lambda: running_agent_memories(registry)
+            )
+            self.app_runtime.memory_idle_release.start()
         from octop.infra.knowledge.jobs import resume_pending_index_jobs  # noqa: PLC0415
 
         resume_pending_index_jobs(self.services)
@@ -633,6 +645,8 @@ class OctopServer:
                 rt = self.app_runtime
                 if rt.seo_audits is not None:
                     await rt.seo_audits.stop()
+                if rt.memory_idle_release is not None:
+                    await rt.memory_idle_release.stop()
                 await rt.proactive_scheduler.shutdown()
                 await rt.cron_manager.shutdown()
                 await rt.gateway.shutdown()
