@@ -2385,6 +2385,14 @@ export async function attachThread(
             notify(state);
             if (!hasStreamingMessages(state)) {
               finish();
+              // The turn ended while this tab was disconnected, so its last
+              // chunks never arrived: reload the stored turn instead.
+              invalidateHistory(threadId);
+              emitSessionEvent({
+                kind: "sessionsChanged",
+                sessionId: threadId,
+                agentId,
+              });
             }
           } else if (state.abortController === controller) {
             state.abortController = previousController;
