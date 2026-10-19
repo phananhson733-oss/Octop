@@ -176,6 +176,15 @@ class PageAnalysis:
     head_broken_by: str | None = None
     # Head-only directives found after the body began: "canonical", "robots", ...
     misplaced_head: list[str] = field(default_factory=list)
+    has_viewport: bool = False
+    # The <html> element's lang attribute; None when it has none.
+    html_lang: str | None = None
+    declares_charset: bool = False
+    has_icon: bool = False
+    # The loading attribute of the first <img> in document order.
+    first_image_loading: str | None = None
+    # schema.org types named by microdata itemtype attributes.
+    microdata_types: list[str] = field(default_factory=list)
 
     @property
     def content_hash(self) -> str | None:
@@ -269,6 +278,12 @@ class _Analyzer(HTMLParser):
             return
         if self.head_depth == 0 and self.suppress_depth == 0:
             self.has_app_root |= attribs.get("id") in _APP_ROOT_IDS or name == "app-root"
+        itemtype = attribs.get("itemtype")
+        if itemtype:
+            for value in itemtype.split():
+                type_name = value.rstrip("/").rsplit("/", 1)[-1]
+                if type_name and type_name not in self.result.microdata_types:
+                    self.result.microdata_types.append(type_name)
         if not self.body_mode and (name == "body" or name not in _HEAD_ELEMENTS):
             self.body_mode = True
             if name != "body":
@@ -279,6 +294,9 @@ class _Analyzer(HTMLParser):
                 self.title_depth += 1
                 if self.title is None:
                     self.title = ""
+        elif name == "html":
+            if self.result.html_lang is None and js_trim(attribs.get("lang") or ""):
+                self.result.html_lang = js_trim(attribs["lang"])
         elif name == "head":
             self.head_depth += 1
         elif name == "body":
@@ -289,6 +307,8 @@ class _Analyzer(HTMLParser):
         elif name == "link":
             self._link(attribs)
         elif name == "img":
+            if not self.result.images:
+                self.result.first_image_loading = (attribs.get("loading") or "").lower() or None
             if len(self.result.images) < MAX_EXTRACTED_IMAGES:
                 self.result.images.append({"src": attribs.get("src"), "alt": attribs.get("alt")})
                 if not attribs.get("width") or not attribs.get("height"):
@@ -367,7 +387,14 @@ class _Analyzer(HTMLParser):
         name = (attribs.get("name") or "").lower()
         prop = attribs.get("property")
         result = self.result
-        if name == "description":
+        if "charset" in attribs or (
+            (attribs.get("http-equiv") or "").lower() == "content-type"
+            and "charset=" in (content or "").lower()
+        ):
+            result.declares_charset = True
+        if name == "viewport":
+            result.has_viewport = True
+        elif name == "description":
             self._misplaced("description")
             if self.meta_description is None:
                 self.meta_description = js_trim(content) if content is not None else ""
@@ -390,6 +417,9 @@ class _Analyzer(HTMLParser):
 
     def _link(self, attribs: dict[str, str]) -> None:
         rel = attribs.get("rel")
+        # "icon" and "shortcut icon" both name a favicon.
+        if "icon" in (rel or "").lower().split():
+            self.result.has_icon = True
         if rel == "canonical":
             self._misplaced("canonical")
             if self.result.canonical is None:

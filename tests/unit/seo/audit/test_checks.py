@@ -203,6 +203,29 @@ def test_a_clean_head_and_a_noscript_pixel_do_not_break_it() -> None:
             "images-missing-size",
             {"images_missing_size": 3, "images_total": 4},
         ),
+        ({"url": "http://example.com/a"}, "http-page", None),
+        ({"missing_declarations": ["viewport"]}, "missing-viewport", None),
+        ({"missing_declarations": ["lang"]}, "missing-html-lang", None),
+        ({"missing_declarations": ["charset"]}, "missing-charset", None),
+        ({"missing_declarations": ["icon"]}, "missing-favicon", None),
+        # The head is judged on an unread app shell too.
+        (
+            {"missing_declarations": ["viewport"], "javascript_shell": True},
+            "missing-viewport",
+            None,
+        ),
+        (
+            {"lazy_first_image": "https://example.com/hero.jpg"},
+            "first-image-lazy",
+            {"image_url": "https://example.com/hero.jpg"},
+        ),
+        (
+            {"missing_open_graph": ["og:image"]},
+            "incomplete-open-graph",
+            {"missing": ["og:image"]},
+        ),
+        ({"structured_types": []}, "no-structured-data", None),
+        ({"structured_types": ["Article"]}, "missing-breadcrumb-schema", None),
     ],
 )
 def test_page_checks(overrides: dict[str, Any], issue_type: str, details: Any) -> None:
@@ -230,10 +253,36 @@ def test_page_checks(overrides: dict[str, Any], issue_type: str, details: Any) -
         {"schema_invalid": 1, "body_truncated": True},
         # Nor can it show that an FAQ question is missing from the text.
         {"faq_hidden": ["Is it safe?"], "body_truncated": True},
+        # Nor that structured data is missing.
+        {"structured_types": [], "body_truncated": True},
+        {"structured_types": ["Article", "BreadcrumbList"]},
+        # The home page (in any language) needs no breadcrumb.
+        {"url": "https://example.com/", "structured_types": ["WebSite"]},
+        {"url": "https://example.com/en/", "structured_types": ["WebSite"]},
     ],
 )
 def test_page_checks_leave_healthy_pages_alone(overrides: dict[str, Any]) -> None:
     assert _found(_page(**overrides)) == {}
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"is_indexable": False},
+        {"canonical_url": "https://example.com/b"},
+    ],
+)
+def test_sharing_and_rich_result_checks_skip_pages_not_meant_to_be_found(
+    overrides: dict[str, Any],
+) -> None:
+    page = _page(missing_open_graph=["og:title"], structured_types=[], **overrides)
+    found = _found(page)
+    assert not {"incomplete-open-graph", "no-structured-data"} & set(found)
+
+
+def test_invalid_markup_is_not_also_called_missing() -> None:
+    found = _found(_page(structured_types=[], schema_invalid=1))
+    assert "structured-data-invalid" in found and "no-structured-data" not in found
 
 
 def _site(*pages: PageFacts) -> dict[str, PageFacts]:

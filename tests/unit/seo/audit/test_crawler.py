@@ -147,6 +147,35 @@ async def test_crawl_page_analyzes_html() -> None:
     assert crawled.is_indexable and crawled.in_sitemap and crawled.crawl_depth == 0
 
 
+async def test_crawl_page_records_what_the_head_leaves_out() -> None:
+    bare = html(
+        "<html><head><title>T</title></head><body>"
+        '<img src="/hero.jpg" loading="lazy"><img src="/b.jpg"><p>Text</p></body></html>'
+    )
+    full = html(
+        '<html lang="en"><head><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width">'
+        '<link rel="shortcut icon" href="/favicon.ico">'
+        '<meta property="og:title" content="T"><meta property="og:description" content="D">'
+        '<meta property="og:image" content="/og.png"><title>T</title></head><body>'
+        '<nav itemscope itemtype="https://schema.org/BreadcrumbList"></nav>'
+        '<script type="application/ld+json">{"@graph": [{"@type": "Article"}]}</script>'
+        '<img src="/hero.jpg"><img src="/b.jpg" loading="lazy"></body></html>',
+    )
+    site = FakeSite({f"{ORIGIN}/bare": bare, f"{ORIGIN}/full": full})
+    async with site.client() as client:
+        first = await crawl_page(client, f"{ORIGIN}/bare", 1, False, _throttle())
+        second = await crawl_page(client, f"{ORIGIN}/full", 1, False, _throttle())
+    assert first is not None and second is not None
+    # The response header declares the charset for the bare page.
+    assert first.missing_declarations == ["viewport", "lang", "icon"]
+    assert first.missing_open_graph == ["og:title", "og:description", "og:image"]
+    assert (first.lazy_first_image, first.structured_types) == (f"{ORIGIN}/hero.jpg", [])
+    assert (second.missing_declarations, second.missing_open_graph) == ([], [])
+    assert second.lazy_first_image is None
+    assert second.structured_types == ["Article", "BreadcrumbList"]
+
+
 async def test_crawl_page_records_redirects_without_following() -> None:
     site = FakeSite({f"{ORIGIN}/old": redirect("/new?b=2&a=1")})
     async with site.client() as client:

@@ -1112,6 +1112,51 @@
           "explanation": "Images on the page lack width and height attributes, so the browser cannot reserve their space before they load and the layout shifts (Cumulative Layout Shift, a Core Web Vital).",
           "how_to_fix": "Set width and height attributes (or a CSS aspect-ratio) on each image so the layout is stable while images load."
         },
+        "http-page": {
+          "title": "Page served over HTTP",
+          "explanation": "The page's final address is plain HTTP, not HTTPS. Browsers mark it as not secure, and Google prefers the HTTPS version of a page when both exist.",
+          "how_to_fix": "Serve the site over HTTPS, redirect every HTTP address to its HTTPS twin with a 301, and update internal links, canonicals and the sitemap to the HTTPS addresses."
+        },
+        "missing-viewport": {
+          "title": "No mobile viewport",
+          "explanation": "The page declares no <meta name=\"viewport\">, so phones render it at desktop width and shrink it. Google indexes the mobile version of pages, and this hurts how the page is read and used there.",
+          "how_to_fix": "Add <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"> to the <head> of the page template."
+        },
+        "first-image-lazy": {
+          "title": "First image is lazy-loaded",
+          "explanation": "The first image in the page has loading=\"lazy\". It is usually above the fold and often the largest element, so deferring it delays the Largest Contentful Paint (LCP), a Core Web Vital. The audit takes the first image in the document as the one above the fold.",
+          "how_to_fix": "Remove loading=\"lazy\" from the hero or first content image (consider fetchpriority=\"high\" for it), and keep lazy loading for images further down the page."
+        },
+        "missing-html-lang": {
+          "title": "No page language declared",
+          "explanation": "The <html> element has no lang attribute, so browsers, screen readers and translation tools have to guess the language of the page.",
+          "how_to_fix": "Set the language on the root element, such as <html lang=\"en\">, matching the page's actual language (and its hreflang code, if it has one)."
+        },
+        "missing-charset": {
+          "title": "No character set declared",
+          "explanation": "Neither the page nor its Content-Type header declares a character set, so the browser has to guess the encoding and may show garbled text.",
+          "how_to_fix": "Add <meta charset=\"utf-8\"> as the first element of <head>, or send Content-Type: text/html; charset=utf-8."
+        },
+        "missing-favicon": {
+          "title": "No site icon declared",
+          "explanation": "The page declares no <link rel=\"icon\">. Google shows a site icon next to results on mobile and needs one it can find; browsers fall back to /favicon.ico, which may not exist.",
+          "how_to_fix": "Add <link rel=\"icon\" href=\"/favicon.ico\"> (or a PNG or SVG icon, at least 48×48 px) to the <head> of every page."
+        },
+        "incomplete-open-graph": {
+          "title": "Open Graph tags incomplete",
+          "explanation": "The page lacks some of og:title, og:description and og:image (the details list which). Without them, links shared on social networks and messengers show a guessed or empty preview.",
+          "how_to_fix": "Add the missing Open Graph tags to the page template, with an image of at least 1200×630 px."
+        },
+        "no-structured-data": {
+          "title": "No structured data",
+          "explanation": "The page carries no JSON-LD or microdata at all. Structured data is optional, but it is what makes a page eligible for rich results such as breadcrumbs, products, articles or videos.",
+          "how_to_fix": "Add JSON-LD for what the page actually is (for example Article, Product or VideoObject) and a BreadcrumbList for pages below the home page; check it with Google's Rich Results Test."
+        },
+        "missing-breadcrumb-schema": {
+          "title": "No breadcrumb markup",
+          "explanation": "The page sits below the home page and has structured data, but no BreadcrumbList. Google uses breadcrumb markup to show the page's place in the site instead of a bare URL in results.",
+          "how_to_fix": "Add a BreadcrumbList (JSON-LD) that matches the breadcrumb trail shown on the page, from the home page down to this one."
+        },
         "render-noindex": {
           "title": "Page becomes noindex after rendering",
           "explanation": "The HTML the server sends lets search engines index the page, but once its JavaScript has run the page carries a noindex robots directive. Google renders pages and obeys the rendered directive, so this page can drop out of the index even though its source looks fine.",

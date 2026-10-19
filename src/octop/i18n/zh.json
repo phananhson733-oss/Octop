@@ -1112,6 +1112,51 @@
           "explanation": "页面上的图片没有 width 和 height 属性，浏览器在图片加载前无法预留位置，页面会跳动（累积布局偏移 CLS，属于核心网页指标）。",
           "how_to_fix": "给每张图片写上 width 和 height 属性（或用 CSS aspect-ratio），让图片加载时布局保持稳定。"
         },
+        "http-page": {
+          "title": "页面用 HTTP 提供",
+          "explanation": "页面的最终网址是 HTTP 而不是 HTTPS。浏览器会标「不安全」，两个版本都在时 Google 也优先用 HTTPS 版本。",
+          "how_to_fix": "全站改用 HTTPS，每个 HTTP 网址都用 301 跳到对应的 HTTPS 网址，站内链接、canonical 和站点地图也换成 HTTPS 网址。"
+        },
+        "missing-viewport": {
+          "title": "没有移动端 viewport",
+          "explanation": "页面没有声明 <meta name=\"viewport\">，手机会按桌面宽度渲染再缩小显示。Google 按移动版收录页面，这会影响页面在手机上的阅读和使用。",
+          "how_to_fix": "在页面模板的 <head> 里加 <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">。"
+        },
+        "first-image-lazy": {
+          "title": "首图被设成延迟加载",
+          "explanation": "页面里第一张图片带 loading=\"lazy\"。它通常在首屏，常常也是最大的元素，延迟加载会拖慢最大内容绘制（LCP，核心网页指标之一）。审计把文档里的第一张图当作首屏图片。",
+          "how_to_fix": "去掉首图或第一张内容图的 loading=\"lazy\"（可以给它加 fetchpriority=\"high\"），往下的图片继续延迟加载。"
+        },
+        "missing-html-lang": {
+          "title": "没有声明页面语言",
+          "explanation": "<html> 元素没有 lang 属性，浏览器、读屏软件和翻译工具只能去猜页面是什么语言。",
+          "how_to_fix": "在根元素上写明语言，比如 <html lang=\"zh-CN\">，和页面实际语言一致（有 hreflang 的话也和它的代码一致）。"
+        },
+        "missing-charset": {
+          "title": "没有声明字符集",
+          "explanation": "页面和它的 Content-Type 响应头都没有声明字符集，浏览器只能猜编码，可能显示成乱码。",
+          "how_to_fix": "把 <meta charset=\"utf-8\"> 放在 <head> 的第一个位置，或者在响应头里发 Content-Type: text/html; charset=utf-8。"
+        },
+        "missing-favicon": {
+          "title": "没有声明站点图标",
+          "explanation": "页面没有声明 <link rel=\"icon\">。Google 在手机搜索结果里会在网站旁边显示站点图标，需要能找到它；浏览器会退回去取 /favicon.ico，那个文件不一定存在。",
+          "how_to_fix": "在每个页面的 <head> 里加 <link rel=\"icon\" href=\"/favicon.ico\">（也可以用 PNG 或 SVG，至少 48×48 像素）。"
+        },
+        "incomplete-open-graph": {
+          "title": "Open Graph 标签不全",
+          "explanation": "页面缺少 og:title、og:description、og:image 中的一项或几项（详情里列了缺哪些）。没有它们，链接分享到社交网络和聊天软件时，预览是猜出来的或者是空的。",
+          "how_to_fix": "在页面模板里补上缺的 Open Graph 标签，图片至少 1200×630 像素。"
+        },
+        "no-structured-data": {
+          "title": "没有结构化数据",
+          "explanation": "页面上完全没有 JSON-LD 或 microdata。结构化数据不是必须的，但页面要有它才可能得到面包屑、商品、文章、视频这类富结果展示。",
+          "how_to_fix": "按页面实际内容加 JSON-LD（比如 Article、Product、VideoObject），首页以下的页面再加 BreadcrumbList；用 Google 的富媒体搜索结果测试检查一遍。"
+        },
+        "missing-breadcrumb-schema": {
+          "title": "没有面包屑标记",
+          "explanation": "页面在首页以下、也有结构化数据，但没有 BreadcrumbList。Google 用面包屑标记在搜索结果里显示页面在网站里的位置，而不是一串网址。",
+          "how_to_fix": "加一个和页面上面包屑导航一致的 BreadcrumbList（JSON-LD），从首页一直到这一页。"
+        },
         "render-noindex": {
           "title": "渲染后页面变成了 noindex",
           "explanation": "服务器返回的 HTML 允许收录，但 JavaScript 执行完后页面上出现了 noindex。Google 会渲染页面并按渲染后的指令处理，所以即使源码看起来没问题，这个页面也可能被移出索引。",

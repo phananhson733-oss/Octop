@@ -104,6 +104,11 @@ def missing_required(documents: list[Any]) -> list[str]:
     return list(missing)[:MAX_REPORTED]
 
 
+def declared_types(documents: list[Any]) -> list[str]:
+    """Every type the documents declare, nested objects and @graph members included."""
+    return sorted({kind for node in _nodes(documents) for kind in _types(node)})
+
+
 def faq_questions(documents: list[Any]) -> list[str]:
     """The question texts FAQPage markup declares."""
     questions: list[str] = []

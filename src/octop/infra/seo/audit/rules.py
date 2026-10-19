@@ -11,6 +11,9 @@ import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from typing import Any, Literal
+from urllib.parse import urlsplit
+
+from octop.infra.seo.audit.urls import path_cluster
 
 Severity = Literal["critical", "warning", "info"]
 
@@ -61,6 +64,15 @@ ISSUE_SEVERITY: dict[str, Severity] = {
     "faq-schema-not-visible": "warning",
     "internal-nofollow": "warning",
     "images-missing-size": "info",
+    "http-page": "warning",
+    "missing-viewport": "warning",
+    "first-image-lazy": "warning",
+    "missing-html-lang": "info",
+    "missing-charset": "info",
+    "missing-favicon": "info",
+    "incomplete-open-graph": "info",
+    "no-structured-data": "info",
+    "missing-breadcrumb-schema": "info",
     "render-noindex": "critical",
     "render-error-state": "critical",
     "render-redirected": "warning",
@@ -211,6 +223,22 @@ class PageFacts:
     head_broken_by: str | None = None
     misplaced_head: list[str] = field(default_factory=list)
     body_truncated: bool = False
+    # Judged while crawling only; the defaults (as in rows read back) report nothing.
+    # Head declarations the page lacks: "viewport", "lang", "charset", "icon".
+    missing_declarations: list[str] = field(default_factory=list)
+    missing_open_graph: list[str] = field(default_factory=list)
+    # The first image's URL when it is lazy-loaded ("" when it has no src).
+    lazy_first_image: str | None = None
+    # JSON-LD and microdata types; None when not judged.
+    structured_types: list[str] | None = None
+
+
+_DECLARATION_ISSUES = {
+    "viewport": "missing-viewport",
+    "lang": "missing-html-lang",
+    "charset": "missing-charset",
+    "icon": "missing-favicon",
+}
 
 
 def _heading_skip(order: list[int]) -> bool:
@@ -280,6 +308,11 @@ def page_issues(page: PageFacts) -> list[Issue]:
         problems = _hreflang_problems(page)
         if problems:
             report("hreflang-invalid", {"problems": problems})
+    if urlsplit(page.url).scheme == "http":
+        report("http-page")
+    # An app shell still carries its head, so these are judged before the shell check.
+    for name in page.missing_declarations:
+        report(_DECLARATION_ISSUES[name])
     # An unrendered app shell cannot show what the page lacks: report the gap instead.
     if page.javascript_shell:
         report("javascript-rendering-suspected", {"word_count": page.word_count})
@@ -340,6 +373,22 @@ def page_issues(page: PageFacts) -> list[Issue]:
             "images-missing-size",
             {"images_missing_size": page.images_missing_size, "images_total": page.images_total},
         )
+    # Without a viewport to measure, the first image in the document stands in for the
+    # one above the fold.
+    if page.lazy_first_image is not None:
+        report("first-image-lazy", {"image_url": page.lazy_first_image or None})
+    # Sharing previews and rich results matter for the pages meant to be found.
+    if page.is_indexable and effective in (None, page.url):
+        if page.missing_open_graph:
+            report("incomplete-open-graph", {"missing": page.missing_open_graph})
+        # A cut-off body can end before markup that is still to come.
+        if page.structured_types is not None and not page.body_truncated:
+            if not page.structured_types and not page.schema_invalid:
+                report("no-structured-data")
+            elif page.structured_types and (
+                path_cluster(page.url) != "/" and "BreadcrumbList" not in page.structured_types
+            ):
+                report("missing-breadcrumb-schema")
     return issues
 
 

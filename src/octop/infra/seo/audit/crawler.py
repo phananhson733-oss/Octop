@@ -23,6 +23,7 @@ from octop.infra.seo.audit.analyzer import Link, PageAnalysis, analyze_html
 from octop.infra.seo.audit.robots import MAX_ROBOTS_BYTES, Robots
 from octop.infra.seo.audit.rules import PageFacts
 from octop.infra.seo.audit.structured import (
+    declared_types,
     faq_questions,
     hidden_questions,
     missing_required,
@@ -142,6 +143,10 @@ class CrawledPage:
     head_broken_by: str | None = None
     misplaced_head: list[str] = field(default_factory=list)
     body_truncated: bool = False
+    missing_declarations: list[str] = field(default_factory=list)
+    missing_open_graph: list[str] = field(default_factory=list)
+    lazy_first_image: str | None = None
+    structured_types: list[str] | None = None
     # The full analysis (body text, JSON-LD) for a caller that shows the page; not stored.
     analysis: PageAnalysis | None = field(default=None, repr=False, compare=False)
 
@@ -181,6 +186,10 @@ class CrawledPage:
             head_broken_by=self.head_broken_by,
             misplaced_head=self.misplaced_head,
             body_truncated=self.body_truncated,
+            missing_declarations=self.missing_declarations,
+            missing_open_graph=self.missing_open_graph,
+            lazy_first_image=self.lazy_first_image,
+            structured_types=self.structured_types,
         )
 
 
@@ -270,6 +279,7 @@ class _Analyzed:
     schema_invalid: int
     schema_missing: list[str]
     faq_hidden: list[str]
+    structured_types: list[str]
 
 
 def _analyze(body: str, url: str) -> _Analyzed:
@@ -281,6 +291,7 @@ def _analyze(body: str, url: str) -> _Analyzed:
         invalid,
         missing_required(documents),
         hidden_questions(faq_questions(documents), analysis.body_text),
+        sorted({*declared_types(documents), *analysis.microdata_types}),
     )
 
 
@@ -372,6 +383,29 @@ async def _page_from_response(
     page.faq_hidden = analyzed.faq_hidden
     page.head_broken_by = analysis.head_broken_by
     page.misplaced_head = analysis.misplaced_head
+    page.missing_declarations = [
+        name
+        for name, declared in (
+            ("viewport", analysis.has_viewport),
+            ("lang", analysis.html_lang is not None),
+            ("charset", analysis.declares_charset or bool(response.charset_encoding)),
+            ("icon", analysis.has_icon),
+        )
+        if not declared
+    ]
+    page.missing_open_graph = [
+        name
+        for name, value in (
+            ("og:title", analysis.og_title),
+            ("og:description", analysis.og_description),
+            ("og:image", analysis.og_image),
+        )
+        if not (value or "").strip()
+    ]
+    if analysis.images and analysis.first_image_loading == "lazy":
+        src = analysis.images[0]["src"]
+        page.lazy_first_image = (normalize_url(src, url) or src) if src else ""
+    page.structured_types = analyzed.structured_types
     return page
 
 
