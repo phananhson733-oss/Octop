@@ -41,7 +41,7 @@ const pickRole: UserRole = {
   policies: [
     { name: "visible_nav", value: "chat,experts" },
     { name: "hidden_expert_tabs", value: "library,market" },
-    { name: "default_published_expert", value: "01TEMPLATE" },
+    { name: "default_published_expert", value: "01TEMPLATE,01SEO" },
   ],
   deletable: true,
   immutable: false,
@@ -51,7 +51,7 @@ const pickRole: UserRole = {
   visible_nav: ["chat", "experts"],
   default_knowledge_bases: [],
   hidden_expert_tabs: ["library", "market"],
-  default_published_expert: "01TEMPLATE",
+  default_published_experts: ["01TEMPLATE", "01SEO"],
   created_at: 1,
   updated_at: 1,
 };
@@ -63,7 +63,10 @@ describe("<RolesPanel /> expert policies", () => {
     stable.request.mockImplementation(async (path: string) => {
       if (path === "/users/roles") return [pickRole];
       if (path === "/experts/published") {
-        return [{ id: "01TEMPLATE", name: "选剧专家模板" }];
+        return [
+          { id: "01TEMPLATE", name: "选剧专家模板" },
+          { id: "01SEO", name: "SEO 专家模板" },
+        ];
       }
       // The save names no new template here, but the server may report installs.
       if (path === "/users/roles/01ROLE") {
@@ -98,8 +101,12 @@ describe("<RolesPanel /> expert policies", () => {
     const template = screen
       .getByText("adminUsers.roleDefaultPublishedExpert")
       .closest(".ant-form-item");
+    // A role can name several templates.
     expect(
       await within(template as HTMLElement).findByText("选剧专家模板"),
+    ).toBeInTheDocument();
+    expect(
+      within(template as HTMLElement).getByText("SEO 专家模板"),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "common.save" }));
@@ -116,7 +123,8 @@ describe("<RolesPanel /> expert policies", () => {
     expect(JSON.parse(patch?.[1].body).policies).toEqual([
       { name: "visible_nav", value: "chat,experts" },
       { name: "hidden_expert_tabs", value: "library,market" },
-      { name: "default_published_expert", value: "01TEMPLATE" },
+      // In the order chosen: the first one is the expert chat opens on.
+      { name: "default_published_expert", value: "01TEMPLATE,01SEO" },
     ]);
     // The toast says how many existing accounts just got the expert.
     await waitFor(() =>

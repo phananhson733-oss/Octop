@@ -16,7 +16,7 @@ from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.users.email import normalize_email
 from octop.infra.users.permissions import effective_permissions
 from octop.infra.users.resource_policy import (
-    role_default_published_expert,
+    role_default_published_experts,
     role_hidden_expert_tabs,
     role_visible_nav,
 )
@@ -44,9 +44,9 @@ def me_payload(user: Any, server: Any) -> dict[str, Any]:
     payload = _user_json(user, locale=user.locale)
     payload["visible_nav"] = role_visible_nav(server.services.db, user)
     payload["hidden_expert_tabs"] = role_hidden_expert_tabs(server.services.db, user)
-    payload["default_published_expert"] = role_default_published_expert(
-        server.services.db, str(user.role)
-    )
+    # The role's first template is the expert the dashboard opens chat on.
+    templates = role_default_published_experts(server.services.db, str(user.role))
+    payload["default_published_expert"] = templates[0] if templates else None
     row = server.user_manager.get_row(user.id)
     if row is None:
         payload["sso_linked"] = False

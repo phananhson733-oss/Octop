@@ -422,7 +422,7 @@ async def test_role_default_published_expert_reaches_its_accounts(env):
     )
     assert role.status_code == 201, role.text
     role_id = role.json()["user_role_id"]
-    assert role.json()["default_published_expert"] is None
+    assert role.json()["default_published_experts"] == []
     _, fern = await account("fern", role_id)
     assert await from_template(fern) == []
 
@@ -430,7 +430,7 @@ async def test_role_default_published_expert_reaches_its_accounts(env):
     policies = [base_policy, {"name": "default_published_expert", "value": expert_id}]
     named = await c.patch(f"/api/users/roles/{role_id}", headers=auth, json={"policies": policies})
     assert named.status_code == 200, named.text
-    assert named.json()["default_published_expert"] == expert_id
+    assert named.json()["default_published_experts"] == [expert_id]
     assert named.json()["default_expert_installed"] == 1
     # The account's profile names the template, so the dashboard can open on that expert.
     fern_me = await c.get("/api/auth/me", headers=fern)
@@ -478,6 +478,43 @@ async def test_role_default_published_expert_reaches_its_accounts(env):
     assert "default_expert_installed" not in again.json()
     assert await from_template(fern) == []
     assert len(await from_template(gus)) == 1
+
+    # A role can name several templates; adding one installs only that one.
+    seo_source = await c.post(
+        "/api/agents/from-expert/default", headers=auth, json={"name": "seo-source"}
+    )
+    assert seo_source.status_code == 201, seo_source.text
+    second = await c.post(
+        f"/api/agents/{seo_source.json()['agent_id']}/publish-expert",
+        headers=auth,
+        json={"name": "SEO 专家", "description": "SEO"},
+    )
+    assert second.status_code == 201, second.text
+    second_id = second.json()["id"]
+    both = [base_policy, {"name": "default_published_expert", "value": f"{expert_id},{second_id}"}]
+    added = await c.patch(f"/api/users/roles/{role_id}", headers=auth, json={"policies": both})
+    assert added.status_code == 200, added.text
+    assert added.json()["default_published_experts"] == [expert_id, second_id]
+    assert added.json()["default_expert_installed"] == 4
+    fern_agents = (await c.get("/api/agents", headers=fern)).json()
+    assert [row["published_expert_id"] for row in fern_agents if row["published_expert_id"]] == [
+        second_id
+    ]
+    assert len(await from_template(gus)) == 1
+    # The first template is the one chat opens on.
+    fern_me = await c.get("/api/auth/me", headers=fern)
+    assert fern_me.json()["default_published_expert"] == expert_id
+    swapped = [
+        base_policy,
+        {"name": "default_published_expert", "value": f"{second_id},{expert_id}"},
+    ]
+    reordered = await c.patch(
+        f"/api/users/roles/{role_id}", headers=auth, json={"policies": swapped}
+    )
+    assert reordered.status_code == 200, reordered.text
+    assert "default_expert_installed" not in reordered.json()
+    fern_me = await c.get("/api/auth/me", headers=fern)
+    assert fern_me.json()["default_published_expert"] == second_id
 
 
 async def test_role_default_knowledge_bases_reach_the_first_expert(env):

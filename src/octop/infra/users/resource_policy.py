@@ -172,22 +172,26 @@ def role_default_knowledge_bases(db: Any, role_id: str) -> list[str]:
     return default_knowledge_bases_of(role.policy_value(POLICY_DEFAULT_KNOWLEDGE_BASES))
 
 
-def default_published_expert_of(raw: Any) -> str | None:
-    """Published-expert id a role installs for its accounts."""
-    return active_policy_value(raw)
+def default_published_experts_of(raw: Any) -> list[str]:
+    """Published-expert ids a role installs for its accounts, in the order chosen."""
+    text = active_policy_value(raw)
+    if text is None:
+        return []
+    return list(dict.fromkeys(part.strip() for part in text.split(",") if part.strip()))
 
 
-def role_default_published_expert(db: Any, role_id: str) -> str | None:
-    """Published expert the role template *role_id* installs for its accounts.
+def role_default_published_experts(db: Any, role_id: str) -> list[str]:
+    """Published experts the role template *role_id* installs for its accounts.
 
-    The id is as stored; the caller skips it when the template is gone.
+    The ids are as stored; the caller skips a template that is gone. The first
+    one is the expert the dashboard opens chat on.
     """
     from octop.infra.db.repos.user_roles import UserRoleRepo
 
     role = UserRoleRepo(db).get(role_id)
     if role is None or role.is_admin:
-        return None
-    return default_published_expert_of(role.policy_value(POLICY_DEFAULT_PUBLISHED_EXPERT))
+        return []
+    return default_published_experts_of(role.policy_value(POLICY_DEFAULT_PUBLISHED_EXPERT))
 
 
 def public_policy_fields(rows: Sequence[Any] | Mapping[str, str] | None) -> dict[str, Any]:
@@ -285,6 +289,10 @@ def normalize_hidden_expert_tabs(raw: str | None) -> str | None:
 
 def normalize_default_knowledge_bases(raw: str | None) -> str | None:
     return ",".join(default_knowledge_bases_of(raw)) or None
+
+
+def normalize_default_published_experts(raw: str | None) -> str | None:
+    return ",".join(default_published_experts_of(raw)) or None
 
 
 def assert_backend_within_user_root(backend: Any, allowed_root: str | None) -> None:

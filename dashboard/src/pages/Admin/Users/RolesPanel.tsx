@@ -74,7 +74,8 @@ interface RoleFormValues extends PolicyFormValues {
   visible_nav?: string[];
   default_knowledge_bases?: string[];
   hidden_expert_tabs?: string[];
-  default_published_expert?: string;
+  /** Templates installed for the role's accounts; the first opens chat. */
+  default_published_experts?: string[];
 }
 
 const HOME_NAV_KEY = "chat";
@@ -116,10 +117,10 @@ function rolePolicies(
       value: values.hidden_expert_tabs.join(","),
     });
   }
-  if (values.default_published_expert) {
+  if (values.default_published_experts?.length) {
     policies.push({
       name: "default_published_expert",
-      value: values.default_published_expert,
+      value: values.default_published_experts.join(","),
     });
   }
   return policies;
@@ -227,7 +228,7 @@ export default function RolesPanel() {
           visible_nav: [],
           default_knowledge_bases: [],
           hidden_expert_tabs: [],
-          default_published_expert: undefined,
+          default_published_experts: [],
         }
       : {
           name: editor.user_role_name,
@@ -250,8 +251,7 @@ export default function RolesPanel() {
           ),
           default_knowledge_bases: editor.default_knowledge_bases ?? [],
           hidden_expert_tabs: editor.hidden_expert_tabs ?? [],
-          default_published_expert:
-            editor.default_published_expert ?? undefined,
+          default_published_experts: editor.default_published_experts ?? [],
         };
   const formKey =
     editor === "new" ? "new" : editor ? editor.user_role_id : "closed";
@@ -815,10 +815,11 @@ export default function RolesPanel() {
                 </Form.Item>
                 <Form.Item
                   label={t("adminUsers.roleDefaultPublishedExpert")}
-                  name="default_published_expert"
+                  name="default_published_experts"
                   extra={t("adminUsers.roleDefaultPublishedExpertHint")}
                 >
                   <Select
+                    mode="multiple"
                     allowClear
                     placeholder={t(
                       "adminUsers.roleDefaultPublishedExpertPlaceholder",

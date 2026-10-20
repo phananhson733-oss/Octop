@@ -24,7 +24,7 @@ from octop.infra.users.resource_policy import (
     POLICY_WORKSPACE_ROOT_DIR,
     effective_workspace_root_dir,
     role_default_knowledge_bases,
-    role_default_published_expert,
+    role_default_published_experts,
 )
 from octop.infra.utils.host_dirs import host_fs_tree_root
 from octop.infra.utils.locale import normalize_locale
@@ -133,18 +133,15 @@ async def try_bootstrap_default_agent(
         logger.warning("could not auto-create default agent for user %s: %s", user_id, exc)
 
 
-async def install_role_published_expert(server: Any, *, user_id: int) -> Any | None:
-    """Give *user_id* the published expert their role template names, once.
+async def install_role_published_expert(server: Any, *, user_id: int, expert_id: str) -> Any | None:
+    """Give *user_id* an expert from the published template *expert_id*, once.
 
     Installs it the way the account would from the Experts page with the
-    defaults left alone. Returns ``None`` when the role names no template or
-    the account already has an expert made from it.
+    defaults left alone. Returns ``None`` when the account already has an
+    expert made from it.
     """
     user = server.user_manager.get_by_id(user_id)
     if user is None:
-        return None
-    expert_id = role_default_published_expert(server.services.db, str(user.role))
-    if expert_id is None:
         return None
     registry = server.app_runtime.agent_registry
     if any(row.published_expert_id == expert_id for row in registry.list_agents(user_id)):
@@ -171,27 +168,49 @@ async def install_role_published_expert(server: Any, *, user_id: int) -> Any | N
     )
 
 
-async def try_install_role_published_expert(server: Any, *, user_id: int) -> bool:
-    """Best-effort wrapper used by HTTP adapters. True when an expert was created."""
+async def try_install_role_published_expert(
+    server: Any, *, user_id: int, expert_ids: list[str] | None = None
+) -> bool:
+    """Best-effort wrapper used by HTTP adapters. True when an expert was created.
+
+    Installs each template the account's role names (or only *expert_ids*) that
+    the account has no expert from; one failing template does not stop the rest.
+    """
     if server.app_runtime is None:
         logger.warning("skip role default expert: app_runtime not ready")
         return False
-    try:
-        return await install_role_published_expert(server, user_id=user_id) is not None
-    except Exception as exc:  # logged; the account or role change should still succeed
-        logger.warning("could not install the role's default expert for user %s: %s", user_id, exc)
-        return False
+    if expert_ids is None:
+        user = server.user_manager.get_by_id(user_id)
+        if user is None:
+            return False
+        expert_ids = role_default_published_experts(server.services.db, str(user.role))
+    installed = False
+    for expert_id in expert_ids:
+        try:
+            created = await install_role_published_expert(
+                server, user_id=user_id, expert_id=expert_id
+            )
+        except Exception as exc:  # logged; the account or role change should still succeed
+            logger.warning(
+                "could not install role expert %s for user %s: %s", expert_id, user_id, exc
+            )
+            continue
+        installed = installed or created is not None
+    return installed
 
 
-async def backfill_role_published_expert(server: Any, role_id: str) -> int:
-    """Install the role's default published expert for the accounts already in it.
+async def backfill_role_published_expert(server: Any, role_id: str, expert_ids: list[str]) -> int:
+    """Install *expert_ids*, templates just added to the role, for the accounts already in it.
 
-    Returns how many accounts got one.
+    Only the added ones, so saving the role does not bring back a copy an account
+    deleted. Returns how many accounts got one.
     """
     installed = 0
     for row in server.services.user_repo.list(include_disabled=True):
         if str(row.role) != role_id:
             continue
-        if await try_install_role_published_expert(server, user_id=int(row.id)):
+        if await try_install_role_published_expert(
+            server, user_id=int(row.id), expert_ids=expert_ids
+        ):
             installed += 1
     return installed

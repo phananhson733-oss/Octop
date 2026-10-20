@@ -24,9 +24,9 @@ export interface UserRole {
   default_knowledge_bases?: string[];
   /** Experts-page tabs hidden from the role's accounts. */
   hidden_expert_tabs?: string[];
-  /** Published expert every account in the role gets a copy of. */
-  default_published_expert?: string | null;
-  /** On an update that named a new template: accounts that just got it. */
+  /** Published experts every account in the role gets a copy of; the first opens chat. */
+  default_published_experts?: string[];
+  /** On an update that added templates: accounts that just got one. */
   default_expert_installed?: number;
   created_at: number;
   updated_at: number;
