@@ -33,7 +33,11 @@ from octop.infra.agents.providers.codex_image import (
     generate_image,
 )
 from octop.infra.agents.providers.codex_oauth import get_valid_access_token, load_codex_token
-from octop.infra.agents.settings.chatgpt_image import ChatgptImageSettingsStore
+from octop.infra.agents.settings.chatgpt_image import (
+    ChatgptImageSettingsStore,
+    may_use_chatgpt_image,
+)
+from octop.infra.users.identity import Role
 from octop.infra.utils.paths import PathLayout
 
 if TYPE_CHECKING:
@@ -57,7 +61,10 @@ _INSTRUCTIONS: dict[str, str] = {
         "Tell the user an administrator must turn on ChatGPT image generation "
         "in Settings > Media generation."
     ),
-    "admin_only": "Tell the user this tool is limited to administrators on this instance.",
+    "admin_only": (
+        "Tell the user this tool is limited to administrators and accounts with the SEO "
+        "permission on this instance."
+    ),
     "auth_required": (
         "Tell the user an administrator must sign in with ChatGPT on the Models settings page."
     ),
@@ -100,12 +107,21 @@ class _Login:
     host_models: tuple[str, ...]
 
 
-def _acting_user_is_admin() -> bool:
+async def _acting_user_may_use(user_repo: Any) -> bool:
     try:
         configurable = dict(get_config().get("configurable") or {})
     except RuntimeError:
         return False
-    return configurable.get("user_is_admin") is True
+    if configurable.get("user_is_admin") is True:
+        return True
+    # The harness puts the acting user's id in ``user``
+    raw = str(configurable.get("user") or "")
+    if not raw.isdigit():
+        return False
+    user = await asyncio.to_thread(user_repo.get, int(raw))
+    return user is not None and may_use_chatgpt_image(
+        is_admin=user.role == Role.ADMIN, permissions=user.permissions
+    )
 
 
 def _host_models(row: Any) -> tuple[str, ...]:
@@ -199,7 +215,7 @@ async def generate_to_workspace(
     prompt: str,
     aspect_ratio: AspectRatio = "square",
     quality: Quality = "medium",
-    acting_user_is_admin: bool,
+    acting_user_may_use: bool,
 ) -> dict[str, object]:
     """Generate one image into ``workspace`` under the same switches as the tool.
 
@@ -210,10 +226,10 @@ async def generate_to_workspace(
     settings = await asyncio.to_thread(settings_store.load)
     if not settings.enabled:
         return _failure("disabled", "ChatGPT image generation is turned off.", prompt=prompt)
-    if settings.admin_only and not acting_user_is_admin:
+    if settings.admin_only and not acting_user_may_use:
         return _failure(
             "admin_only",
-            "ChatGPT image generation is limited to administrators.",
+            "ChatGPT image generation is limited to administrators and SEO accounts.",
             prompt=prompt,
         )
     if not prompt:
@@ -288,6 +304,7 @@ def build_chatgpt_image_tools(
     workspace: BackendWorkspace,
     paths: PathLayout,
     provider_repo: Any,
+    user_repo: Any,
     settings_store: ChatgptImageSettingsStore,
 ) -> list[StructuredTool]:
     """Return the tool bound to one agent's workspace."""
@@ -316,7 +333,7 @@ def build_chatgpt_image_tools(
             prompt=prompt,
             aspect_ratio=aspect_ratio,
             quality=quality,
-            acting_user_is_admin=_acting_user_is_admin(),
+            acting_user_may_use=await _acting_user_may_use(user_repo),
         )
 
     return [

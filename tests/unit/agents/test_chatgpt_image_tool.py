@@ -29,6 +29,9 @@ from octop.infra.gateway.media.tool_media import is_media_push_tool
 from octop.infra.users.identity import Role
 from octop.infra.utils.paths import PathLayout
 
+# Kept before the autouse fixture swaps it out
+_REAL_MAY_USE = codex_image_tool._acting_user_may_use
+
 USAGE_OK = {
     "plan_type": "pro",
     "rate_limit": {"primary_window": {"used_percent": 40, "reset_at": 1792649637}},
@@ -147,13 +150,21 @@ def _tool(paths: PathLayout, store: ChatgptImageSettingsStore, workspace: FakeWo
         workspace=workspace,  # type: ignore[arg-type]
         paths=paths,
         provider_repo=repo,
+        user_repo=SimpleNamespace(get=lambda _uid: None),
         settings_store=store,
     )[0]
 
 
+def _caller(allowed: bool) -> Any:
+    async def may_use(_user_repo: Any) -> bool:
+        return allowed
+
+    return may_use
+
+
 @pytest.fixture(autouse=True)
 def _admin_caller(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(codex_image_tool, "_acting_user_is_admin", lambda: True)
+    monkeypatch.setattr(codex_image_tool, "_acting_user_may_use", _caller(True))
 
 
 async def test_generates_and_saves_image_to_workspace(
@@ -232,7 +243,7 @@ async def test_disabled_and_non_admin_and_logged_out_send_nothing(
     workspace = FakeWorkspace(tmp_path)
 
     disabled = await _tool(paths, _store(), workspace, FakeProviderRepo()).ainvoke({"prompt": "x"})
-    monkeypatch.setattr(codex_image_tool, "_acting_user_is_admin", lambda: False)
+    monkeypatch.setattr(codex_image_tool, "_acting_user_may_use", _caller(False))
     non_admin = await _tool(paths, _store(enabled=True), workspace, FakeProviderRepo()).ainvoke(
         {"prompt": "x"}
     )
@@ -271,10 +282,16 @@ def test_settings_default_to_off_admin_only_no_credits() -> None:
     assert store.load() == ChatgptImageSettings(enabled=True, admin_only=False, allow_credits=True)
 
 
-def _mount(settings: ChatgptImageSettings, *, role: Role | None, team: bool = False) -> bool:
+def _mount(
+    settings: ChatgptImageSettings,
+    *,
+    role: Role | None,
+    team: bool = False,
+    permissions: list[str] | None = None,
+) -> bool:
     store = ChatgptImageSettingsStore(FakeSettingsRepo())  # type: ignore[arg-type]
     store.save(settings)
-    owner = SimpleNamespace(role=role) if role is not None else None
+    owner = SimpleNamespace(role=role, permissions=permissions or []) if role is not None else None
     manager = SimpleNamespace(
         _chatgpt_image=store,
         _repos=SimpleNamespace(user_repo=SimpleNamespace(get=lambda _uid: owner)),
@@ -285,7 +302,7 @@ def _mount(settings: ChatgptImageSettings, *, role: Role | None, team: bool = Fa
     return AgentManager.chatgpt_image_mounted(manager, row)  # type: ignore[arg-type]
 
 
-def test_tool_mounts_only_for_admin_owned_agents_by_default(
+def test_tool_mounts_only_for_admin_and_seo_owned_agents_by_default(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("octop.infra.agents.teams.is_team_agent", lambda row: row.kind == "team")
@@ -293,6 +310,8 @@ def test_tool_mounts_only_for_admin_owned_agents_by_default(
 
     assert _mount(on, role=Role.ADMIN) is True
     assert _mount(on, role=Role.USER) is False
+    assert _mount(on, role=Role.USER, permissions=["seo"]) is True
+    assert _mount(on, role=Role.USER, permissions=["terminal"]) is False
     assert _mount(on, role=None) is False
     assert _mount(ChatgptImageSettings(), role=Role.ADMIN) is False
     assert _mount(ChatgptImageSettings(enabled=True, admin_only=False), role=Role.USER) is True
@@ -327,7 +346,7 @@ async def test_dashboard_route_uses_the_caller_not_the_agent_context(
     from octop.infra.errors import OctopError
 
     # The route must not read the LangGraph config: it gets the caller from the request.
-    monkeypatch.setattr(codex_image_tool, "_acting_user_is_admin", lambda: pytest.fail("tool path"))
+    monkeypatch.setattr(codex_image_tool, "_acting_user_may_use", lambda _repo: pytest.fail("tool"))
     calls = _mock_http(monkeypatch, USAGE_OK)
     workspace = FakeWorkspace(tmp_path)
     server = _route_server(paths, _store(enabled=True), workspace)
@@ -337,6 +356,8 @@ async def test_dashboard_route_uses_the_caller_not_the_agent_context(
     refused = await generate_chatgpt_image("a1", body, user=owner, server=server)
     admin = SimpleNamespace(id=9, is_admin=True)
     done = await generate_chatgpt_image("a1", body, user=admin, server=server)
+    seo_owner = SimpleNamespace(id=1, is_admin=False, permissions=["seo"])
+    seo_done = await generate_chatgpt_image("a1", body, user=seo_owner, server=server)
     with pytest.raises(OctopError):
         await generate_chatgpt_image(
             "a1", body, user=SimpleNamespace(id=2, is_admin=False), server=server
@@ -346,7 +367,30 @@ async def test_dashboard_route_uses_the_caller_not_the_agent_context(
     assert refused.error is not None and refused.error.code == "admin_only"
     assert refused.error.safe_to_resubmit is True
     assert done.status == "completed" and done.error is None
+    assert seo_done.status == "completed" and seo_done.error is None
     assert done.images[0].path.startswith("generated/image/chatgpt-")
     assert workspace.files[done.images[0].path] == _png()
     assert done.execution is not None and done.execution["requested_size"] == "1536x1024"
-    assert calls.count(USAGE_URL) == 1
+    assert calls.count(USAGE_URL) == 2  # admin and SEO owner each checked once
+
+
+async def test_tool_lets_in_admins_and_seo_accounts_from_the_turn_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    users = {
+        5: SimpleNamespace(role=Role.USER, permissions=["seo"]),
+        6: SimpleNamespace(role=Role.USER, permissions=["terminal"]),
+        7: SimpleNamespace(role=Role.ADMIN, permissions=[]),
+    }
+    repo = SimpleNamespace(get=users.get)
+
+    async def allowed(configurable: dict[str, Any]) -> bool:
+        monkeypatch.setattr(codex_image_tool, "get_config", lambda: {"configurable": configurable})
+        return await _REAL_MAY_USE(repo)
+
+    assert await allowed({"user_is_admin": True}) is True
+    assert await allowed({"user": "5"}) is True
+    assert await allowed({"user": "6"}) is False
+    assert await allowed({"user": "7"}) is True
+    assert await allowed({"user": "404"}) is False
+    assert await allowed({"user": "ops-bot"}) is False

@@ -2940,7 +2940,7 @@
       "title": "Images on the ChatGPT subscription",
       "description": "Gives agents a chatgpt_image tool that uses the signed-in ChatGPT subscription (gpt-image-2). Each image uses the plan's Codex allowance.",
       "enable": "Enable",
-      "adminOnly": "Admin agents only",
+      "adminOnly": "Admin and SEO accounts' agents only",
       "adminOnlyHint": "When off, every account's agents draw on this one subscription.",
       "allowCredits": "Spend credits after the allowance is used up",
       "allowCreditsHint": "When off, each image checks the allowance first and is not generated if the allowance is used up or cannot be read. When on, images are billed to purchased credits.",

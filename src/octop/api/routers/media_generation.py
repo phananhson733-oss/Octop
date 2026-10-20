@@ -95,7 +95,10 @@ class ChatgptImageSettingsBody(BaseModel):
     enabled: bool = Field(default=False, description="Mount the chatgpt_image tool.")
     admin_only: bool = Field(
         default=True,
-        description="Only agents owned by admins get the tool, and only admins may call it.",
+        description=(
+            "Only agents owned by admins or accounts with the SEO permission get the tool, "
+            "and only those accounts may call it."
+        ),
     )
     allow_credits: bool = Field(
         default=False,

@@ -2940,7 +2940,7 @@
       "title": "ChatGPT 订阅生图",
       "description": "用已登录的 ChatGPT 订阅（gpt-image-2）给智能体加一个 chatgpt_image 工具，每张图都走订阅的 Codex 额度。",
       "enable": "启用",
-      "adminOnly": "只给管理员的智能体用",
+      "adminOnly": "只给管理员和有 SEO 权限的账号的智能体用",
       "adminOnlyHint": "关闭后，所有账号的智能体都会用这一个订阅。",
       "allowCredits": "额度用完后允许扣 credits",
       "allowCreditsHint": "关闭时，每次生图前先查额度，额度用完或查不到就不生成。打开后，图片会扣你购买的 credits。",

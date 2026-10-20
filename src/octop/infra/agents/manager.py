@@ -38,6 +38,7 @@ from octop.infra.agents.settings.acp import ACPSettingsStore
 from octop.infra.agents.settings.chatgpt_image import (
     ChatgptImageSettings,
     ChatgptImageSettingsStore,
+    may_use_chatgpt_image,
 )
 from octop.infra.agents.settings.langfuse import LangfuseSettings, LangfuseSettingsStore
 from octop.infra.agents.settings.media_generation import (
@@ -1954,7 +1955,7 @@ class AgentManager:
         return saved
 
     def chatgpt_image_mounted(self, row: AgentRow) -> bool:
-        """Whether ``chatgpt_image`` is built for this agent (admin owners unless opened up)."""
+        """Whether ``chatgpt_image`` is built for this agent (admin and SEO owners unless opened up)."""
         from octop.infra.agents.teams import is_team_agent  # noqa: PLC0415
         from octop.infra.users.identity import Role  # noqa: PLC0415
 
@@ -1964,7 +1965,9 @@ class AgentManager:
         if not settings.admin_only:
             return True
         owner = self._repos.user_repo.get(row.user_id) if row.user_id is not None else None
-        return owner is not None and owner.role == Role.ADMIN
+        return owner is not None and may_use_chatgpt_image(
+            is_admin=owner.role == Role.ADMIN, permissions=owner.permissions
+        )
 
     def save_security(self, policy: SecurityPolicy | dict[str, Any]) -> SecurityPolicy:
         """Persist security policy and push it into harness agents."""
@@ -3291,6 +3294,7 @@ class AgentManager:
                     workspace=ws,
                     paths=self.paths,
                     provider_repo=self._repos.provider_repo,
+                    user_repo=self._repos.user_repo,
                     settings_store=self._chatgpt_image,
                 )
             )

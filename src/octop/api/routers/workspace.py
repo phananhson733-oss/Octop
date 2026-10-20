@@ -23,6 +23,7 @@ from octop.api.common.workspace import (
 )
 from octop.api.deps import current_user, get_server
 from octop.infra.agents.providers.codex_image_tool import generate_to_workspace
+from octop.infra.agents.settings.chatgpt_image import may_use_chatgpt_image
 from octop.infra.backend.tree_listing import dedupe_tree_rows
 from octop.infra.backup.workspace_archive import export_workspace_zip, import_workspace_zip
 from octop.infra.errors import ErrorCode, OctopError
@@ -535,7 +536,10 @@ async def generate_chatgpt_image(
         prompt=body.prompt,
         aspect_ratio=body.aspect_ratio,
         quality=body.quality,
-        acting_user_is_admin=bool(getattr(user, "is_admin", False)),
+        acting_user_may_use=may_use_chatgpt_image(
+            is_admin=bool(getattr(user, "is_admin", False)),
+            permissions=getattr(user, "permissions", None),
+        ),
     )
     return ChatgptImageResult.model_validate(result)
 
