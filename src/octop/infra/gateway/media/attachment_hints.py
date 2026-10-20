@@ -481,6 +481,27 @@ async def materialize_image_part(
     return None
 
 
+def workspace_image_ref_as_path_hint(
+    block: dict[str, Any],
+    *,
+    workspace: BackendWorkspace,
+    locale: str | Locale = "en",
+) -> dict[str, Any]:
+    """Path-only text for a model that cannot read images, so its tools can still use the file."""
+    path = workspace_path_from_image_ref(block)
+    if not path:
+        return _image_unavailable_block(locale=locale)
+    return path_hint_content_block(
+        InboundAttachmentMeta(
+            path=path,
+            filename=Path(path).name or "image",
+            media_type=str(block.get("mime_type") or "") or "image/png",
+        ),
+        workspace=workspace,
+        locale=locale,
+    )
+
+
 async def expand_workspace_image_ref(
     block: dict[str, Any],
     *,
@@ -628,5 +649,6 @@ __all__ = [
     "materialize_image_part",
     "path_hint_content_block",
     "sniff_image_media_type",
+    "workspace_image_ref_as_path_hint",
     "workspace_path_from_image_ref",
 ]

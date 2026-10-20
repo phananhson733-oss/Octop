@@ -2,7 +2,9 @@
 
 Checkpoint / history keep path-only ``image_url`` refs (``workspace://…``).
 This middleware expands them to ``data:`` URIs on the model request only so
-base64 never lands in LangGraph state or the dashboard history payload.
+base64 never lands in LangGraph state or the dashboard history payload. A model
+that cannot read images gets the workspace path as text instead, so its tools can
+still use the file.
 """
 
 from __future__ import annotations
@@ -16,10 +18,17 @@ from octop.infra.gateway.media.attachment_hints import (
     expand_workspace_image_ref,
     expand_workspace_image_ref_sync,
     is_workspace_image_ref,
+    workspace_image_ref_as_path_hint,
 )
 
 if TYPE_CHECKING:
     from octop_harness.backends.workspace import BackendWorkspace
+
+
+def _reads_images(model: Any) -> bool:
+    # octop-harness records the model's input types on the instance it builds; unknown means yes
+    supported = getattr(model, "_harness_supported_input", None)
+    return not isinstance(supported, (set, frozenset)) or "image" in supported
 
 
 class WorkspaceImageMaterializeMiddleware(AgentMiddleware[Any, Any]):
@@ -33,7 +42,10 @@ class WorkspaceImageMaterializeMiddleware(AgentMiddleware[Any, Any]):
         request: ModelRequest[Any],
         handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
     ) -> ModelResponse[Any]:
-        messages = self._expand_messages_sync(request.messages)
+        if _reads_images(request.model):
+            messages = self._expand_messages_sync(request.messages)
+        else:
+            messages = self._path_hint_messages(request.messages)
         return handler(request.override(messages=messages))
 
     async def awrap_model_call(
@@ -41,7 +53,10 @@ class WorkspaceImageMaterializeMiddleware(AgentMiddleware[Any, Any]):
         request: ModelRequest[Any],
         handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
     ) -> ModelResponse[Any]:
-        messages = await self._expand_messages(request.messages)
+        if _reads_images(request.model):
+            messages = await self._expand_messages(request.messages)
+        else:
+            messages = self._path_hint_messages(request.messages)
         return await handler(request.override(messages=messages))
 
     def _expand_messages_sync(self, messages: Sequence[Any]) -> list[Any]:
@@ -81,6 +96,26 @@ class WorkspaceImageMaterializeMiddleware(AgentMiddleware[Any, Any]):
                     )
                 else:
                     new_blocks.append(block)
+            out.append(msg.model_copy(update={"content": new_blocks}))
+        return out
+
+    def _path_hint_messages(self, messages: Sequence[Any]) -> list[Any]:
+        out: list[Any] = []
+        for msg in messages:
+            content = getattr(msg, "content", None)
+            if not isinstance(content, list) or not any(
+                is_workspace_image_ref(block) for block in content if isinstance(block, dict)
+            ):
+                out.append(msg)
+                continue
+            new_blocks: list[Any] = [
+                (
+                    workspace_image_ref_as_path_hint(block, workspace=self._workspace)
+                    if isinstance(block, dict) and is_workspace_image_ref(block)
+                    else block
+                )
+                for block in content
+            ]
             out.append(msg.model_copy(update={"content": new_blocks}))
         return out
 

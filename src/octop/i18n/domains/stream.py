@@ -54,6 +54,26 @@ _RETRY_WRAPPER_RE = re.compile(
 )
 _TECHNICAL_DETAIL_RE = re.compile(r"(?is)technical detail:\s*(.+)$")
 
+# A gateway or bot check can answer with a whole web page instead of an API error; one
+# such page echoed a request with two screenshots (2.4 MB). The failure prompt is kept in
+# the conversation, so every later turn of that thread overflowed the context window.
+_DETAIL_LIMIT = 2000
+_HTML_START_RE = re.compile(r"(?i)<\s*(?:!doctype\s+html|html)\b")
+_HTML_TITLE_RE = re.compile(r"(?is)<title[^>]*>(.*?)</title>")
+
+
+def _compact_detail(detail: str) -> str:
+    """Replace a web page with a one-line note and cap the rest at ``_DETAIL_LIMIT``."""
+    page = _HTML_START_RE.search(detail)
+    if page:
+        title = _HTML_TITLE_RE.search(detail, page.start())
+        named = f" titled {' '.join(title.group(1).split())!r}" if title else ""
+        note = f"an HTML page{named} ({len(detail) - page.start()} characters) instead of an API response"
+        detail = f"{detail[: page.start()].rstrip()} {note}".strip()
+    if len(detail) > _DETAIL_LIMIT:
+        detail = f"{detail[:_DETAIL_LIMIT]}… ({len(detail)} characters in all)"
+    return detail
+
 
 def _normalize_message(message: str) -> str:
     msg = message.strip()
@@ -242,7 +262,9 @@ def format_stream_error(exc: BaseException | str, locale: str | Locale = "en") -
     if _looks_like_send_file_tool_error(message) or _looks_like_send_file_tool_error(inner):
         return message if _looks_like_send_file_tool_error(message) else inner
     if inner:
-        return _format_template("stream_errors.model_call_failed_detail", locale, detail=inner)
+        return _format_template(
+            "stream_errors.model_call_failed_detail", locale, detail=_compact_detail(inner)
+        )
     return tr(MODEL_CALL_FAILED.removeprefix(_PREFIX), locale)
 
 
@@ -252,8 +274,9 @@ def model_retry_failure_prompt(exc: Exception, locale: str | Locale = "en") -> s
     Used as ``ModelRetryMiddleware.on_failure`` so the agent continues with a
     specific cause instead of raising a generic retry-exhausted exception.
     """
-    detail = unwrap_model_retry_message(exception_display_message(exc))
-    classified = classify_stream_error_message(detail)
+    raw = unwrap_model_retry_message(exception_display_message(exc))
+    classified = classify_stream_error_message(raw)
+    detail = _compact_detail(raw)
     if classified is not None:
         guidance = tr(classified.removeprefix(_PREFIX), locale)
     else:

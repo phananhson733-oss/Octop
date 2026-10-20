@@ -198,6 +198,41 @@ def test_model_retry_failure_prompt_is_specific_and_model_visible() -> None:
     assert "Do not pretend the task succeeded" in prompt
 
 
+def _challenge_page() -> str:
+    script = "x" * 3_000_000
+    return f"<html><head><title>Just a moment...</title></head><body><script>{script}</script></body></html>"
+
+
+def test_model_retry_failure_prompt_replaces_a_web_page_with_a_short_note() -> None:
+    prompt = model_retry_failure_prompt(RuntimeError(_challenge_page()), "en")
+    assert prompt.startswith(MODEL_RETRY_FAILURE_MARK)
+    assert len(prompt) < 2000
+    assert "an HTML page titled 'Just a moment...'" in prompt
+    assert "<html>" not in prompt
+    assert "HTML page" in unwrap_model_retry_message(prompt)
+
+
+def test_model_retry_failure_prompt_caps_a_long_plain_error() -> None:
+    prompt = model_retry_failure_prompt(RuntimeError("Error code: 500 - " + "y" * 50_000), "en")
+    assert len(prompt) < 5000
+    assert "characters in all" in prompt
+
+
+def test_model_retry_failure_prompt_still_classifies_before_shortening() -> None:
+    long_tail = "z" * 10_000
+    prompt = model_retry_failure_prompt(
+        RuntimeError(f"Error code: 400 - {long_tail} maximum context length is 128000 tokens"), "en"
+    )
+    assert "context" in prompt.lower()
+    assert len(prompt) < 6000
+
+
+def test_format_stream_error_shortens_a_web_page() -> None:
+    text = format_stream_error(RuntimeError(_challenge_page()), "zh")
+    assert len(text) < 500
+    assert "<html>" not in text
+
+
 def test_exception_display_message_empty_falls_back_to_type() -> None:
     assert exception_display_message(TimeoutError()) == "TimeoutError"
     assert exception_display_message(RuntimeError()) == "RuntimeError"
