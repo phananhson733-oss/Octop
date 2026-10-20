@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 
 from octop.infra.agents.providers import KIND_TO_PROTOCOL
+from octop.infra.agents.providers.codex_chat import build_codex_chat_model, is_codex_base_url
 from octop.infra.agents.providers.opencode_session import ensure_opencode_session_header
 
 logger = logging.getLogger(__name__)
@@ -35,10 +36,6 @@ def provider_headers(row: Any) -> dict[str, str]:
     return dict(headers) if isinstance(headers, dict) else {}
 
 
-def _is_codex_base_url(base_url: str | None) -> bool:
-    return bool(base_url and "chatgpt.com/backend-api/codex" in base_url)
-
-
 def build_probe_chat_model(row: Any, *, model_id: str | None = None) -> Any:
     """Construct a chat model from a provider row for probing."""
     from octop_harness.config import ModelConfig, ProviderConfig
@@ -53,18 +50,11 @@ def build_probe_chat_model(row: Any, *, model_id: str | None = None) -> Any:
     display_name = (entry or {}).get("name") or mid
     model = ModelConfig(id=mid, name=display_name)
 
-    if _is_codex_base_url(base_url):
-        from langchain_openai import ChatOpenAI
-
-        kwargs: dict[str, Any] = {
-            "model": model.id,
-            "base_url": base_url,
-            "api_key": row.api_key or "",
-            "use_responses_api": True,
-        }
-        if headers:
-            kwargs["default_headers"] = dict(headers)
-        return ChatOpenAI(**kwargs)
+    if is_codex_base_url(base_url):
+        # Same client as real chats, so the connection test means the same thing
+        return build_codex_chat_model(
+            model_id=model.id, base_url=base_url, api_key=row.api_key or "", headers=headers
+        )
 
     provider = ProviderConfig(
         id=row.name,

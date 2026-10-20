@@ -496,7 +496,11 @@ class AgentManager:
         return self._teams
 
     async def boot(self) -> None:
+        from octop.infra.agents.providers.codex_chat import install_codex_chat_builder
+
         self._tool_guard_rules.ensure_seeded()
+        # Before any model is built: ChatGPT-login models need the Responses API
+        install_codex_chat_builder()
         providers = self._providers.build_harness_configs()
         self._harness_manager = HarnessAgentManager(
             providers=providers,
