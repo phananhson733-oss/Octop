@@ -269,7 +269,12 @@ async def create_user_role(
     return _public(server, row)
 
 
-@router.patch("/{user_role_id}", summary="Update a role template")
+@router.patch(
+    "/{user_role_id}",
+    summary="Update a role template",
+    description="Permission keys added or removed here also reach the accounts already in the "
+    "role; keys an account holds apart from the role stay.",
+)
 async def patch_user_role(
     user_role_id: str,
     body: UserRolePatchBody,
@@ -335,6 +340,10 @@ async def patch_user_role(
         action="user_role.update",
         target=updated.user_role_name,
     )
+    if permissions is not None:
+        await server.user_manager.apply_role_permission_change(
+            user_role_id, current.permissions, updated.permissions
+        )
     payload = _public(server, updated)
     # A newly named template also reaches the accounts already in the role.
     expert = payload["default_published_expert"]

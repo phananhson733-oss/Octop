@@ -5421,7 +5421,7 @@
     "roleEmpty": "No roles yet",
     "roleBuiltin": "Built-in",
     "roleAdminLocked": "The administrator role has every permission and no resource limits. You can rename it. You cannot delete it or change its permissions or policies.",
-    "roleTemplateHint": "A role only supplies defaults for create, edit, and invite. Changing a role does not rewrite existing users.",
+    "roleTemplateHint": "A role supplies defaults for create, edit, and invite. Permissions ticked or cleared here also reach the accounts already in the role; permissions an account holds apart from the role stay.",
     "roleCustomHint": "A custom role supplies permissions and resource policy. Set the account type on the user.",
     "roleVisibleNav": "Limit visible pages",
     "roleVisibleNavHint": "When on, accounts in this role see only Chat and the pages selected below in the sidebar, and other pages cannot be opened by URL. Experts, skills and knowledge bases still work inside Chat. Changes apply at once to every account in the role. Administrators are never limited.",

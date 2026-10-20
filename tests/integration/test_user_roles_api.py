@@ -70,7 +70,8 @@ async def test_builtin_roles_invite_reads_role_at_redeem(env):
     assert renamed.status_code == 200, renamed.text
     kept = await c.get(f"/api/users/{uid}", headers=auth)
     assert kept.json()["role_name"] == "分析师"
-    assert kept.json()["permissions"] == ["browser"]
+    # Permission edits reach the accounts in the role; their name and quota stay.
+    assert kept.json()["permissions"] == ["desktop"]
     assert kept.json()["token_quota"] == 1000
 
     # Still assigned — delete must be refused.
@@ -277,6 +278,57 @@ async def test_role_visible_nav_limits_its_accounts(env):
     assert opened.json()["visible_nav"] is None
     me = await c.get("/api/auth/me", headers=dora)
     assert me.json()["visible_nav"] is None
+
+
+async def test_role_permission_edits_reach_its_accounts(env):
+    c, _srv, auth = env
+    created = await c.post(
+        "/api/users/roles",
+        headers=auth,
+        json={"user_role_name": "选剧", "permissions": ["knowledge_bases"]},
+    )
+    role_id = created.json()["user_role_id"]
+    for name in ("erin", "fay"):
+        made = await c.post(
+            "/api/users",
+            headers=auth,
+            json={"username": name, "password": TEST_PASSWORD, "role": role_id},
+        )
+        assert made.status_code == 201, made.text
+    fay_id = made.json()["id"]
+    # fay also holds a key the role does not give.
+    extra = await c.patch(
+        f"/api/users/{fay_id}", headers=auth, json={"permissions": ["knowledge_bases", "channels"]}
+    )
+    assert extra.status_code == 200, extra.text
+    outsider = await c.post(
+        "/api/users",
+        headers=auth,
+        json={"username": "gus", "password": TEST_PASSWORD, "role": "user"},
+    )
+    assert outsider.status_code == 201, outsider.text
+    erin = bearer(await login(c, username="erin", password=TEST_PASSWORD))
+    fay = bearer(await login(c, username="fay", password=TEST_PASSWORD))
+    gus = bearer(await login(c, username="gus", password=TEST_PASSWORD))
+    assert (await c.get("/api/seo/projects", headers=erin)).status_code == 403
+
+    added = await c.patch(
+        f"/api/users/roles/{role_id}",
+        headers=auth,
+        json={"permissions": ["knowledge_bases", "seo"]},
+    )
+    assert added.status_code == 200, added.text
+    # Signed-in accounts get the new key without logging in again.
+    assert (await c.get("/api/seo/projects", headers=erin)).status_code == 200
+    assert "seo" in (await c.get("/api/auth/me", headers=erin)).json()["permissions"]
+    assert "seo" not in (await c.get("/api/auth/me", headers=gus)).json()["permissions"]
+
+    await c.patch(f"/api/users/roles/{role_id}", headers=auth, json={"permissions": ["seo"]})
+    assert sorted((await c.get("/api/auth/me", headers=fay)).json()["permissions"]) == [
+        "channels",
+        "seo",
+    ]
+    assert (await c.get("/api/auth/me", headers=erin)).json()["permissions"] == ["seo"]
 
 
 async def test_role_hidden_expert_tabs_reach_its_accounts(env):

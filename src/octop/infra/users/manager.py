@@ -559,6 +559,28 @@ class UserManager:
             payload=",".join(keys),
         )
 
+    async def apply_role_permission_change(
+        self, role_id: str, before: builtins.list[str], after: builtins.list[str]
+    ) -> int:
+        """Give the accounts in ``role_id`` the keys a role edit added and take the removed ones.
+
+        Keys an account holds apart from the role stay. Returns how many accounts changed.
+        """
+        added = [key for key in after if key not in before]
+        removed = set(before) - set(after)
+        if not added and not removed:
+            return 0
+        changed = 0
+        for row in self._services.user_repo.list(include_disabled=True):
+            if str(row.role) != role_id:
+                continue
+            keys = [key for key in row.permissions if key not in removed]
+            keys += [key for key in added if key not in keys]
+            if keys != list(row.permissions):
+                await self.set_permissions(row.username, keys)
+                changed += 1
+        return changed
+
     async def set_resource_policy(
         self,
         username: str,
