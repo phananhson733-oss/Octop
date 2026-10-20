@@ -6752,6 +6752,7 @@
     "gscConnect": "Connect a Google account",
     "gscConnectAnother": "Connect another Google account",
     "gscConnectHelp": "Read-only access to Search Console and Analytics; nothing is changed.",
+    "gscAdminConnects": "Search Console data shows here once an admin connects a Google account.",
     "gscConnected": "Google account connected.",
     "gscConnectFirst": "Connect a Google account with Search Console access to this site first.",
     "gscDisconnect": "Disconnect",

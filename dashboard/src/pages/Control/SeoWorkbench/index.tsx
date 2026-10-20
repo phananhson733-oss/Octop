@@ -62,6 +62,8 @@ export default function SeoWorkbench({
   const [query, setQuery] = useSearchParams();
   const requestedProject = query.get("project");
   const user = useCurrentUser();
+  // Other accounts with SEO access share the admin's projects but do not set them up.
+  const isAdmin = user?.role === "admin";
   const [projects, setProjects] = useState<SeoProject[]>([]);
   const [projectId, setProjectId] = useState<string>();
   const [configured, setConfigured] = useState(false);
@@ -159,12 +161,16 @@ export default function SeoWorkbench({
               label: `${p.name} · ${p.domain}`,
             }))}
           />
-          <Button onClick={() => setDialog("project")}>
-            {t("seo.createProject")}
-          </Button>
-          <Button onClick={() => setDialog("provider")}>
-            {t("seo.provider")}
-          </Button>
+          {isAdmin && (
+            <>
+              <Button onClick={() => setDialog("project")}>
+                {t("seo.createProject")}
+              </Button>
+              <Button onClick={() => setDialog("provider")}>
+                {t("seo.provider")}
+              </Button>
+            </>
+          )}
           <Tag color={configured ? "green" : "default"}>
             {t(configured ? "seo.configured" : "seo.notConfigured")}
           </Tag>
@@ -175,6 +181,7 @@ export default function SeoWorkbench({
             project={project}
             configured={configured}
             isVisible={isVisible}
+            isAdmin={isAdmin}
             agents={owned}
             onProject={(updated) =>
               setProjects((list) =>
@@ -290,12 +297,15 @@ function ProjectWorkspace({
   project,
   configured,
   isVisible,
+  isAdmin,
   agents,
   onProject,
 }: {
   project: SeoProject;
   configured: boolean;
   isVisible: boolean;
+  /** Binding and report generation need the bound expert, which only its admin owner reaches. */
+  isAdmin: boolean;
   agents: { agent_id: string; name: string }[];
   onProject: (updated: SeoProject) => void;
 }) {
@@ -632,26 +642,28 @@ function ProjectWorkspace({
           showIcon
           message={t("seo.unbound")}
           description={
-            <div className={styles.toolbar}>
-              <Select
-                aria-label={t("seo.agent")}
-                className={styles.projectSelect}
-                value={bindTo}
-                onChange={setBindTo}
-                placeholder={t("seo.agent")}
-                options={agents.map((a) => ({
-                  value: a.agent_id,
-                  label: a.name,
-                }))}
-              />
-              <Button
-                disabled={!bindTo || !!busy}
-                loading={busy === "bind"}
-                onClick={bind}
-              >
-                {t("seo.bindAgent")}
-              </Button>
-            </div>
+            isAdmin && (
+              <div className={styles.toolbar}>
+                <Select
+                  aria-label={t("seo.agent")}
+                  className={styles.projectSelect}
+                  value={bindTo}
+                  onChange={setBindTo}
+                  placeholder={t("seo.agent")}
+                  options={agents.map((a) => ({
+                    value: a.agent_id,
+                    label: a.name,
+                  }))}
+                />
+                <Button
+                  disabled={!bindTo || !!busy}
+                  loading={busy === "bind"}
+                  onClick={bind}
+                >
+                  {t("seo.bindAgent")}
+                </Button>
+              </div>
+            )
           }
         />
       )}
@@ -897,15 +909,19 @@ function ProjectWorkspace({
                       >
                         {t("seo.saveKeywords", { count: selected.length })}
                       </Button>
-                      <Button
-                        disabled={!!busy || !runHasRows || !project.agent_id}
-                        loading={busy === "report"}
-                        onClick={generateReport}
-                      >
-                        {t("seo.generateReport")}
-                      </Button>
+                      {isAdmin && (
+                        <Button
+                          disabled={!!busy || !runHasRows || !project.agent_id}
+                          loading={busy === "report"}
+                          onClick={generateReport}
+                        >
+                          {t("seo.generateReport")}
+                        </Button>
+                      )}
                     </div>
-                    <Text type="secondary">{t("seo.reportHelp")}</Text>
+                    {isAdmin && (
+                      <Text type="secondary">{t("seo.reportHelp")}</Text>
+                    )}
                   </>
                 )}
               </div>

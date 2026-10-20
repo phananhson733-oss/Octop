@@ -47,7 +47,7 @@ from octop.infra.seo.provider import (
     interleave,
     normalize_keyword,
 )
-from octop.infra.users.identity import Role
+from octop.infra.users.identity import Role, User
 from octop.infra.utils.ulid import new_ulid
 
 
@@ -225,11 +225,23 @@ class SeoService:
         self.repos = repos
         self.repo = repos.seo_repo
 
+    async def workspace_user_id(self, user: User) -> int:
+        """Whose SEO data ``user`` works in.
+
+        Projects, provider credentials and Google grants are stored per admin. An admin works
+        in its own; an account holding the ``seo`` permission shares the first admin's.
+        """
+        if user.is_admin:
+            return user.id
+        admins = [row.id for row in await _db(self.repos.user_repo.list) if row.role == Role.ADMIN]
+        return min(admins, default=user.id)
+
     async def list_projects(self, user_id: int) -> list[dict[str, Any]]:
         return await _db(self.repo.projects, user_id)
 
     async def _project(self, user_id: int, project_id: str) -> dict[str, Any]:
-        # SEO is admin-only. HTTP checks it too; Agent tools only come through here.
+        # SEO data lives under admins (see workspace_user_id). HTTP checks the seo permission;
+        # Agent tools only come through here.
         user = await _db(self.repos.user_repo.get, user_id)
         if user is None or user.role != Role.ADMIN:
             raise _error(ErrorCode.FORBIDDEN)

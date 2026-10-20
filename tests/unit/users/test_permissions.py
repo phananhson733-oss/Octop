@@ -64,6 +64,7 @@ def test_categories_match_nav_groups() -> None:
     assert {k for k, p in PERMISSIONS.items() if p.category == "control"} == {
         "terminal",
         "browser",
+        "seo",
         "desktop",
         "mobile",
     }

@@ -7,8 +7,8 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, Field
 
-from octop.api.deps import current_user, require_admin
-from octop.api.routers.seo import seo_service
+from octop.api.deps import require_permission
+from octop.api.routers.seo import seo_owner, seo_service
 from octop.infra.seo.models import (
     RankCheckCreate,
     RankKeywordsAdd,
@@ -17,10 +17,9 @@ from octop.infra.seo.models import (
 )
 from octop.infra.seo.rank import SeoRankService
 from octop.infra.seo.service import SeoService
-from octop.infra.users.identity import User
 from octop.infra.utils.locale import resolve_request_locale
 
-router = APIRouter(dependencies=[Depends(require_admin())])
+router = APIRouter(dependencies=[Depends(require_permission("seo"))])
 
 
 def rank_service(service: SeoService = Depends(seo_service)) -> SeoRankService:
@@ -116,10 +115,10 @@ _TRACKER = "/projects/{project_id}/rank-trackers/{tracker_id}"
 )
 async def rank_trackers(
     project_id: str,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoRankService = Depends(rank_service),
 ) -> Any:
-    return await service.list_trackers(user.id, project_id)
+    return await service.list_trackers(owner, project_id)
 
 
 @router.post(
@@ -133,11 +132,11 @@ async def create_rank_tracker(
     project_id: str,
     body: RankTrackerCreate,
     request: Request,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoRankService = Depends(rank_service),
 ) -> Any:
     return await service.create_tracker(
-        user.id, project_id, locale=resolve_request_locale(request), **body.model_dump()
+        owner, project_id, locale=resolve_request_locale(request), **body.model_dump()
     )
 
 
@@ -152,10 +151,10 @@ async def rank_results(
     project_id: str,
     tracker_id: str,
     compare: Literal["1d", "7d", "30d", "90d"] = Query(default="7d"),
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoRankService = Depends(rank_service),
 ) -> Any:
-    return await service.results(user.id, project_id, tracker_id, compare=compare)
+    return await service.results(owner, project_id, tracker_id, compare=compare)
 
 
 @router.patch(
@@ -167,11 +166,11 @@ async def update_rank_tracker(
     project_id: str,
     tracker_id: str,
     body: RankTrackerUpdate,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoRankService = Depends(rank_service),
 ) -> Any:
     return await service.update_tracker(
-        user.id, project_id, tracker_id, **body.model_dump(exclude_none=True)
+        owner, project_id, tracker_id, **body.model_dump(exclude_none=True)
     )
 
 
@@ -185,11 +184,11 @@ async def delete_rank_tracker(
     project_id: str,
     tracker_id: str,
     request: Request,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoRankService = Depends(rank_service),
 ) -> Response:
     await service.delete_tracker(
-        user.id, project_id, tracker_id, locale=resolve_request_locale(request)
+        owner, project_id, tracker_id, locale=resolve_request_locale(request)
     )
     return Response(status_code=204)
 
@@ -204,11 +203,11 @@ async def add_rank_keywords(
     tracker_id: str,
     body: RankKeywordsAdd,
     request: Request,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoRankService = Depends(rank_service),
 ) -> Any:
     return await service.add_keywords(
-        user.id,
+        owner,
         project_id,
         tracker_id,
         locale=resolve_request_locale(request),
@@ -226,10 +225,10 @@ async def remove_rank_keyword(
     project_id: str,
     tracker_id: str,
     keyword_id: str,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoRankService = Depends(rank_service),
 ) -> Response:
-    await service.remove_keyword(user.id, project_id, tracker_id, keyword_id)
+    await service.remove_keyword(owner, project_id, tracker_id, keyword_id)
     return Response(status_code=204)
 
 
@@ -243,10 +242,10 @@ async def rank_history(
     project_id: str,
     tracker_id: str,
     keyword_id: str,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoRankService = Depends(rank_service),
 ) -> Any:
-    return await service.history(user.id, project_id, tracker_id, keyword_id)
+    return await service.history(owner, project_id, tracker_id, keyword_id)
 
 
 @router.post(
@@ -264,11 +263,11 @@ async def start_rank_check(
     tracker_id: str,
     body: RankCheckCreate,
     request: Request,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoRankService = Depends(rank_service),
 ) -> Any:
     return await service.start_check(
-        user.id,
+        owner,
         project_id,
         tracker_id,
         locale=resolve_request_locale(request),

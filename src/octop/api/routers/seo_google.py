@@ -9,8 +9,8 @@ from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 
 from octop.api.common.public_base import resolve_public_base
-from octop.api.deps import current_user, get_server, require_admin
-from octop.api.routers.seo import seo_service
+from octop.api.deps import get_server, require_admin, require_permission
+from octop.api.routers.seo import seo_owner, seo_service
 from octop.infra.seo.google.service import SeoGoogleService
 from octop.infra.seo.models import (
     Ga4Bind,
@@ -26,7 +26,7 @@ from octop.infra.seo.service import SeoService
 from octop.infra.server import OctopServer
 from octop.infra.users.identity import User
 
-router = APIRouter(dependencies=[Depends(require_admin())])
+router = APIRouter(dependencies=[Depends(require_permission("seo"))])
 # Google's redirect after consent carries no JWT; the state it brings back names the admin.
 callback_router = APIRouter()
 
@@ -270,10 +270,10 @@ class Ga4ReportResult(BaseModel):
 @router.get("/google", response_model=GoogleStatus, summary="Google sign-in status")
 async def google_status(
     request: Request,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoGoogleService = Depends(google_service),
 ) -> Any:
-    return await service.status(user.id, resolve_public_base(request))
+    return await service.status(owner, resolve_public_base(request))
 
 
 @router.post(
@@ -286,7 +286,7 @@ async def google_status(
 async def google_connect(
     request: Request,
     body: GoogleConnect,
-    user: User = Depends(current_user),
+    user: User = Depends(require_admin()),
     service: SeoGoogleService = Depends(google_service),
 ) -> Any:
     return await service.start(user.id, resolve_public_base(request), body.return_path)
@@ -300,7 +300,7 @@ async def google_connect(
 )
 async def google_disconnect(
     grant_id: str,
-    user: User = Depends(current_user),
+    user: User = Depends(require_admin()),
     service: SeoGoogleService = Depends(google_service),
 ) -> Response:
     await service.delete_account(user.id, grant_id)
@@ -332,10 +332,10 @@ async def google_callback(
 )
 async def gsc_connection(
     project_id: str,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoGoogleService = Depends(google_service),
 ) -> Any:
-    return {"connection": await service.gsc_connection(user.id, project_id)}
+    return {"connection": await service.gsc_connection(owner, project_id)}
 
 
 @router.get(
@@ -345,10 +345,10 @@ async def gsc_connection(
 )
 async def gsc_sites(
     project_id: str,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoGoogleService = Depends(google_service),
 ) -> Any:
-    return await service.gsc_sites(user.id, project_id)
+    return await service.gsc_sites(owner, project_id)
 
 
 @router.put(
@@ -360,10 +360,10 @@ async def gsc_sites(
 async def gsc_bind(
     project_id: str,
     body: GscBind,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoGoogleService = Depends(google_service),
 ) -> Any:
-    return await service.gsc_bind(user.id, project_id, **body.model_dump())
+    return await service.gsc_bind(owner, project_id, **body.model_dump())
 
 
 @router.delete(
@@ -371,10 +371,10 @@ async def gsc_bind(
 )
 async def gsc_unbind(
     project_id: str,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoGoogleService = Depends(google_service),
 ) -> Response:
-    await service.gsc_unbind(user.id, project_id)
+    await service.gsc_unbind(owner, project_id)
     return Response(status_code=204)
 
 
@@ -388,10 +388,10 @@ async def gsc_unbind(
 async def gsc_report(
     project_id: str,
     body: GscReportQuery,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoGoogleService = Depends(google_service),
 ) -> Any:
-    return await service.gsc_report(user.id, project_id, **body.model_dump())
+    return await service.gsc_report(owner, project_id, **body.model_dump())
 
 
 @router.post(
@@ -402,10 +402,10 @@ async def gsc_report(
 async def gsc_table(
     project_id: str,
     body: GscTableQuery,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoGoogleService = Depends(google_service),
 ) -> Any:
-    return await service.gsc_table(user.id, project_id, **body.model_dump())
+    return await service.gsc_table(owner, project_id, **body.model_dump())
 
 
 @router.post(
@@ -418,10 +418,10 @@ async def gsc_table(
 async def gsc_inspect(
     project_id: str,
     body: GscInspect,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoGoogleService = Depends(google_service),
 ) -> Any:
-    return await service.gsc_inspect(user.id, project_id, **body.model_dump())
+    return await service.gsc_inspect(owner, project_id, **body.model_dump())
 
 
 @router.get(
@@ -431,10 +431,10 @@ async def gsc_inspect(
 )
 async def ga4_connection(
     project_id: str,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoGoogleService = Depends(google_service),
 ) -> Any:
-    return {"connection": await service.ga4_connection(user.id, project_id)}
+    return {"connection": await service.ga4_connection(owner, project_id)}
 
 
 @router.get(
@@ -444,10 +444,10 @@ async def ga4_connection(
 )
 async def ga4_properties(
     project_id: str,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoGoogleService = Depends(google_service),
 ) -> Any:
-    return await service.ga4_properties(user.id, project_id)
+    return await service.ga4_properties(owner, project_id)
 
 
 @router.put(
@@ -460,10 +460,10 @@ async def ga4_properties(
 async def ga4_bind(
     project_id: str,
     body: Ga4Bind,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoGoogleService = Depends(google_service),
 ) -> Any:
-    return await service.ga4_bind(user.id, project_id, **body.model_dump())
+    return await service.ga4_bind(owner, project_id, **body.model_dump())
 
 
 @router.delete(
@@ -471,10 +471,10 @@ async def ga4_bind(
 )
 async def ga4_unbind(
     project_id: str,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoGoogleService = Depends(google_service),
 ) -> Response:
-    await service.ga4_unbind(user.id, project_id)
+    await service.ga4_unbind(owner, project_id)
     return Response(status_code=204)
 
 
@@ -489,10 +489,10 @@ async def ga4_unbind(
 async def ga4_overview(
     project_id: str,
     body: Ga4Overview,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoGoogleService = Depends(google_service),
 ) -> Any:
-    return await service.ga4_overview(user.id, project_id, **body.model_dump())
+    return await service.ga4_overview(owner, project_id, **body.model_dump())
 
 
 @router.post(
@@ -506,7 +506,7 @@ async def ga4_overview(
 async def ga4_report(
     project_id: str,
     body: Ga4Report,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoGoogleService = Depends(google_service),
 ) -> Any:
-    return await service.ga4_report(user.id, project_id, **body.model_dump())
+    return await service.ga4_report(owner, project_id, **body.model_dump())

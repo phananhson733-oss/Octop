@@ -68,13 +68,13 @@ function addBoard() {
   });
 }
 
-function addAdminPage() {
+function addSeoPage() {
   registerWorkbenchPage({
     id: "main",
     pluginId: "seo-workbench",
     title: "SEO",
     component: () => <div>seo page</div>,
-    adminOnly: true,
+    permission: "seo",
   });
 }
 
@@ -159,10 +159,10 @@ describe("Workbench with plugin pages", () => {
   });
 });
 
-describe("Workbench with an admin-only page", () => {
-  it("refuses its URL to a non-admin account", () => {
+describe("Workbench with a permission-gated page", () => {
+  it("refuses its URL to an account without the permission", () => {
     addBoard();
-    addAdminPage();
+    addSeoPage();
     setPluginUisSettled(true);
     renderAt("/workbench/seo-workbench.main", member);
 
@@ -170,17 +170,17 @@ describe("Workbench with an admin-only page", () => {
     expect(screen.queryByText("seo page")).not.toBeInTheDocument();
   });
 
-  it("does not open the workbench to a non-admin account on its own", () => {
-    addAdminPage();
+  it("does not open the workbench to an account without the permission on its own", () => {
+    addSeoPage();
     setPluginUisSettled(true);
     renderAt("/workbench", member);
 
     expect(screen.getByText("forbidden")).toBeInTheDocument();
   });
 
-  it("leaves it out of a non-admin account's tabs", async () => {
+  it("leaves it out of the tabs of an account without the permission", async () => {
     addBoard();
-    addAdminPage();
+    addSeoPage();
     setPluginUisSettled(true);
     renderAt("/workbench", { role: "01ROLE", permissions: ["terminal"] });
 
@@ -190,8 +190,23 @@ describe("Workbench with an admin-only page", () => {
     );
   });
 
+  it("shows it to an account holding the permission", async () => {
+    addBoard();
+    addSeoPage();
+    setPluginUisSettled(true);
+    renderAt("/workbench/seo-workbench.main", {
+      role: "01ROLE",
+      permissions: ["seo"],
+    });
+
+    expect(await screen.findByText("seo page")).toBeInTheDocument();
+    expect(screen.getByRole("navigation")).toHaveTextContent(
+      "pick.board,seo-workbench.main",
+    );
+  });
+
   it("shows it to an admin", async () => {
-    addAdminPage();
+    addSeoPage();
     setPluginUisSettled(true);
     renderAt("/workbench/seo-workbench.main", admin);
 

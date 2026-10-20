@@ -99,8 +99,12 @@ vi.mock("../../../context/AgentContext", () => ({
     agents: [{ agent_id: "agent-one", name: "My SEO", is_owner: true }],
   }),
 }));
+const admin = { id: 1, role: "admin" };
+const currentUser = vi.hoisted(() => ({
+  value: { id: 1, role: "admin" } as { id: number; role: string },
+}));
 vi.mock("../../../hooks/useCurrentUser", () => ({
-  useCurrentUser: () => ({ id: 1 }),
+  useCurrentUser: () => currentUser.value,
 }));
 vi.mock("../../../hooks/useServerTimezone", () => ({
   useServerTimezone: () => "UTC",
@@ -174,6 +178,7 @@ beforeEach(() => {
   );
   vi.clearAllMocks();
   window.sessionStorage.clear();
+  currentUser.value = admin;
   vi.mocked(seoApi.projects).mockResolvedValue([project]);
   vi.mocked(seoApi.provider).mockResolvedValue({ configured: true });
   vi.mocked(seoApi.runs).mockResolvedValue([]);
@@ -214,6 +219,20 @@ async function startResearch() {
   });
 }
 describe("SEO native workflow", () => {
+  it("lets an account with SEO access research the admin's project without its setup controls", async () => {
+    currentUser.value = { id: 2, role: "01ROLE" };
+    setup();
+    await startResearch();
+    expect(await screen.findByText("zero volume")).toBeVisible();
+    expect(seoApi.research).toHaveBeenCalled();
+    for (const name of [
+      "seo.createProject",
+      "seo.provider",
+      "seo.generateReport",
+    ]) {
+      expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
+    }
+  });
   it("only queries on explicit consent and submission; saves selected evidence then opens report chat", async () => {
     setup();
     await screen.findByLabelText("seo.seeds");
@@ -871,6 +890,18 @@ describe("search performance", () => {
       ],
     });
   });
+  it("leaves Google accounts to the admin for an account with SEO access", async () => {
+    currentUser.value = { id: 2, role: "01ROLE" };
+    setup("/workbench/seo-workbench.main?project=p1&view=search");
+    expect(await screen.findByText("owner@example.com")).toBeVisible();
+    expect(
+      screen.queryByRole("button", { name: "seo.gscDisconnect" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "seo.gscConnectAnother" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("binds a verified property, then reads totals, queries and striking distance", async () => {
     setup("/workbench/seo-workbench.main?project=p1&view=search");
     const picker = await screen.findByRole("combobox", {

@@ -56,6 +56,7 @@ PERMISSIONS: dict[str, PermissionDef] = {
     # --- control (nav.control) — page/tab labels ---
     "terminal": _p("terminal", "control", "工作台/终端", "Workbench / Terminal"),
     "browser": _p("browser", "control", "工作台/浏览器", "Workbench / Browser"),
+    "seo": _p("seo", "control", "工作台/SEO", "Workbench / SEO"),
     "desktop": _p("desktop", "control", "远程桌面", "Remote Desktop"),
     "mobile": _p("mobile", "control", "远程手机", "Remote Phone"),
     # --- admin: grouped by page, chip = tab title ---

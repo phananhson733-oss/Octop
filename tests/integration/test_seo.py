@@ -57,7 +57,7 @@ async def test_private_keyword_and_report_workflow(env_with_agent, monkeypatch):
     project_id = created.json()["project_id"]
     base = f"/api/seo/projects/{project_id}"
     other = await create_user(client, auth, username="seo-other")
-    # SEO is admin-only: an ordinary account is refused before any project lookup.
+    # Without the seo permission an account is refused before any project lookup.
     assert (await client.get("/api/seo/projects", headers=other)).status_code == 403
     assert (await client.get(base + "/keywords", headers=other)).status_code == 403
     assert (
@@ -827,3 +827,62 @@ async def test_ai_visibility_over_http(env_with_agent, monkeypatch):
         (ai_path + "/checks", "post"),
     ]:
         assert paths[route][method]["summary"], route
+
+
+async def test_seo_permission_shares_the_admin_workspace(env_with_agent, monkeypatch):
+    import octop.infra.seo.service as module
+
+    client, _server, auth, agent_id = env_with_agent
+    calls = []
+
+    def supplier(request):
+        calls.append(json.loads(request.content))
+        item = {"keyword": "example seo", "keyword_info": {"search_volume": 120}}
+        task = {"status_code": 20000, "cost": 0.01, "result": [{"items": [item]}]}
+        return httpx.Response(200, json={"status_code": 20000, "tasks": [task]})
+
+    monkeypatch.setattr(
+        module,
+        "DataForSeoClient",
+        functools.partial(DataForSeoClient, transport=httpx.MockTransport(supplier)),
+    )
+    created = await client.post(
+        "/api/seo/projects",
+        headers=auth,
+        json={"name": "Example", "domain": "example.com", "agent_id": agent_id},
+    )
+    project_id = created.json()["project_id"]
+    base = f"/api/seo/projects/{project_id}"
+    await client.put(
+        "/api/seo/provider", headers=auth, json={"login": "fixture", "password": "secret"}
+    )
+    member = await create_user(client, auth, username="seo-member", permissions=["seo"])
+
+    # The member works in the admin's projects, on the admin's provider credentials.
+    listed = (await client.get("/api/seo/projects", headers=member)).json()
+    assert [p["project_id"] for p in listed] == [project_id]
+    assert (await client.get("/api/seo/provider", headers=member)).json() == {"configured": True}
+    request = {
+        "keywords": ["example"],
+        "mode": "ideas",
+        "idempotency_key": "member",
+        "confirm_paid": True,
+    }
+    researched = await client.post(base + "/research", headers=member, json=request)
+    assert researched.status_code == 200, researched.text
+    run_id = researched.json()["run_id"]
+    assert len(calls) == 1
+    assert [r["run_id"] for r in (await client.get(base + "/runs", headers=auth)).json()] == [
+        run_id
+    ]
+
+    # Project setup, provider credentials and Google accounts stay with the admin.
+    for method, path, body in [
+        ("post", "/api/seo/projects", {"name": "X", "domain": "x.com", "agent_id": agent_id}),
+        ("patch", base, {"agent_id": agent_id}),
+        ("put", "/api/seo/provider", {"login": "member", "password": "secret"}),
+        ("post", "/api/seo/google/connect", {}),
+        ("delete", "/api/seo/google/accounts/grant-1", None),
+    ]:
+        kwargs = {"headers": member} | ({"json": body} if body is not None else {})
+        assert (await getattr(client, method)(path, **kwargs)).status_code == 403, path

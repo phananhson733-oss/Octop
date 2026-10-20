@@ -6752,6 +6752,7 @@
     "gscConnect": "连接 Google 账号",
     "gscConnectAnother": "再连接一个 Google 账号",
     "gscConnectHelp": "只读取 Search Console 与 Analytics 数据，不会修改任何内容。",
+    "gscAdminConnects": "管理员连接 Google 账号后，这里就能看到 Search Console 数据。",
     "gscConnected": "Google 账号已连接。",
     "gscConnectFirst": "先连接一个能访问该网站 Search Console 的 Google 账号。",
     "gscDisconnect": "断开",

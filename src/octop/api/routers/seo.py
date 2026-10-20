@@ -7,7 +7,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
-from octop.api.deps import current_user, get_server, require_admin
+from octop.api.deps import current_user, get_server, require_admin, require_permission
 from octop.infra.seo.audit.service import SeoAuditService
 from octop.infra.seo.models import (
     AuditCreate,
@@ -26,7 +26,7 @@ from octop.infra.server import OctopServer
 from octop.infra.users.identity import User
 from octop.infra.utils.locale import resolve_request_locale
 
-router = APIRouter(dependencies=[Depends(require_admin())])
+router = APIRouter(dependencies=[Depends(require_permission("seo"))])
 
 
 class Project(BaseModel):
@@ -410,6 +410,13 @@ def seo_service(server: OctopServer = Depends(get_server)) -> SeoService:
     return SeoService(server.services.repos)
 
 
+async def seo_owner(
+    user: User = Depends(current_user), service: SeoService = Depends(seo_service)
+) -> int:
+    """User id whose SEO data the request works in: an admin's own, otherwise the first admin's."""
+    return await service.workspace_user_id(user)
+
+
 def audit_service(service: SeoService = Depends(seo_service)) -> SeoAuditService:
     return SeoAuditService(service)
 
@@ -420,15 +427,15 @@ def _snapshot(serp: dict[str, Any]) -> dict[str, Any]:
 
 @router.get("/projects", response_model=list[Project], summary="List your SEO projects")
 async def projects(
-    user: User = Depends(current_user), service: SeoService = Depends(seo_service)
+    owner: int = Depends(seo_owner), service: SeoService = Depends(seo_service)
 ) -> Any:
-    return await service.list_projects(user.id)
+    return await service.list_projects(owner)
 
 
 @router.post("/projects", response_model=Project, summary="Create an agent-bound SEO project")
 async def create_project(
     body: ProjectCreate,
-    user: User = Depends(current_user),
+    user: User = Depends(require_admin()),
     service: SeoService = Depends(seo_service),
     server: OctopServer = Depends(get_server),
 ) -> Any:
@@ -448,7 +455,7 @@ async def create_project(
 async def update_project(
     project_id: str,
     body: ProjectUpdate,
-    user: User = Depends(current_user),
+    user: User = Depends(require_admin()),
     service: SeoService = Depends(seo_service),
     server: OctopServer = Depends(get_server),
 ) -> Any:
@@ -461,9 +468,9 @@ async def update_project(
 
 @router.get("/provider", response_model=ProviderStatus, summary="Check SEO provider configuration")
 async def provider(
-    user: User = Depends(current_user), service: SeoService = Depends(seo_service)
+    owner: int = Depends(seo_owner), service: SeoService = Depends(seo_service)
 ) -> Any:
-    return await service.provider_status(user.id)
+    return await service.provider_status(owner)
 
 
 @router.put(
@@ -471,7 +478,7 @@ async def provider(
 )
 async def put_provider(
     body: ProviderPut,
-    user: User = Depends(current_user),
+    user: User = Depends(require_admin()),
     service: SeoService = Depends(seo_service),
 ) -> Any:
     return await service.set_provider(user.id, **body.model_dump())
@@ -486,10 +493,10 @@ async def put_provider(
 async def research(
     project_id: str,
     body: ResearchCreate,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoService = Depends(seo_service),
 ) -> Any:
-    return await service.research(user.id, project_id, **body.model_dump())
+    return await service.research(owner, project_id, **body.model_dump())
 
 
 @router.get(
@@ -500,9 +507,9 @@ async def research(
     "Read one run's rows with the run endpoint.",
 )
 async def runs(
-    project_id: str, user: User = Depends(current_user), service: SeoService = Depends(seo_service)
+    project_id: str, owner: int = Depends(seo_owner), service: SeoService = Depends(seo_service)
 ) -> Any:
-    return await service.list_runs(user.id, project_id)
+    return await service.list_runs(owner, project_id)
 
 
 @router.get(
@@ -513,10 +520,10 @@ async def runs(
 async def run(
     project_id: str,
     run_id: str,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoService = Depends(seo_service),
 ) -> Any:
-    return await service.get_run(user.id, project_id, run_id)
+    return await service.get_run(owner, project_id, run_id)
 
 
 @router.post(
@@ -531,10 +538,10 @@ async def run(
 async def buy_serp(
     project_id: str,
     body: SerpCreate,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoService = Depends(seo_service),
 ) -> Any:
-    return _snapshot(await service.serp(user.id, project_id, **body.model_dump()))
+    return _snapshot(await service.serp(owner, project_id, **body.model_dump()))
 
 
 @router.get(
@@ -546,10 +553,10 @@ async def buy_serp(
 async def serps(
     project_id: str,
     keyword: str | None = None,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoService = Depends(seo_service),
 ) -> Any:
-    return await service.list_serps(user.id, project_id, keyword=keyword)
+    return await service.list_serps(owner, project_id, keyword=keyword)
 
 
 @router.get(
@@ -560,10 +567,10 @@ async def serps(
 async def serp(
     project_id: str,
     serp_id: str,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoService = Depends(seo_service),
 ) -> Any:
-    return _snapshot(await service.get_serp(user.id, project_id, serp_id))
+    return _snapshot(await service.get_serp(owner, project_id, serp_id))
 
 
 @router.post(
@@ -579,10 +586,10 @@ async def serp(
 async def buy_lookup(
     project_id: str,
     body: LookupCreate,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoService = Depends(seo_service),
 ) -> Any:
-    return _snapshot(await service.lookup(user.id, project_id, **body.model_dump()))
+    return _snapshot(await service.lookup(owner, project_id, **body.model_dump()))
 
 
 @router.get(
@@ -594,10 +601,10 @@ async def buy_lookup(
 async def lookups(
     project_id: str,
     kind: str | None = Query(default=None, pattern="^(domain|competitors)$"),
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoService = Depends(seo_service),
 ) -> Any:
-    return await service.list_lookups(user.id, project_id, kind=kind)
+    return await service.list_lookups(owner, project_id, kind=kind)
 
 
 @router.get(
@@ -608,10 +615,10 @@ async def lookups(
 async def lookup(
     project_id: str,
     lookup_id: str,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoService = Depends(seo_service),
 ) -> Any:
-    return _snapshot(await service.get_lookup(user.id, project_id, lookup_id))
+    return _snapshot(await service.get_lookup(owner, project_id, lookup_id))
 
 
 @router.get(
@@ -622,9 +629,9 @@ async def lookup(
     "competitors, key pages and the newest research log entries.",
 )
 async def project_context(
-    project_id: str, user: User = Depends(current_user), service: SeoService = Depends(seo_service)
+    project_id: str, owner: int = Depends(seo_owner), service: SeoService = Depends(seo_service)
 ) -> Any:
-    return await service.project_context(user.id, project_id)
+    return await service.project_context(owner, project_id)
 
 
 @router.patch(
@@ -638,11 +645,11 @@ async def project_context(
 async def update_project_context(
     project_id: str,
     body: ContextUpdate,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoService = Depends(seo_service),
 ) -> Any:
     updates = [op.model_dump(exclude_none=True) for op in body.updates]
-    return await service.update_context(user.id, project_id, updates, author="user")
+    return await service.update_context(owner, project_id, updates, author="user")
 
 
 @router.post(
@@ -654,10 +661,10 @@ async def update_project_context(
 async def save_keywords(
     project_id: str,
     body: KeywordsSave,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoService = Depends(seo_service),
 ) -> Any:
-    return await service.save_keywords(user.id, project_id, **body.model_dump())
+    return await service.save_keywords(owner, project_id, **body.model_dump())
 
 
 @router.get(
@@ -670,11 +677,11 @@ async def keywords(
     search: str = "",
     page: int = Query(1, ge=1),
     page_size: int = Query(50, ge=1, le=500),
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoService = Depends(seo_service),
 ) -> Any:
     return await service.list_keywords(
-        user.id, project_id, search=search, page=page, page_size=page_size
+        owner, project_id, search=search, page=page, page_size=page_size
     )
 
 
@@ -686,10 +693,10 @@ async def keywords(
 async def report_context(
     project_id: str,
     run_id: str,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoService = Depends(seo_service),
 ) -> Any:
-    return await service.report_context(user.id, project_id, run_id)
+    return await service.report_context(owner, project_id, run_id)
 
 
 @router.post(
@@ -701,10 +708,10 @@ async def report_context(
 async def save_report(
     project_id: str,
     body: ReportCreate,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoService = Depends(seo_service),
 ) -> Any:
-    return await service.save_report(user.id, project_id, **body.model_dump())
+    return await service.save_report(owner, project_id, **body.model_dump())
 
 
 @router.get(
@@ -713,9 +720,9 @@ async def save_report(
     summary="List private report metadata",
 )
 async def reports(
-    project_id: str, user: User = Depends(current_user), service: SeoService = Depends(seo_service)
+    project_id: str, owner: int = Depends(seo_owner), service: SeoService = Depends(seo_service)
 ) -> Any:
-    return await service.list_reports(user.id, project_id)
+    return await service.list_reports(owner, project_id)
 
 
 @router.get(
@@ -727,11 +734,11 @@ async def report(
     project_id: str,
     report_id: str,
     response: Response,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoService = Depends(seo_service),
 ) -> Any:
     response.headers["Cache-Control"] = "no-store"
-    return await service.get_report(user.id, project_id, report_id)
+    return await service.get_report(owner, project_id, report_id)
 
 
 @router.post(
@@ -747,12 +754,12 @@ async def start_audit(
     project_id: str,
     body: AuditCreate,
     request: Request,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoAuditService = Depends(audit_service),
     server: OctopServer = Depends(get_server),
 ) -> Any:
     audit = await service.start(
-        user.id, project_id, locale=resolve_request_locale(request), **body.model_dump()
+        owner, project_id, locale=resolve_request_locale(request), **body.model_dump()
     )
     if server.app_runtime is not None and server.app_runtime.seo_audits is not None:
         server.app_runtime.seo_audits.submit(audit["audit_id"])
@@ -767,10 +774,10 @@ async def start_audit(
 )
 async def audits(
     project_id: str,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoAuditService = Depends(audit_service),
 ) -> Any:
-    return await service.list_audits(user.id, project_id)
+    return await service.list_audits(owner, project_id)
 
 
 @router.get(
@@ -781,10 +788,10 @@ async def audits(
 async def audit(
     project_id: str,
     audit_id: str,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoAuditService = Depends(audit_service),
 ) -> Any:
-    return await service.get(user.id, project_id, audit_id)
+    return await service.get(owner, project_id, audit_id)
 
 
 @router.get(
@@ -801,11 +808,11 @@ async def audit_issues(
     request: Request,
     severity: str | None = Query(None, pattern="^(critical|warning|info)$"),
     issue_type: str | None = None,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoAuditService = Depends(audit_service),
 ) -> Any:
     return await service.issues(
-        user.id,
+        owner,
         project_id,
         audit_id,
         severity=severity,
@@ -825,11 +832,11 @@ async def audit_pages(
     fetch_class: str | None = None,
     status_code: int | None = None,
     url_contains: str = "",
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoAuditService = Depends(audit_service),
 ) -> Any:
     return await service.pages(
-        user.id,
+        owner,
         project_id,
         audit_id,
         fetch_class=fetch_class,
@@ -848,10 +855,10 @@ async def audit_pages(
 async def cancel_audit(
     project_id: str,
     audit_id: str,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoAuditService = Depends(audit_service),
 ) -> Any:
-    return await service.cancel(user.id, project_id, audit_id)
+    return await service.cancel(owner, project_id, audit_id)
 
 
 @router.delete(
@@ -862,8 +869,8 @@ async def cancel_audit(
 async def delete_audit(
     project_id: str,
     audit_id: str,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoAuditService = Depends(audit_service),
 ) -> Response:
-    await service.delete(user.id, project_id, audit_id)
+    await service.delete(owner, project_id, audit_id)
     return Response(status_code=204)

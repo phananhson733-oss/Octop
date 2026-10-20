@@ -1,6 +1,7 @@
 import { lazy, useEffect, useMemo, useSyncExternalStore } from "react";
 import { pluginsApi } from "../../api/modules/plugins";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
+import { userCan } from "../../utils/permissions";
 import { loadInstalledPluginUis } from "../toolRenderers/loader";
 import { updateToolPluginIndex } from "../toolRenderers/toolPluginIndex";
 import {
@@ -14,7 +15,7 @@ import {
 
 /**
  * Workbench pages the current account may see; re-renders when plugin UIs load
- * or unload. ``adminOnly`` pages are left out until an admin is signed in.
+ * or unload. A page with a ``permission`` is left out for accounts without it.
  */
 export function useWorkbenchPages(): WorkbenchPluginPage[] {
   const pages = useSyncExternalStore(
@@ -22,10 +23,13 @@ export function useWorkbenchPages(): WorkbenchPluginPage[] {
     getWorkbenchPages,
     getWorkbenchPages,
   );
-  const isAdmin = useCurrentUser()?.role === "admin";
+  const user = useCurrentUser();
   return useMemo(
-    () => (isAdmin ? pages : pages.filter((page) => !page.adminOnly)),
-    [pages, isAdmin],
+    () =>
+      pages.filter(
+        (page) => !page.permission || userCan(user, page.permission),
+      ),
+    [pages, user],
   );
 }
 
@@ -57,7 +61,7 @@ export function useInstalledPluginUis(enabled: boolean): void {
         zh: "关键词研究、保存关键词与私有报告",
       },
       component: lazy(() => import("../../pages/Control/SeoWorkbench")),
-      adminOnly: true,
+      permission: "seo",
     });
     (async () => {
       try {

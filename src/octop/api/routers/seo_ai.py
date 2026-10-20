@@ -7,15 +7,14 @@ from typing import Any, Literal
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, Field
 
-from octop.api.deps import current_user, require_admin
-from octop.api.routers.seo import seo_service
+from octop.api.deps import require_permission
+from octop.api.routers.seo import seo_owner, seo_service
 from octop.infra.seo.ai_visibility import SeoAiService
 from octop.infra.seo.models import AiCheckCreate, AiEnginesPut, AiPromptsAdd
 from octop.infra.seo.service import SeoService
-from octop.infra.users.identity import User
 from octop.infra.utils.locale import resolve_request_locale
 
-router = APIRouter(dependencies=[Depends(require_admin())])
+router = APIRouter(dependencies=[Depends(require_permission("seo"))])
 
 Engine = Literal["chatgpt", "gemini", "google_ai_overview"]
 
@@ -179,20 +178,20 @@ async def ai_visibility(
     gap: bool = Query(
         default=False, description="Only answers naming a competitor but not the project."
     ),
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoAiService = Depends(ai_service),
 ) -> Any:
-    return await service.results(user.id, project_id, run_id=run_id, branded=branded, gap=gap)
+    return await service.results(owner, project_id, run_id=run_id, branded=branded, gap=gap)
 
 
 @router.put(_BASE + "/engines", response_model=AiVisibility, summary="Choose AI engines")
 async def put_ai_engines(
     project_id: str,
     body: AiEnginesPut,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoAiService = Depends(ai_service),
 ) -> Any:
-    return await service.set_engines(user.id, project_id, **body.model_dump())
+    return await service.set_engines(owner, project_id, **body.model_dump())
 
 
 @router.post(
@@ -205,11 +204,11 @@ async def add_ai_prompts(
     project_id: str,
     body: AiPromptsAdd,
     request: Request,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoAiService = Depends(ai_service),
 ) -> Any:
     return await service.add_prompts(
-        user.id, project_id, locale=resolve_request_locale(request), **body.model_dump()
+        owner, project_id, locale=resolve_request_locale(request), **body.model_dump()
     )
 
 
@@ -222,10 +221,10 @@ async def add_ai_prompts(
 async def remove_ai_prompt(
     project_id: str,
     prompt_id: str,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoAiService = Depends(ai_service),
 ) -> Response:
-    await service.remove_prompt(user.id, project_id, prompt_id)
+    await service.remove_prompt(owner, project_id, prompt_id)
     return Response(status_code=204)
 
 
@@ -240,10 +239,10 @@ async def ai_answer(
     run_id: str,
     prompt_id: str,
     engine: Engine,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoAiService = Depends(ai_service),
 ) -> Any:
-    return await service.answer(user.id, project_id, run_id, prompt_id, engine)
+    return await service.answer(owner, project_id, run_id, prompt_id, engine)
 
 
 @router.post(
@@ -261,9 +260,9 @@ async def start_ai_check(
     project_id: str,
     body: AiCheckCreate,
     request: Request,
-    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
     service: SeoAiService = Depends(ai_service),
 ) -> Any:
     return await service.start_check(
-        user.id, project_id, locale=resolve_request_locale(request), **body.model_dump()
+        owner, project_id, locale=resolve_request_locale(request), **body.model_dump()
     )

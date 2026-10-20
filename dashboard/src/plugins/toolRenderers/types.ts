@@ -73,8 +73,8 @@ export interface WorkbenchPageRegistration {
   /** Shown under the page title while this tab is active. */
   description?: WorkbenchPageTitle;
   component: ComponentType<WorkbenchPageProps>;
-  /** Hide the tab, its URL and the sidebar entry it adds from non-admin accounts. UI only. */
-  adminOnly?: boolean;
+  /** Module permission key an account needs to see the tab, its URL and the sidebar entry it adds (admins always do). UI only. */
+  permission?: string;
 }
 
 export interface OpenSidePanelOptions {
@@ -102,7 +102,11 @@ export interface OctopPluginUIHost {
    * ``/agents/{id}/workspace/upload?path=…&from_workspace=true``. ``request``
    * always sends ``Content-Type: application/json``, which breaks ``FormData``.
    */
-  upload<T = unknown>(path: string, body: FormData, init?: RequestInit): Promise<T>;
+  upload<T = unknown>(
+    path: string,
+    body: FormData,
+    init?: RequestInit,
+  ): Promise<T>;
   /** Open this tool call's UI in the chat side dock (one tab per callId). */
   openSidePanel(opts: OpenSidePanelOptions): void;
   /** Close the side dock tab for this tool call, if open. */

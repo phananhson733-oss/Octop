@@ -37,6 +37,7 @@ import {
   type GscTable,
   type GscTotals,
 } from "../../../api/modules/seo";
+import { useCurrentUser } from "../../../hooks/useCurrentUser";
 import { useServerTimezone } from "../../../hooks/useServerTimezone";
 import { formatServerIsoDateTime } from "../../../utils/formatMessageTime";
 import { apiErrorMessage } from "../../../utils/apiError";
@@ -115,6 +116,8 @@ function delta(
 export function SearchPerformancePanel({ projectId }: { projectId: string }) {
   const { t } = useTranslation();
   const timeZone = useServerTimezone();
+  // Google accounts belong to the admin; other accounts with SEO access only use them.
+  const isAdmin = useCurrentUser()?.role === "admin";
   const [query, setQuery] = useSearchParams();
   const location = useLocation();
   const [google, setGoogle] = useState<GoogleStatus>();
@@ -368,7 +371,7 @@ export function SearchPerformancePanel({ projectId }: { projectId: string }) {
   const accounts = (
     <Card size="small" title={t("seo.gscAccounts")}>
       <div className={styles.stack}>
-        {!google.configured && (
+        {isAdmin && !google.configured && (
           <Alert
             type="info"
             showIcon
@@ -385,21 +388,26 @@ export function SearchPerformancePanel({ projectId }: { projectId: string }) {
             <Text strong>{account.email ?? account.grant_id}</Text>
             {account.search_console && <Tag color="blue">Search Console</Tag>}
             {account.analytics && <Tag color="green">Analytics</Tag>}
-            <Popconfirm
-              title={t("seo.gscDisconnectConfirm")}
-              onConfirm={() => disconnect(account.grant_id)}
-            >
-              <Button
-                size="small"
-                danger
-                loading={busy === `disconnect:${account.grant_id}`}
+            {isAdmin && (
+              <Popconfirm
+                title={t("seo.gscDisconnectConfirm")}
+                onConfirm={() => disconnect(account.grant_id)}
               >
-                {t("seo.gscDisconnect")}
-              </Button>
-            </Popconfirm>
+                <Button
+                  size="small"
+                  danger
+                  loading={busy === `disconnect:${account.grant_id}`}
+                >
+                  {t("seo.gscDisconnect")}
+                </Button>
+              </Popconfirm>
+            )}
           </div>
         ))}
-        {google.configured && (
+        {!isAdmin && !accountCount && (
+          <Text type="secondary">{t("seo.gscAdminConnects")}</Text>
+        )}
+        {isAdmin && google.configured && (
           <div className={styles.toolbar}>
             <Button
               type={accountCount ? "default" : "primary"}

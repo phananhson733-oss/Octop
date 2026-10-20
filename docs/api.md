@@ -413,7 +413,12 @@ discovery.
 
 ## SEO workbench
 
-Admin only. Paid DataForSEO calls (`research`, `serps`, `lookups`, rank and AI visibility `checks`) require
+Admins, and accounts holding the `seo` permission (「工作台/SEO」). Such an account works in the
+first admin's SEO data — projects, DataForSEO credentials and Google accounts — and may run paid
+calls, which are recorded under that admin. Creating or rebinding a project, storing provider
+credentials and connecting or disconnecting Google accounts stay with admins.
+
+Paid DataForSEO calls (`research`, `serps`, `lookups`, rank and AI visibility `checks`) require
 `confirm_paid: true` and an `idempotency_key`; the same key with the same
 input returns the earlier result instead of paying again. Deleting the bound
 expert keeps the project and its evidence with `agent_id: null` until it is
@@ -421,56 +426,56 @@ rebound.
 
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
-| `GET`/`POST` | `/seo/projects` | admin | list / create (bound to an owned, unshared expert) |
+| `GET`/`POST` | `/seo/projects` | seo / admin | list / create (bound to an owned, unshared expert) |
 | `PATCH`  | `/seo/projects/{id}` | admin | body `{agent_id}` — rebind to another expert |
-| `GET`/`PUT` | `/seo/provider` | admin | `{configured}`; `PUT {login, password}` stores encrypted credentials |
-| `POST`   | `/seo/projects/{id}/research` | admin | paid keyword research → full run |
-| `GET`    | `/seo/projects/{id}/runs` | admin | run summaries (per-seed `row_count`, no rows) |
-| `GET`    | `/seo/projects/{id}/runs/{run_id}` | admin | one run with keyword rows |
-| `POST`   | `/seo/projects/{id}/serps` | admin | body `{keyword, device, depth: 20\|100}` — paid Google SERP; a repeat within 12 h is served from the saved copy at no charge |
-| `GET`    | `/seo/projects/{id}/serps?keyword=` | admin | snapshot summaries, newest first |
-| `GET`    | `/seo/projects/{id}/serps/{serp_id}` | admin | one snapshot with result rows |
-| `POST`   | `/seo/projects/{id}/lookups` | admin | body `{kind: domain, domain}` (organic footprint + top 100 ranked keywords by traffic) or `{kind: competitors, keywords: [1-200]}` (top 50 domains ranking for them) — paid DataForSEO Labs; a repeat within 12 h is served from the saved copy at no charge |
-| `GET`    | `/seo/projects/{id}/lookups?kind=` | admin | lookup summaries, newest first |
-| `GET`    | `/seo/projects/{id}/lookups/{lookup_id}` | admin | one lookup with its rows |
-| `GET`/`POST` | `/seo/projects/{id}/rank-trackers` | admin | trackers / create one `{domain?, devices: both\|desktop\|mobile, depth: 10-100 in tens, keywords}` (free; the project's own domain when omitted; 20 per project, 200 keywords each) |
-| `GET`    | `/seo/projects/{id}/rank-trackers/{tracker_id}?compare=7d` | admin | positions per keyword and device against the newest check older than `compare` (`1d`/`7d`/`30d`/`90d`, else the first check), the newest run and `estimate_usd` |
-| `PATCH`/`DELETE` | `/seo/projects/{id}/rank-trackers/{tracker_id}` | admin | change `{devices, depth}` / delete with its history (409 while a check runs) |
-| `POST`   | `/seo/projects/{id}/rank-trackers/{tracker_id}/keywords` | admin | body `{keywords}` → `{added}` |
-| `DELETE` | `/seo/projects/{id}/rank-trackers/{tracker_id}/keywords/{keyword_id}` | admin | stop tracking; its history stays |
-| `GET`    | `/seo/projects/{id}/rank-trackers/{tracker_id}/keywords/{keyword_id}/history` | admin | newest 200 saved positions, oldest first |
-| `POST`   | `/seo/projects/{id}/rank-trackers/{tracker_id}/checks` | admin | body `{max_cost_usd}` (≥ the tracker's `estimate_usd`) — paid: one live Google SERP per keyword and device, stopping at the domain's page, in the background → 202 run; one check at a time per tracker |
-| `GET`    | `/seo/projects/{id}/ai-visibility?run_id=&branded=neutral&gap=false` | admin | a check's answers (the newest by default): per prompt and engine whether each brand (the project and its saved competitors) is mentioned or cited, brand summaries, cited domains, the prompts, the newest 20 runs and `estimate_usd`; `branded` `neutral` leaves out prompts naming the project, `branded`/`all`; `gap` keeps answers naming a competitor but not the project |
-| `PUT`    | `/seo/projects/{id}/ai-visibility/engines` | admin | body `{engines: [chatgpt, gemini, google_ai_overview]}` (default ChatGPT and Gemini) |
-| `POST`   | `/seo/projects/{id}/ai-visibility/prompts` | admin | body `{prompts: [1-100], topic?}` → `{added}` (free; 100 per project) |
-| `DELETE` | `/seo/projects/{id}/ai-visibility/prompts/{prompt_id}` | admin | stop asking a prompt; its answers stay with their checks |
-| `GET`    | `/seo/projects/{id}/ai-visibility/runs/{run_id}/answers/{prompt_id}/{engine}` | admin | one saved answer: its text (model output, shown as plain text) and cited pages marked own / competitor |
-| `POST`   | `/seo/projects/{id}/ai-visibility/checks` | admin | body `{max_cost_usd}` (≥ `estimate_usd`, $0.004 per prompt and engine) — paid: one live answer per prompt and engine (ChatGPT / Gemini LLM scrapers, AI Overviews from a live Google SERP), in the background → 202 run; one check at a time per project |
-| `GET`/`PATCH` | `/seo/projects/{id}/context` | admin | project background; `PATCH {updates: [...]}` applies all ops or none |
-| `GET`/`POST` | `/seo/projects/{id}/keywords` | admin | saved keywords (paged) / save rows from a run |
-| `GET`    | `/seo/projects/{id}/report-context?run_id=` | admin | evidence and `context_hash` for an agent report |
-| `GET`/`POST` | `/seo/projects/{id}/reports` | admin | report metadata / save an immutable HTML report |
-| `GET`    | `/seo/projects/{id}/reports/{report_id}` | admin | report with HTML |
-| `POST`   | `/seo/projects/{id}/audits` | admin | body `{idempotency_key, start_url?, max_pages: 10–200 (default 50)}` — queue a free technical site audit; one active audit per project (`409`) |
-| `GET`    | `/seo/projects/{id}/audits` | admin | audits, newest first, with progress |
-| `GET`    | `/seo/projects/{id}/audits/{audit_id}` | admin | one audit with `issue_counts` by severity |
-| `GET`    | `/seo/projects/{id}/audits/{audit_id}/issues?severity=&issue_type=` | admin | per-type summary with explanation and fix (request language) and every affected URL |
-| `GET`    | `/seo/projects/{id}/audits/{audit_id}/pages?fetch_class=&status_code=&url_contains=` | admin | crawled pages |
-| `POST`   | `/seo/projects/{id}/audits/{audit_id}/cancel` | admin | queued: cancelled at once; running: stops after the current page, results so far kept |
-| `DELETE` | `/seo/projects/{id}/audits/{audit_id}` | admin | delete the audit and its results (`204`) |
-| `GET`    | `/seo/google` | admin | `{configured, redirect_uri, accounts}` — the callback URI to register and the admin's connected Google accounts |
+| `GET`/`PUT` | `/seo/provider` | seo / admin | `{configured}`; `PUT {login, password}` stores encrypted credentials |
+| `POST`   | `/seo/projects/{id}/research` | seo | paid keyword research → full run |
+| `GET`    | `/seo/projects/{id}/runs` | seo | run summaries (per-seed `row_count`, no rows) |
+| `GET`    | `/seo/projects/{id}/runs/{run_id}` | seo | one run with keyword rows |
+| `POST`   | `/seo/projects/{id}/serps` | seo | body `{keyword, device, depth: 20\|100}` — paid Google SERP; a repeat within 12 h is served from the saved copy at no charge |
+| `GET`    | `/seo/projects/{id}/serps?keyword=` | seo | snapshot summaries, newest first |
+| `GET`    | `/seo/projects/{id}/serps/{serp_id}` | seo | one snapshot with result rows |
+| `POST`   | `/seo/projects/{id}/lookups` | seo | body `{kind: domain, domain}` (organic footprint + top 100 ranked keywords by traffic) or `{kind: competitors, keywords: [1-200]}` (top 50 domains ranking for them) — paid DataForSEO Labs; a repeat within 12 h is served from the saved copy at no charge |
+| `GET`    | `/seo/projects/{id}/lookups?kind=` | seo | lookup summaries, newest first |
+| `GET`    | `/seo/projects/{id}/lookups/{lookup_id}` | seo | one lookup with its rows |
+| `GET`/`POST` | `/seo/projects/{id}/rank-trackers` | seo | trackers / create one `{domain?, devices: both\|desktop\|mobile, depth: 10-100 in tens, keywords}` (free; the project's own domain when omitted; 20 per project, 200 keywords each) |
+| `GET`    | `/seo/projects/{id}/rank-trackers/{tracker_id}?compare=7d` | seo | positions per keyword and device against the newest check older than `compare` (`1d`/`7d`/`30d`/`90d`, else the first check), the newest run and `estimate_usd` |
+| `PATCH`/`DELETE` | `/seo/projects/{id}/rank-trackers/{tracker_id}` | seo | change `{devices, depth}` / delete with its history (409 while a check runs) |
+| `POST`   | `/seo/projects/{id}/rank-trackers/{tracker_id}/keywords` | seo | body `{keywords}` → `{added}` |
+| `DELETE` | `/seo/projects/{id}/rank-trackers/{tracker_id}/keywords/{keyword_id}` | seo | stop tracking; its history stays |
+| `GET`    | `/seo/projects/{id}/rank-trackers/{tracker_id}/keywords/{keyword_id}/history` | seo | newest 200 saved positions, oldest first |
+| `POST`   | `/seo/projects/{id}/rank-trackers/{tracker_id}/checks` | seo | body `{max_cost_usd}` (≥ the tracker's `estimate_usd`) — paid: one live Google SERP per keyword and device, stopping at the domain's page, in the background → 202 run; one check at a time per tracker |
+| `GET`    | `/seo/projects/{id}/ai-visibility?run_id=&branded=neutral&gap=false` | seo | a check's answers (the newest by default): per prompt and engine whether each brand (the project and its saved competitors) is mentioned or cited, brand summaries, cited domains, the prompts, the newest 20 runs and `estimate_usd`; `branded` `neutral` leaves out prompts naming the project, `branded`/`all`; `gap` keeps answers naming a competitor but not the project |
+| `PUT`    | `/seo/projects/{id}/ai-visibility/engines` | seo | body `{engines: [chatgpt, gemini, google_ai_overview]}` (default ChatGPT and Gemini) |
+| `POST`   | `/seo/projects/{id}/ai-visibility/prompts` | seo | body `{prompts: [1-100], topic?}` → `{added}` (free; 100 per project) |
+| `DELETE` | `/seo/projects/{id}/ai-visibility/prompts/{prompt_id}` | seo | stop asking a prompt; its answers stay with their checks |
+| `GET`    | `/seo/projects/{id}/ai-visibility/runs/{run_id}/answers/{prompt_id}/{engine}` | seo | one saved answer: its text (model output, shown as plain text) and cited pages marked own / competitor |
+| `POST`   | `/seo/projects/{id}/ai-visibility/checks` | seo | body `{max_cost_usd}` (≥ `estimate_usd`, $0.004 per prompt and engine) — paid: one live answer per prompt and engine (ChatGPT / Gemini LLM scrapers, AI Overviews from a live Google SERP), in the background → 202 run; one check at a time per project |
+| `GET`/`PATCH` | `/seo/projects/{id}/context` | seo | project background; `PATCH {updates: [...]}` applies all ops or none |
+| `GET`/`POST` | `/seo/projects/{id}/keywords` | seo | saved keywords (paged) / save rows from a run |
+| `GET`    | `/seo/projects/{id}/report-context?run_id=` | seo | evidence and `context_hash` for an agent report |
+| `GET`/`POST` | `/seo/projects/{id}/reports` | seo | report metadata / save an immutable HTML report |
+| `GET`    | `/seo/projects/{id}/reports/{report_id}` | seo | report with HTML |
+| `POST`   | `/seo/projects/{id}/audits` | seo | body `{idempotency_key, start_url?, max_pages: 10–200 (default 50)}` — queue a free technical site audit; one active audit per project (`409`) |
+| `GET`    | `/seo/projects/{id}/audits` | seo | audits, newest first, with progress |
+| `GET`    | `/seo/projects/{id}/audits/{audit_id}` | seo | one audit with `issue_counts` by severity |
+| `GET`    | `/seo/projects/{id}/audits/{audit_id}/issues?severity=&issue_type=` | seo | per-type summary with explanation and fix (request language) and every affected URL |
+| `GET`    | `/seo/projects/{id}/audits/{audit_id}/pages?fetch_class=&status_code=&url_contains=` | seo | crawled pages |
+| `POST`   | `/seo/projects/{id}/audits/{audit_id}/cancel` | seo | queued: cancelled at once; running: stops after the current page, results so far kept |
+| `DELETE` | `/seo/projects/{id}/audits/{audit_id}` | seo | delete the audit and its results (`204`) |
+| `GET`    | `/seo/google` | seo | `{configured, redirect_uri, accounts}` — the callback URI to register and the admin's connected Google accounts |
 | `POST`   | `/seo/google/connect` | admin | body `{return_path?}` → `{authorize_url}`; one consent covers read-only Search Console and Analytics |
 | `GET`    | `/seo/google/callback` | public | Google's redirect; the single-use state (10 min) names the admin. `303` back to `return_path` with `seo_google=connected` or `seo_google_error=<reason>` |
 | `DELETE` | `/seo/google/accounts/{grant_id}` | admin | disconnect; projects bound through it lose their property (`204`) |
-| `GET`/`PUT`/`DELETE` | `/seo/projects/{id}/gsc` | admin | the bound Search Console property; `PUT {grant_id, site_url}` needs a verified property on that grant |
-| `GET`    | `/seo/projects/{id}/gsc/sites` | admin | properties per connected account, with `requires_reconnect` / `api_disabled` |
-| `POST`   | `/seo/projects/{id}/gsc/report` | admin | body `{date_range, device?, country?, page_filter?, query_filter?}` — totals vs the previous period, daily series, striking-distance queries (best page 5–20), countries |
-| `POST`   | `/seo/projects/{id}/gsc/table` | admin | report filters plus `{dimension: query\|page, page, page_size ≤ 100}`; `has_next_page` from one extra row |
-| `POST`   | `/seo/projects/{id}/gsc/inspect` | admin | body `{urls: 1–10, language_code?}` — Google's stored index status; one URL's error is reported next to it |
-| `GET`/`PUT`/`DELETE` | `/seo/projects/{id}/ga4` | admin | the bound GA4 property; `PUT {grant_id, property_id: "properties/<n>"}` needs a property that grant can read |
-| `GET`    | `/seo/projects/{id}/ga4/properties` | admin | properties per connected account, with `requires_reconnect` / `api_disabled` |
-| `POST`   | `/seo/projects/{id}/ga4/overview` | admin | body `{start_date?, end_date?, trend: daily\|weekly}` — organic-search totals vs the previous equal-length period and a trend; days follow the property's time zone, default the last 28 complete days |
-| `POST`   | `/seo/projects/{id}/ga4/report` | admin | body `{kind, start_date?, end_date?, channel, limit ≤ 1000, offset, …breakdowns}` — one page of a report kind (`landing_pages`, `page_performance`, `key_events`, `traffic_acquisition`, `ecommerce_performance`, `site_search`, `audience_breakdown`); `page_info.next_offset` continues it |
+| `GET`/`PUT`/`DELETE` | `/seo/projects/{id}/gsc` | seo | the bound Search Console property; `PUT {grant_id, site_url}` needs a verified property on that grant |
+| `GET`    | `/seo/projects/{id}/gsc/sites` | seo | properties per connected account, with `requires_reconnect` / `api_disabled` |
+| `POST`   | `/seo/projects/{id}/gsc/report` | seo | body `{date_range, device?, country?, page_filter?, query_filter?}` — totals vs the previous period, daily series, striking-distance queries (best page 5–20), countries |
+| `POST`   | `/seo/projects/{id}/gsc/table` | seo | report filters plus `{dimension: query\|page, page, page_size ≤ 100}`; `has_next_page` from one extra row |
+| `POST`   | `/seo/projects/{id}/gsc/inspect` | seo | body `{urls: 1–10, language_code?}` — Google's stored index status; one URL's error is reported next to it |
+| `GET`/`PUT`/`DELETE` | `/seo/projects/{id}/ga4` | seo | the bound GA4 property; `PUT {grant_id, property_id: "properties/<n>"}` needs a property that grant can read |
+| `GET`    | `/seo/projects/{id}/ga4/properties` | seo | properties per connected account, with `requires_reconnect` / `api_disabled` |
+| `POST`   | `/seo/projects/{id}/ga4/overview` | seo | body `{start_date?, end_date?, trend: daily\|weekly}` — organic-search totals vs the previous equal-length period and a trend; days follow the property's time zone, default the last 28 complete days |
+| `POST`   | `/seo/projects/{id}/ga4/report` | seo | body `{kind, start_date?, end_date?, channel, limit ≤ 1000, offset, …breakdowns}` — one page of a report kind (`landing_pages`, `page_performance`, `key_events`, `traffic_acquisition`, `ecommerce_performance`, `site_search`, `audience_breakdown`); `page_info.next_offset` continues it |
 
 Site audits crawl on the server as `Octop-SEO-Audit/1.0`: robots.txt and its sitemaps are
 followed, one page at a time (1 s apart, backing off on `429`), without running JavaScript, and
