@@ -27,7 +27,7 @@ def tool_env(monkeypatch):
         "research_log_limit": 20,
     }
     service = SimpleNamespace(
-        project_for_agent=AsyncMock(return_value={"project_id": "project-a"}),
+        project_for_agent=AsyncMock(return_value=(7, {"project_id": "project-a"})),
         report_context=AsyncMock(
             return_value={
                 "project": {"project_id": "project-a"},
@@ -93,6 +93,15 @@ async def test_foreign_thread_cannot_access_site_data(tool_env):
     with pytest.raises(OctopError):
         await tools["seo_list_saved_keywords"].ainvoke({})
     service.keyword_rows.assert_not_awaited()
+
+
+async def test_shared_account_reads_the_owner_data(tool_env):
+    # An seo-permission account (user 7) works in the admin's (user 1) SEO data.
+    _config, _threads, service, tools = tool_env
+    service.project_for_agent.return_value = (1, {"project_id": "project-a"})
+    await tools["seo_list_saved_keywords"].ainvoke({})
+    service.project_for_agent.assert_awaited_with(7, "agent-a")
+    service.keyword_rows.assert_awaited_once_with(1, "project-a", search="")
 
 
 async def test_changed_resume_context_is_rejected(tool_env):

@@ -12,8 +12,12 @@ async def test_project_owner_and_agent_unique(context):
     )
     assert project["location_code"] == 2840
     assert await service.list_projects(other) == []
-    assert (await service.project_for_agent(user, "seo"))["project_id"] == project["project_id"]
-    assert await service.project_for_agent(other, "seo") is None
+    owner, found = await service.project_for_agent(user, "seo")
+    assert owner == user and found["project_id"] == project["project_id"]
+    # Someone else's thread cannot use the expert.
+    with pytest.raises(OctopError) as foreign:
+        await service.project_for_agent(other, "seo")
+    assert foreign.value.code == "FORBIDDEN"
     with pytest.raises(OctopError):
         await service.create_project(other, name="Stolen", domain="example.org", agent_id="seo")
     with pytest.raises(OctopError):
@@ -26,12 +30,34 @@ async def test_seo_data_is_admin_only(context):
         user, name="Example", domain="example.com", agent_id="seo"
     )
     repos.user_repo.set_role(user, "user")
-    # Agent tools reach projects only through project_for_agent; a demoted owner is refused.
-    with pytest.raises(OctopError) as denied:
-        await service.project_for_agent(user, "seo")
-    assert denied.value.code == "FORBIDDEN"
+    # Agent tools reach projects only through project_for_agent; a demoted owner gets none.
+    assert await service.project_for_agent(user, "seo") is None
     with pytest.raises(OctopError):
         await service.keyword_rows(user, project["project_id"])
+
+
+async def test_seo_permission_copy_works_in_the_admin_project(context):
+    service, repos, user, other = context
+    repos.agent_repo.update_config("seo", published_expert_id="tpl-seo")
+    project = await service.create_project(
+        user, name="Example", domain="example.com", agent_id="seo"
+    )
+    repos.agent_repo.create(
+        agent_id="bob-seo", user_id=other, name="SEO", published_expert_id="tpl-seo"
+    )
+    repos.agent_repo.create(
+        agent_id="bob-blog", user_id=other, name="Blog", published_expert_id="tpl-blog"
+    )
+    # Without the seo permission the copy gets nothing.
+    assert await service.project_for_agent(other, "bob-seo") is None
+    repos.user_repo.set_permissions(other, ["seo"])
+    # With it, the copy of the bound expert works on that project, in the admin's data.
+    owner, found = await service.project_for_agent(other, "bob-seo")
+    assert owner == user and found["project_id"] == project["project_id"]
+    assert await service.project_for_agent(other, "bob-blog") is None
+    # Only its owner's threads can use it.
+    with pytest.raises(OctopError):
+        await service.project_for_agent(user, "bob-seo")
 
 
 async def test_provider_encrypted_and_status_only(context):

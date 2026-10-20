@@ -416,7 +416,9 @@ discovery.
 Admins, and accounts holding the `seo` permission (「工作台/SEO」). Such an account works in the
 first admin's SEO data — projects, DataForSEO credentials and Google accounts — and may run paid
 calls, which are recorded under that admin. Creating or rebinding a project, storing provider
-credentials and connecting or disconnecting Google accounts stay with admins.
+credentials and connecting or disconnecting Google accounts stay with admins. The SEO Agent
+tools go to the expert bound to a project and to experts that such an account installed from
+the same published template; those read and write the same project data.
 
 Paid DataForSEO calls (`research`, `serps`, `lookups`, rank and AI visibility `checks`) require
 `confirm_paid: true` and an `idempotency_key`; the same key with the same

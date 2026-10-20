@@ -292,10 +292,13 @@ def build_seo_tools(
         thread = await asyncio.get_running_loop().run_in_executor(None, thread_repo.get, thread_id)
         if thread is None or thread.user_id != user_id or thread.agent_id != bound_agent_id:
             raise OctopError(ErrorCode.FORBIDDEN, "SEO thread is not owned by the caller")
-        project = await service.project_for_agent(user_id, bound_agent_id)
-        if project is None:
-            raise OctopError(ErrorCode.FORBIDDEN, "Agent has no owned SEO project")
-        return user_id, str(project["project_id"]), thread_id
+        found = await service.project_for_agent(user_id, bound_agent_id)
+        if found is None:
+            raise OctopError(ErrorCode.FORBIDDEN, "Agent has no SEO project")
+        # The data owner, not the caller: an account holding the seo permission works in
+        # an admin's SEO data.
+        owner_id, project = found
+        return owner_id, str(project["project_id"]), thread_id
 
     async def report_context(run_id: str) -> str:
         user_id, project_id, _thread_id = await context()

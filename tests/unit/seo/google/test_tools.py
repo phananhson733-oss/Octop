@@ -23,7 +23,7 @@ def gsc_tools(monkeypatch):
     monkeypatch.setattr("octop.infra.seo.google.service.SeoGoogleService", lambda _seo: google)
     threads = Mock()
     threads.get.return_value = SimpleNamespace(user_id=7, agent_id="agent-a")
-    service = SimpleNamespace(project_for_agent=AsyncMock(return_value={"project_id": "p"}))
+    service = SimpleNamespace(project_for_agent=AsyncMock(return_value=(7, {"project_id": "p"})))
     tools = {tool.name: tool for tool in build_seo_tools(service, "agent-a", threads)}
     return google, threads, tools
 

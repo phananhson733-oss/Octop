@@ -50,7 +50,7 @@ async def test_deleting_the_agent_keeps_the_project_until_rebound(context, monke
     repos.agent_repo.create(agent_id="seo2", user_id=user, name="SEO 2")
     project, previous = await service.bind_agent(user, project_id, agent_id="seo2")
     assert project["agent_id"] == "seo2" and previous is None
-    assert (await service.project_for_agent(user, "seo2"))["project_id"] == project_id
+    assert (await service.project_for_agent(user, "seo2"))[1]["project_id"] == project_id
     repos.agent_repo.create(agent_id="seo3", user_id=user, name="SEO 3")
     project, previous = await service.bind_agent(user, project_id, agent_id="seo3")
     assert previous == "seo2" and await service.project_for_agent(user, "seo2") is None

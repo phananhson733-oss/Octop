@@ -220,6 +220,42 @@ async def _db[T](fn: Callable[..., T], *args: Any, **kwargs: Any) -> T:
     return await asyncio.get_running_loop().run_in_executor(None, partial(fn, *args, **kwargs))
 
 
+def _first_admin_id(repos: RepoBundle) -> int | None:
+    admins = [row.id for row in repos.user_repo.list() if row.role == Role.ADMIN]
+    return min(admins, default=None)
+
+
+def seo_project_for_agent(repos: RepoBundle, agent: Any) -> tuple[int, dict[str, Any]] | None:
+    """Whose SEO data the expert ``agent`` works in, and on which project; ``None`` if none.
+
+    An admin's expert works on that admin's project bound to it. An expert owned by an
+    account holding the ``seo`` permission works in the first admin's data (see
+    ``workspace_user_id``), on the project whose bound expert came from the same
+    published template.
+    """
+    if agent.user_id is None or agent.kind != "expert":
+        return None
+    owner = repos.user_repo.get(agent.user_id)
+    if owner is None:
+        return None
+    if owner.role == Role.ADMIN:
+        project = next(
+            (p for p in repos.seo_repo.projects(owner.id) if p["agent_id"] == agent.agent_id),
+            None,
+        )
+        return (owner.id, project) if project is not None else None
+    if "seo" not in owner.permissions or agent.is_shared or not agent.published_expert_id:
+        return None
+    admin_id = _first_admin_id(repos)
+    if admin_id is None:
+        return None
+    for project in repos.seo_repo.projects(admin_id):
+        bound = repos.agent_repo.get(project["agent_id"]) if project["agent_id"] else None
+        if bound is not None and bound.published_expert_id == agent.published_expert_id:
+            return admin_id, project
+    return None
+
+
 class SeoService:
     def __init__(self, repos: RepoBundle) -> None:
         self.repos = repos
@@ -233,8 +269,8 @@ class SeoService:
         """
         if user.is_admin:
             return user.id
-        admins = [row.id for row in await _db(self.repos.user_repo.list) if row.role == Role.ADMIN]
-        return min(admins, default=user.id)
+        admin_id = await _db(_first_admin_id, self.repos)
+        return user.id if admin_id is None else admin_id
 
     async def list_projects(self, user_id: int) -> list[dict[str, Any]]:
         return await _db(self.repo.projects, user_id)
@@ -254,17 +290,20 @@ class SeoService:
         # (agent_id NULL) or shared keeps its evidence readable by its owner.
         return project
 
-    async def project_for_agent(self, user_id: int, agent_id: str) -> dict[str, Any] | None:
-        project = next(
-            (p for p in await self.list_projects(user_id) if p["agent_id"] == agent_id), None
-        )
-        if project is None:
-            return None
-        project = await self._project(user_id, project["project_id"])
+    async def project_for_agent(
+        self, user_id: int, agent_id: str
+    ) -> tuple[int, dict[str, Any]] | None:
+        """The data owner and project ``user_id``'s expert ``agent_id`` works on."""
         agent = await _db(self.repos.agent_repo.get, agent_id)
-        if agent is None or agent.user_id != user_id or agent.kind != "expert":
+        if agent is None:
+            return None
+        found = await _db(seo_project_for_agent, self.repos, agent)
+        if found is None:
+            return None
+        if agent.user_id != user_id:
             raise _error(ErrorCode.FORBIDDEN)
-        return project
+        owner_id, project = found
+        return owner_id, await self._project(owner_id, project["project_id"])
 
     async def _bindable_agent(self, user_id: int, agent_id: str) -> None:
         agent = await _db(self.repos.agent_repo.get, agent_id)
