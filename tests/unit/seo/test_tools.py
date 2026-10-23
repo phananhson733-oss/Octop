@@ -163,9 +163,10 @@ async def test_agent_context_writes_are_attributed_and_serps_are_read_only(tool_
         await tools["seo_list_competitor_lookups"].ainvoke({"kind": "keywords"})
     await tools["seo_list_ai_lookups"].ainvoke({"kind": "prompt"})
     service.list_ai_lookups.assert_awaited_once_with(7, "project-a", kind="prompt")
-    with pytest.raises(OctopError) as unasked:
-        await tools["seo_get_ai_lookup"].ainvoke({"lookup_id": "lookup-p", "model": "claude"})
-    assert unasked.value.code == "SEO_INVALID_INPUT"
+    for args in ({"lookup_id": "lookup-p", "model": "claude"}, {"lookup_id": "lookup-p"}):
+        with pytest.raises(OctopError) as unasked:
+            await tools["seo_get_ai_lookup"].ainvoke(args)
+        assert unasked.value.code == "SEO_INVALID_INPUT"
     # An asked model without an answer reads as the lookup's status, not a missing lookup.
     pending = json.loads(
         await tools["seo_get_ai_lookup"].ainvoke({"lookup_id": "lookup-p", "model": "chat_gpt"})
@@ -175,6 +176,14 @@ async def test_agent_context_writes_are_attributed_and_serps_are_read_only(tool_
         "interrupted",
         [],
     )
+    service.get_ai_lookup.return_value = {
+        "lookup_id": "lookup-b",
+        "kind": "brand",
+        "overview": {"total_mentions": 3},
+        "items": [{"section": "page"}],
+    }
+    brand = json.loads(await tools["seo_get_ai_lookup"].ainvoke({"lookup_id": "lookup-b"}))
+    assert brand["overview"] == {"total_mentions": 3} and brand["items"] == [{"section": "page"}]
     await tools["seo_get_rank_results"].ainvoke({"tracker_id": "t", "compare": "30d"})
     service.ranks.results.assert_awaited_once_with(7, "project-a", "t", compare="30d")
     await tools["seo_get_rank_history"].ainvoke({"tracker_id": "t", "keyword_id": "k"})

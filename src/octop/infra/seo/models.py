@@ -103,6 +103,19 @@ class PromptLookupCreate(Command):
     confirm_paid: Literal[True]
 
 
+BrandTarget = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=250)]
+
+
+class BrandLookupCreate(Command):
+    """A brand or domain's mentions in AI answers (OpenSEO Brand Lookup)."""
+
+    target: BrandTarget
+    # Compared for share of voice; OpenSEO takes up to 5.
+    competitors: list[BrandTarget] = Field(default_factory=list, max_length=5)
+    idempotency_key: str = Field(min_length=1, max_length=100)
+    confirm_paid: Literal[True]
+
+
 # Rank tracking, ported from OpenSEO rank-tracking.ts schemas.
 TrackedKeyword = Annotated[str, StringConstraints(max_length=200)]
 Devices = Literal["both", "desktop", "mobile"]

@@ -230,7 +230,12 @@ export function HistorySelect({
         value: item.lookup_id,
         label: `${
           "request" in item
-            ? clip(item.request.prompt, 40)
+            ? clip(
+                item.kind === "prompt"
+                  ? item.request.prompt
+                  : item.request.target,
+                40,
+              )
             : item.domain ??
               t("seo.lookupKeywordCount", {
                 count: item.keywords?.length ?? 0,

@@ -19,11 +19,13 @@ from octop.i18n import tr
 from octop.infra.connectors.crypto import decrypt_credentials, encrypt_credentials
 from octop.infra.db.services import RepoBundle
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.seo.brand import shape_brand
 from octop.infra.seo.models import (
     SECTION_KEYS,
     AddCompetitorsOp,
     AddKeyPagesOp,
     AppendResearchLogOp,
+    BrandLookupCreate,
     ContextOp,
     ContextUpdate,
     CustomSectionOp,
@@ -43,10 +45,13 @@ from octop.infra.seo.models import (
     SerpCreate,
 )
 from octop.infra.seo.provider import (
+    CHATGPT_MARKET,
     LLM_MODELS,
+    LLM_PLATFORMS,
     DataForSeoClient,
     ProviderFailure,
     interleave,
+    llm_target,
     normalize_keyword,
     pick_llm_model_name,
     supports_search_country,
@@ -77,7 +82,9 @@ DOMAIN_PAGES_LIMIT = 100
 BACKLINKS_LIMIT = 100
 # Competitor research is read on the Competitors tab; AI search lookups on the AI tab.
 COMPETITOR_LOOKUP_KINDS = ("domain", "competitors", "pages", "backlinks")
-AI_LOOKUP_KINDS = ("prompt",)
+AI_LOOKUP_KINDS = ("prompt", "brand")
+# brandLookup.ts: a sample of 100 prompts per platform explains the cited pages.
+BRAND_MENTIONS_LIMIT = 100
 # Minutes before a running lookup counts as interrupted. Competitor lookups make at most two
 # sequential 60 s calls; a prompt lookup reads the model catalogs, then waits up to 150 s for
 # the slowest model.
@@ -118,6 +125,17 @@ def _bare_host(raw: str) -> str:
     ):
         raise ValueError(f"Not a valid domain: {raw}")
     return host
+
+
+def _brand_target(raw: str) -> tuple[str, str]:
+    """targetDetection.ts: one word with a dot that parses as a host is a domain."""
+    text = raw.strip()
+    if text and not re.search(r"\s", text) and "." in text:
+        try:
+            return "domain", _bare_host(text)
+        except ValueError:
+            pass
+    return "keyword", text
 
 
 def _key_page_url(raw: str) -> str:
@@ -859,6 +877,38 @@ class SeoService:
             buy=self._buy_prompt,
         )
 
+    async def brand_lookup(self, user_id: int, project_id: str, **kwargs: Any) -> dict[str, Any]:
+        """Buy, or reuse within 12 hours, a brand's mentions in ChatGPT and AI Overviews."""
+        project = await self._project(user_id, project_id)
+        try:
+            command = BrandLookupCreate.model_validate(kwargs)
+        except ValueError as exc:
+            raise _error() from exc
+        kind, target = _brand_target(command.target)
+        # shareOfVoice.ts: one group per brand, never the target again, any casing.
+        seen = {target.lower()}
+        competitors = []
+        for raw in command.competitors:
+            _kind, value = _brand_target(raw)
+            if value.lower() not in seen:
+                seen.add(value.lower())
+                competitors.append(value)
+        request = {"target": target, "target_type": kind, "competitors": competitors}
+        key_fields = {
+            "target": target.lower(),
+            "target_type": kind,
+            "competitors": sorted(value.lower() for value in competitors),
+        }
+        return await self._purchase_lookup(
+            user_id,
+            project,
+            kind="brand",
+            target_key=hashlib.sha256(json.dumps(key_fields, sort_keys=True).encode()).hexdigest(),
+            key=command.idempotency_key,
+            fields={"domain": None, "keywords": None, "request": request},
+            buy=self._buy_brand,
+        )
+
     async def _purchase_lookup(
         self,
         user_id: int,
@@ -1000,9 +1050,9 @@ class SeoService:
             known = [c for c in costs if c is not None]
             lookup["cost_known_usd"] = sum(known)
             lookup["cost_usd"] = sum(known) if len(known) == len(costs) else None
-        # Like backlinks lookups, a failed request fails the lookup, which keeps the other
-        # answers but is never reused, so asking again buys afresh. A free refusal would only
-        # be refused again, so it does not count.
+        # Like backlinks and brand lookups, a failed request fails the lookup, which keeps the
+        # other answers but is never reused, so asking again buys afresh. A free refusal would
+        # only be refused again, so it does not count.
         bought = [row for row in lookup["items"] if row["error"] not in _PROMPT_REFUSALS]
         failures = [row for row in bought if row["status"] != "completed"]
         if any(row["status"] == "unknown" for row in failures):
@@ -1116,6 +1166,75 @@ class SeoService:
             known = [c for c in costs if c is not None]
             lookup["cost_known_usd"] = sum(known)
             lookup["cost_usd"] = sum(known) if costs and len(known) == len(costs) else None
+
+    @staticmethod
+    async def _buy_brand(client: DataForSeoClient, lookup: dict[str, Any]) -> None:
+        """Every LLM Mentions call at once; each answer is kept even when another fails.
+
+        Unlike OpenSEO, which sequences them for its hosted balance checks.
+        """
+        request = lookup["request"]
+        target = llm_target(request["target_type"], request["target"])
+        groups = [(request["target"], target)] + [
+            (value, llm_target(*_brand_target(value))) for value in request["competitors"]
+        ]
+        project_market = (lookup["location_code"], lookup["language_code"])
+        names: list[tuple[str, str]] = []
+        calls: list[Awaitable[tuple[Any, float | None, dict[str, Any]]]] = []
+        for platform in LLM_PLATFORMS:
+            location_code, language_code = (
+                CHATGPT_MARKET if platform == "chat_gpt" else project_market
+            )
+            market: dict[str, Any] = {
+                "platform": platform,
+                "location_code": location_code,
+                "language_code": language_code,
+            }
+            names += [(platform, "aggregated"), (platform, "top_pages"), (platform, "mentions")]
+            calls += [
+                client.llm_aggregated_metrics(target=target, **market),
+                client.llm_top_pages(target=target, **market),
+                client.llm_mentions_search(target=target, limit=BRAND_MENTIONS_LIMIT, **market),
+            ]
+            # Share of voice leaves ChatGPT out outside US English, so its comparison is not
+            # bought there.
+            if request["competitors"] and (
+                platform != "chat_gpt" or project_market == CHATGPT_MARKET
+            ):
+                names.append((platform, "cross"))
+                calls.append(client.llm_cross_aggregated(groups=groups, **market))
+        results = await asyncio.gather(*calls, return_exceptions=True)
+        answers: dict[tuple[str, str], Any] = {}
+        costs: list[float | None] = []
+        failures: list[ProviderFailure] = []
+        for name, result in zip(names, results, strict=True):
+            if isinstance(result, ProviderFailure):
+                costs.append(result.cost)
+                lookup["receipts"].append(result.receipt)
+                failures.append(result)
+                continue
+            if isinstance(result, BaseException):
+                raise result
+            data, cost, receipt = result
+            costs.append(cost)
+            lookup["receipts"].append(receipt)
+            answers[name] = data
+        lookup["overview"], lookup["items"] = shape_brand(
+            answers,
+            target=request["target"],
+            competitors=request["competitors"],
+            chatgpt_counted=project_market == CHATGPT_MARKET,
+        )
+        if failures:
+            lookup.update(
+                status="unknown" if any(f.unknown for f in failures) else "failed",
+                error=str(failures[0]),
+            )
+        else:
+            lookup["status"] = "completed"
+        known = [c for c in costs if c is not None]
+        lookup["cost_known_usd"] = sum(known)
+        lookup["cost_usd"] = sum(known) if len(known) == len(costs) else None
 
     async def list_lookups(
         self, user_id: int, project_id: str, *, kind: str | None = None

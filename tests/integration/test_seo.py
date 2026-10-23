@@ -552,6 +552,11 @@ async def test_competitor_lookups_over_http(env_with_agent, monkeypatch):
             result = {"total_count": 7, "items": [page]}
         elif request.url.path.endswith("/llm_responses/models"):
             result = {"model_name": "gpt-5.6-luna"}
+        elif "/llm_mentions/" in request.url.path:
+            # One shape answers every LLM Mentions endpoint: totals and page items.
+            group = {"key": "google", "mentions": 3}
+            page = {"key": "https://rival.com/p", "platform": [group]}
+            result = {"total": {"platform": [group]}, "items": [page]}
         elif request.url.path.endswith("/llm_responses/live"):
             note = {"title": "Rival", "url": "https://rival.com/"}
             message = {"type": "message", "sections": [{"text": "Rival.", "annotations": [note]}]}
@@ -690,9 +695,28 @@ async def test_competitor_lookups_over_http(env_with_agent, monkeypatch):
         {"url": "https://rival.com/", "domain": "rival.com", "title": "Rival"}
     ]
     assert answers["items"][1]["error"] == "unsupported_country"
+    brand = await client.post(
+        base + "/ai-lookups/brand",
+        headers=auth,
+        json={"target": "rival.com", "idempotency_key": "r", "confirm_paid": True},
+    )
+    assert brand.status_code == 200, brand.text
+    mentions = brand.json()
+    assert (mentions["kind"], mentions["request"]["target_type"]) == ("brand", "domain")
+    assert mentions["overview"]["total_mentions"] == 3
+    assert mentions["overview"]["share_of_voice"] is None
+    # Brand rows keep their own fields through the response unions.
+    assert [(row["section"], row["platform"]) for row in mentions["items"]] == [
+        ("page", "google"),
+        ("page", "chat_gpt"),
+    ]
+    assert mentions["items"][0]["url"] == "https://rival.com/p"
     listed = (await client.get(base + "/ai-lookups", headers=auth)).json()
-    assert [row["lookup_id"] for row in listed] == [answers["lookup_id"]]
-    assert "items" not in listed[0] and listed[0]["item_count"] == 2
+    assert [row["lookup_id"] for row in listed] == [mentions["lookup_id"], answers["lookup_id"]]
+    assert "items" not in listed[1] and listed[1]["item_count"] == 2
+    assert listed[0]["overview"]["total_mentions"] == 3
+    only_brand = await client.get(base + "/ai-lookups", headers=auth, params={"kind": "brand"})
+    assert [row["kind"] for row in only_brand.json()] == ["brand"]
     read_answers = await client.get(base + "/ai-lookups/" + answers["lookup_id"], headers=auth)
     assert read_answers.json()["items"] == answers["items"]
     assert (
@@ -713,7 +737,7 @@ async def test_competitor_lookups_over_http(env_with_agent, monkeypatch):
     read = (await client.get(base + "/lookups/" + domain["lookup_id"], headers=auth)).json()
     assert read["items"] == domain["items"]
     assert (await client.get(base + "/lookups/nope", headers=auth)).status_code == 404
-    assert len(calls) == 11
+    assert len(calls) == 17
 
     other = await create_user(client, auth, username="seo-r3-other")
     for method, path, body in [
@@ -734,6 +758,7 @@ async def test_competitor_lookups_over_http(env_with_agent, monkeypatch):
         ("/api/seo/projects/{project_id}/lookups", "get"),
         ("/api/seo/projects/{project_id}/lookups/{lookup_id}", "get"),
         ("/api/seo/projects/{project_id}/ai-lookups/prompt", "post"),
+        ("/api/seo/projects/{project_id}/ai-lookups/brand", "post"),
         ("/api/seo/projects/{project_id}/ai-lookups", "get"),
         ("/api/seo/projects/{project_id}/ai-lookups/{lookup_id}", "get"),
     ]:

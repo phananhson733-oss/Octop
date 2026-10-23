@@ -6,17 +6,33 @@ import {
   Input,
   Select,
   Space,
+  Table,
+  Tabs,
   Tag,
   Typography,
 } from "antd";
 import { useTranslation } from "react-i18next";
 import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip as RechartsTooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import {
   seoApi,
-  type AiLookup,
-  type AiLookupSummary,
+  type BrandLookup,
+  type BrandLookupSummary,
+  type BrandPage,
+  type BrandPlatform,
+  type BrandQuery,
   type LlmModel,
   type PromptAnswer,
   type PromptCitation,
+  type PromptLookup,
+  type PromptLookupSummary,
   type PromptRequest,
 } from "../../../api/modules/seo";
 import {
@@ -30,8 +46,9 @@ import { safeHttpUrl } from "./SerpPanel";
 import styles from "./index.module.less";
 
 /**
- * AI search (OpenSEO Prompt Explorer): one prompt asked of up to four models
- * side by side, bought on a confirmed click and kept as a lookup.
+ * AI search (OpenSEO Prompt Explorer and Brand Lookup): one prompt asked of up
+ * to four models side by side, and where a brand shows up in AI answers. Each
+ * is bought on a confirmed click and kept as a lookup.
  */
 
 const { Text, Paragraph } = Typography;
@@ -52,14 +69,16 @@ const MAX_PROMPT = 500;
 
 type PromptTarget = Omit<PromptRequest, "country"> & { country?: string };
 
+// Lookup ids come from the same kind's list, so the read is of that kind.
 const promptLookups: LookupApi<
   "prompt",
-  AiLookupSummary,
-  AiLookup,
+  PromptLookupSummary,
+  PromptLookup,
   PromptTarget
 > = {
   list: (projectId, kind) => seoApi.aiLookups(projectId, kind),
-  get: (projectId, lookupId) => seoApi.aiLookup(projectId, lookupId),
+  get: (projectId, lookupId) =>
+    seoApi.aiLookup<PromptLookup>(projectId, lookupId),
   buy: (projectId, data) => seoApi.buyPromptLookup(projectId, data),
 };
 
@@ -324,6 +343,369 @@ export function PromptExplorerCard({
               ))}
             </div>
             <Text type="secondary">{t("seo.aiAnswerPlain")}</Text>
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+const MAX_COMPETITORS = 5;
+// LLM Mentions costs $0.1 a call plus $0.001 a row: three calls a platform,
+// plus a comparison a platform when competitors are given.
+const BRAND_COST_USD = { alone: 0.81, compared: 1.02 };
+const amount = (value: number | null | undefined) =>
+  value == null ? "—" : Math.round(value).toLocaleString();
+
+type BrandTarget = { target: string; competitors: string[] };
+
+const brandLookups: LookupApi<
+  "brand",
+  BrandLookupSummary,
+  BrandLookup,
+  BrandTarget
+> = {
+  list: (projectId, kind) => seoApi.aiLookups(projectId, kind),
+  get: (projectId, lookupId) =>
+    seoApi.aiLookup<BrandLookup>(projectId, lookupId),
+  buy: (projectId, data) => seoApi.buyBrandLookup(projectId, data),
+};
+
+function SafeLink({ url, label }: { url: string; label?: string | null }) {
+  const safe = safeHttpUrl(url);
+  if (!safe) return <Text>{label || url}</Text>;
+  return (
+    <a href={safe} target="_blank" rel="noopener noreferrer" title={safe}>
+      {label || safe}
+    </a>
+  );
+}
+
+export function BrandLookupCard({
+  projectId,
+  domain,
+  configured,
+}: {
+  projectId: string;
+  domain: string;
+  configured: boolean;
+}) {
+  const { t } = useTranslation();
+  const lookups = useLookups(projectId, "brand", brandLookups);
+  const [target, setTarget] = useState(domain);
+  const [competitors, setCompetitors] = useState<string[]>([]);
+  const current = lookups.current;
+  const overview = current?.overview ?? null;
+  const rows = current?.items ?? [];
+  const pages = rows.filter((row): row is BrandPage => row.section === "page");
+  const queries = rows.filter(
+    (row): row is BrandQuery => row.section === "query",
+  );
+  const platform = (value: BrandPlatform) => t(`seo.brandPlatform_${value}`);
+  const platformTag = (value: BrandPlatform) => <Tag>{platform(value)}</Tag>;
+  const table = { pagination: { pageSize: 20, showSizeChanger: false } };
+  const share = overview?.share_of_voice;
+  return (
+    <Card size="small" title={t("seo.brandTitle")}>
+      <div className={styles.stack}>
+        <Text type="secondary">{t("seo.brandHelp")}</Text>
+        {lookups.error && (
+          <Alert type="error" showIcon message={lookups.error} />
+        )}
+        <div className={styles.toolbar}>
+          <Input
+            aria-label={t("seo.brandTarget")}
+            className={styles.projectSelect}
+            value={target}
+            onChange={(event) => setTarget(event.target.value)}
+            placeholder={t("seo.brandTargetPlaceholder")}
+            maxLength={250}
+          />
+          <Select
+            aria-label={t("seo.brandCompetitors")}
+            className={styles.projectSelect}
+            mode="tags"
+            suffixIcon={null}
+            notFoundContent={null}
+            maxCount={MAX_COMPETITORS}
+            tokenSeparators={[",", "，"]}
+            value={competitors}
+            onChange={(values: string[]) =>
+              setCompetitors(
+                values.map((value) => value.trim()).filter(Boolean),
+              )
+            }
+            placeholder={t("seo.brandCompetitorsPlaceholder")}
+          />
+          <BuyButton
+            label={t("seo.brandBuy")}
+            description={t("seo.brandPaidConfirm", {
+              cost: competitors.length
+                ? BRAND_COST_USD.compared
+                : BRAND_COST_USD.alone,
+            })}
+            disabled={!configured || !target.trim()}
+            buying={lookups.buying}
+            onConfirm={() =>
+              lookups.buy({ target: target.trim(), competitors })
+            }
+          />
+          <HistorySelect
+            history={lookups.history}
+            current={current}
+            onOpen={lookups.open}
+          />
+        </div>
+        {!current && !lookups.loading && (
+          <Text type="secondary">{t("seo.lookupNotBought")}</Text>
+        )}
+        {current && (
+          <>
+            <Space wrap size={4}>
+              <Text strong>{current.request.target}</Text>
+              {current.request.competitors.map((name) => (
+                <Tag key={name}>{name}</Tag>
+              ))}
+            </Space>
+            <LookupMeta lookup={current} />
+            {overview && (
+              <>
+                <div className={styles.metrics}>
+                  <Card size="small">
+                    <Text type="secondary">{t("seo.brandMentions")}</Text>
+                    <div className={styles.metricValue}>
+                      {amount(overview.total_mentions)}
+                    </div>
+                  </Card>
+                  <Card size="small">
+                    <Text type="secondary">{t("seo.brandVolume")}</Text>
+                    <div className={styles.metricValue}>
+                      {amount(overview.total_ai_search_volume)}
+                    </div>
+                  </Card>
+                  {overview.platforms.map((row) => (
+                    <Card key={row.platform} size="small">
+                      <Text type="secondary">{platform(row.platform)}</Text>
+                      <div className={styles.metricValue}>
+                        {row.status === "failed"
+                          ? t("seo.brandPlatformFailed")
+                          : t("seo.brandPlatformMetric", {
+                              mentions: amount(row.mentions),
+                              volume: amount(row.ai_search_volume),
+                            })}
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+                {!overview.chatgpt_counted && (
+                  <Text type="secondary">{t("seo.brandChatgptApart")}</Text>
+                )}
+                {overview.monthly_volume.length > 1 && (
+                  <>
+                    <Text strong>{t("seo.brandTrend")}</Text>
+                    <div className={styles.chart}>
+                      <ResponsiveContainer
+                        width="100%"
+                        height="100%"
+                        minWidth={0}
+                      >
+                        <LineChart
+                          data={overview.monthly_volume.map((row) => ({
+                            month: `${row.year}-${String(row.month).padStart(
+                              2,
+                              "0",
+                            )}`,
+                            volume: row.volume,
+                          }))}
+                        >
+                          <CartesianGrid
+                            strokeDasharray="3 3"
+                            stroke="var(--fn-border-secondary)"
+                          />
+                          <XAxis dataKey="month" />
+                          <YAxis />
+                          <RechartsTooltip />
+                          <Line
+                            dataKey="volume"
+                            name={t("seo.brandVolume")}
+                            stroke="#1677ff"
+                            dot={false}
+                          />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </>
+                )}
+                {share && (
+                  <>
+                    <Text strong>
+                      {t("seo.brandShare", {
+                        platforms: share.platforms.map(platform).join(" + "),
+                      })}
+                    </Text>
+                    <Table
+                      size="small"
+                      pagination={false}
+                      rowKey="label"
+                      dataSource={share.entries}
+                      columns={[
+                        {
+                          title: t("seo.brandName"),
+                          dataIndex: "label",
+                          render: (value: string, row) =>
+                            row.is_target ? <Text strong>{value}</Text> : value,
+                        },
+                        {
+                          title: t("seo.brandMentions"),
+                          dataIndex: "mentions",
+                          width: 120,
+                          render: amount,
+                        },
+                        {
+                          title: t("seo.brandSharePct"),
+                          dataIndex: "share_pct",
+                          width: 120,
+                          render: (value: number | null) =>
+                            value == null ? "—" : `${value.toFixed(1)}%`,
+                        },
+                      ]}
+                    />
+                  </>
+                )}
+              </>
+            )}
+            <Tabs
+              items={[
+                {
+                  key: "pages",
+                  label: t("seo.brandPagesTab", { count: pages.length }),
+                  children: (
+                    <Table<BrandPage>
+                      {...table}
+                      rowKey={(row) => `${row.platform}>${row.url}`}
+                      dataSource={pages}
+                      locale={{ emptyText: t("seo.lookupEmpty") }}
+                      expandable={{
+                        rowExpandable: (row) => row.keywords.length > 0,
+                        expandedRowRender: (row) => (
+                          <Space direction="vertical" size={2}>
+                            <Text type="secondary">
+                              {t("seo.brandPagePrompts")}
+                            </Text>
+                            {row.keywords.map((keyword) => (
+                              <Text key={keyword.question}>
+                                {keyword.question} ·{" "}
+                                {amount(keyword.ai_search_volume)}
+                              </Text>
+                            ))}
+                          </Space>
+                        ),
+                      }}
+                      columns={[
+                        {
+                          title: t("seo.brandPage"),
+                          dataIndex: "url",
+                          render: (value: string) => <SafeLink url={value} />,
+                        },
+                        {
+                          title: t("seo.brandPlatform"),
+                          dataIndex: "platform",
+                          width: 150,
+                          render: platformTag,
+                        },
+                        {
+                          title: t("seo.brandMentions"),
+                          dataIndex: "mentions",
+                          width: 100,
+                          render: amount,
+                        },
+                        {
+                          title: t("seo.brandCapturedVolume"),
+                          dataIndex: "captured_volume",
+                          width: 140,
+                          render: amount,
+                        },
+                      ]}
+                    />
+                  ),
+                },
+                {
+                  key: "queries",
+                  label: t("seo.brandQueriesTab", { count: queries.length }),
+                  children: (
+                    <Table<BrandQuery>
+                      {...table}
+                      rowKey={(row) => `${row.platform}>${row.question}`}
+                      dataSource={queries}
+                      locale={{ emptyText: t("seo.lookupEmpty") }}
+                      expandable={{
+                        rowExpandable: (row) =>
+                          row.cited_sources.length > 0 ||
+                          row.brands_mentioned.length > 0,
+                        expandedRowRender: (row) => (
+                          <Space direction="vertical" size={4}>
+                            {row.cited_sources.length > 0 && (
+                              <>
+                                <Text type="secondary">
+                                  {t("seo.promptCitations", {
+                                    count: row.cited_sources.length,
+                                  })}
+                                </Text>
+                                {row.cited_sources.map((source) => (
+                                  <SafeLink
+                                    key={source.url}
+                                    url={source.url}
+                                    label={source.title || source.domain}
+                                  />
+                                ))}
+                              </>
+                            )}
+                            {row.brands_mentioned.length > 0 && (
+                              <>
+                                <Text type="secondary">
+                                  {t("seo.brandMentioned")}
+                                </Text>
+                                <Space wrap size={4}>
+                                  {row.brands_mentioned.map((name) => (
+                                    <Tag key={name}>{name}</Tag>
+                                  ))}
+                                </Space>
+                              </>
+                            )}
+                          </Space>
+                        ),
+                      }}
+                      columns={[
+                        {
+                          title: t("seo.brandQuestion"),
+                          dataIndex: "question",
+                        },
+                        {
+                          title: t("seo.brandPlatform"),
+                          dataIndex: "platform",
+                          width: 150,
+                          render: platformTag,
+                        },
+                        {
+                          title: t("seo.brandVolume"),
+                          dataIndex: "ai_search_volume",
+                          width: 120,
+                          render: amount,
+                        },
+                        {
+                          title: t("seo.brandLastSeen"),
+                          dataIndex: "last_seen_at",
+                          width: 110,
+                          render: (value: string | null) =>
+                            value ? value.slice(0, 10) : "—",
+                        },
+                      ]}
+                    />
+                  ),
+                },
+              ]}
+            />
+            <Text type="secondary">{t("seo.brandEstimates")}</Text>
           </>
         )}
       </div>

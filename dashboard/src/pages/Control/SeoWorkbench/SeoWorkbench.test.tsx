@@ -47,6 +47,7 @@ vi.mock("../../../api/modules/seo", async (importOriginal) => ({
     lookups: vi.fn(),
     lookup: vi.fn(),
     buyPromptLookup: vi.fn(),
+    buyBrandLookup: vi.fn(),
     aiLookups: vi.fn(),
     aiLookup: vi.fn(),
     context: vi.fn(),
@@ -1879,6 +1880,134 @@ describe("AI visibility", () => {
     });
     expect(within(card).getByText("seo.promptNotMentioned")).toBeVisible();
     expect(seoApi.buyPromptLookup).toHaveBeenCalledTimes(1);
+  });
+
+  it("looks up a brand with competitors on a confirmed click and shows each section", async () => {
+    vi.mocked(seoApi.aiVisibility).mockRejectedValue(new Error("not needed"));
+    vi.mocked(seoApi.buyBrandLookup).mockResolvedValue({
+      lookup_id: "l-brand",
+      kind: "brand",
+      request: {
+        target: "example.com",
+        target_type: "domain",
+        competitors: ["Rival", "Other Brand"],
+      },
+      overview: {
+        chatgpt_counted: false,
+        total_mentions: 5,
+        total_ai_search_volume: 1500,
+        platforms: [
+          {
+            platform: "chat_gpt",
+            status: "completed",
+            mentions: 10,
+            ai_search_volume: 1000,
+          },
+          {
+            platform: "google",
+            status: "failed",
+            mentions: null,
+            ai_search_volume: null,
+          },
+        ],
+        monthly_volume: [
+          { year: 2026, month: 8, volume: 100 },
+          { year: 2026, month: 9, volume: 200 },
+        ],
+        share_of_voice: {
+          platforms: ["google"],
+          entries: [
+            {
+              label: "example.com",
+              is_target: true,
+              mentions: 6,
+              share_pct: 75,
+            },
+            { label: "Rival", is_target: false, mentions: 2, share_pct: 25 },
+            {
+              label: "Other Brand",
+              is_target: false,
+              mentions: null,
+              share_pct: null,
+            },
+          ],
+        },
+      },
+      status: "completed",
+      observed_at: "2026-10-23T08:00:00Z",
+      item_count: 2,
+      cost_usd: 1.02,
+      cached: false,
+      items: [
+        {
+          section: "page",
+          platform: "chat_gpt",
+          url: "https://example.com/a",
+          domain: "example.com",
+          mentions: 10,
+          captured_volume: 300,
+          keywords: [{ question: "best drama apps", ai_search_volume: 900 }],
+        },
+        {
+          section: "query",
+          platform: "chat_gpt",
+          question: "best drama apps",
+          ai_search_volume: 900,
+          first_seen_at: null,
+          last_seen_at: "2026-10-01 00:00:00 +00:00",
+          cited_sources: [
+            { url: "javascript:alert(1)", domain: null, title: "Bad source" },
+          ],
+          brands_mentioned: ["Example"],
+        },
+      ],
+    });
+    setup("/workbench/seo-workbench.main?project=p1&view=ai");
+    const card = (await screen.findByText("seo.brandTitle")).closest(
+      ".ant-card",
+    ) as HTMLElement;
+    expect(await within(card).findByText("seo.lookupNotBought")).toBeVisible();
+    expect(seoApi.aiLookups).toHaveBeenCalledWith("p1", "brand");
+    // The project's domain is the default target.
+    expect(within(card).getByLabelText("seo.brandTarget")).toHaveValue(
+      "example.com",
+    );
+    fireEvent.change(
+      within(card).getByRole("combobox", { name: "seo.brandCompetitors" }),
+      { target: { value: " Rival ,Other Brand," } },
+    );
+    fireEvent.click(within(card).getByRole("button", { name: "seo.brandBuy" }));
+    expect(await screen.findByText("seo.brandPaidConfirm")).toBeInTheDocument();
+    expect(seoApi.buyBrandLookup).not.toHaveBeenCalled();
+    const confirm = await screen.findAllByRole("button", {
+      name: "seo.serpConfirmBuy",
+    });
+    await act(async () => {
+      fireEvent.click(confirm[confirm.length - 1]);
+    });
+    expect(seoApi.buyBrandLookup).toHaveBeenCalledWith("p1", {
+      target: "example.com",
+      competitors: ["Rival", "Other Brand"],
+      idempotency_key: expect.any(String),
+      confirm_paid: true,
+    });
+    expect(await within(card).findByText("1,500")).toBeVisible();
+    expect(within(card).getByText("seo.brandPlatformFailed")).toBeVisible();
+    expect(within(card).getByText("seo.brandChatgptApart")).toBeVisible();
+    expect(within(card).getByText("75.0%")).toBeVisible();
+    expect(
+      within(card).getByRole("link", { name: "https://example.com/a" }),
+    ).toHaveAttribute("href", "https://example.com/a");
+    fireEvent.click(within(card).getByText("seo.brandQueriesTab"));
+    expect(await within(card).findByText("best drama apps")).toBeVisible();
+    fireEvent.click(
+      within(card)
+        .getAllByRole("button", { name: /expand row/i })
+        .at(-1)!,
+    );
+    expect(await within(card).findByText("Bad source")).toBeVisible();
+    expect(within(card).queryByRole("link", { name: "Bad source" })).toBeNull();
+    expect(within(card).getByText("Example")).toBeVisible();
   });
 });
 describe("static private report preview", () => {

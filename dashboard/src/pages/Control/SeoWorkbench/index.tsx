@@ -44,7 +44,7 @@ import { AuditPanel } from "./AuditPanel";
 import { CompetitorsPanel } from "./CompetitorsPanel";
 import { RankTrackingPanel } from "./RankTrackingPanel";
 import { AiVisibilityPanel } from "./AiVisibilityPanel";
-import { PromptExplorerCard } from "./AiSearchCards";
+import { BrandLookupCard, PromptExplorerCard } from "./AiSearchCards";
 import { ProjectContextPanel } from "./ProjectContextPanel";
 import { SearchPerformancePanel } from "./SearchPerformancePanel";
 import { SerpPanel } from "./SerpPanel";
@@ -1067,6 +1067,11 @@ function ProjectWorkspace({
                   isVisible={isVisible && view === "ai"}
                 />
                 <PromptExplorerCard
+                  projectId={id}
+                  domain={project.domain}
+                  configured={configured}
+                />
+                <BrandLookupCard
                   projectId={id}
                   domain={project.domain}
                   configured={configured}

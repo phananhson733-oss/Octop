@@ -243,10 +243,57 @@ export interface PromptAnswer {
   web_search: boolean | null;
   cost_usd: number | null;
 }
-export interface AiLookupSummary {
+export type BrandPlatform = "chat_gpt" | "google";
+export interface BrandRequest {
+  /** A domain (subdomains count) or a brand name. */
+  target: string;
+  target_type: "domain" | "keyword";
+  competitors: string[];
+}
+export interface BrandOverview {
+  /** ChatGPT data is US English only; counted in totals only for US English projects. */
+  chatgpt_counted: boolean;
+  total_mentions: number | null;
+  total_ai_search_volume: number | null;
+  platforms: {
+    platform: BrandPlatform;
+    status: "completed" | "failed";
+    mentions: number | null;
+    ai_search_volume: number | null;
+  }[];
+  monthly_volume: { year: number; month: number; volume: number }[];
+  share_of_voice: {
+    platforms: BrandPlatform[];
+    entries: {
+      label: string;
+      is_target: boolean;
+      mentions: number | null;
+      share_pct: number | null;
+    }[];
+  } | null;
+}
+export interface BrandQuery {
+  section: "query";
+  platform: BrandPlatform;
+  question: string;
+  ai_search_volume: number | null;
+  first_seen_at: string | null;
+  last_seen_at: string | null;
+  cited_sources: PromptCitation[];
+  brands_mentioned: string[];
+}
+export interface BrandPage {
+  section: "page";
+  platform: BrandPlatform;
+  url: string;
+  domain: string | null;
+  mentions: number | null;
+  captured_volume: number | null;
+  keywords: { question: string; ai_search_volume: number | null }[];
+}
+export type BrandRow = BrandQuery | BrandPage;
+interface AiLookupBase {
   lookup_id: string;
-  kind: "prompt";
-  request: PromptRequest;
   status: ResearchRun["status"];
   observed_at: string;
   item_count: number;
@@ -255,9 +302,19 @@ export interface AiLookupSummary {
   source_lookup_id?: string | null;
   error?: string | null;
 }
-export interface AiLookup extends AiLookupSummary {
-  items: PromptAnswer[];
+export interface PromptLookupSummary extends AiLookupBase {
+  kind: "prompt";
+  request: PromptRequest;
 }
+export interface BrandLookupSummary extends AiLookupBase {
+  kind: "brand";
+  request: BrandRequest;
+  overview: BrandOverview | null;
+}
+export type AiLookupSummary = PromptLookupSummary | BrandLookupSummary;
+export type PromptLookup = PromptLookupSummary & { items: PromptAnswer[] };
+export type BrandLookup = BrandLookupSummary & { items: BrandRow[] };
+export type AiLookup = PromptLookup | BrandLookup;
 export type RankDevices = "both" | "desktop" | "mobile";
 export type RankCompare = "1d" | "7d" | "30d" | "90d";
 export interface RankTrackerSummary {
@@ -783,18 +840,29 @@ export const seoApi = {
       confirm_paid: true;
     },
   ) =>
-    request<AiLookup>(`${projectPath(id)}/ai-lookups/prompt`, {
+    request<PromptLookup>(`${projectPath(id)}/ai-lookups/prompt`, {
       method: "POST",
       body: JSON.stringify(data),
     }),
-  aiLookups: (id: string, kind: AiLookupSummary["kind"]) =>
-    request<AiLookupSummary[]>(
+  buyBrandLookup: (
+    id: string,
+    data: {
+      target: string;
+      competitors: string[];
+      idempotency_key: string;
+      confirm_paid: true;
+    },
+  ) =>
+    request<BrandLookup>(`${projectPath(id)}/ai-lookups/brand`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  aiLookups: <K extends AiLookupSummary["kind"]>(id: string, kind: K) =>
+    request<Extract<AiLookupSummary, { kind: K }>[]>(
       `${projectPath(id)}/ai-lookups?${new URLSearchParams({ kind })}`,
     ),
-  aiLookup: (id: string, lookupId: string) =>
-    request<AiLookup>(
-      `${projectPath(id)}/ai-lookups/${encodeURIComponent(lookupId)}`,
-    ),
+  aiLookup: <L extends AiLookup = AiLookup>(id: string, lookupId: string) =>
+    request<L>(`${projectPath(id)}/ai-lookups/${encodeURIComponent(lookupId)}`),
   rankTrackers: (id: string) =>
     request<RankTrackerSummary[]>(`${projectPath(id)}/rank-trackers`),
   createRankTracker: (

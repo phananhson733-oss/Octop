@@ -7,7 +7,7 @@ dataforseo-research-tools.ts (top pages follow OpenSEO 2d8236a domainPagesPage.t
 backlinks its lib/dataforseo/backlinks.ts and features/backlinks/services), AI answers follow lib/dataforseo/ai-tracking.ts and
 features/ai-visibility/providers/dataforseoEvidence.ts, and prompt answers follow 2d8236a
 lib/dataforseo/llm-models.ts, lib/dataforseo/ai.ts and features/ai-search/services/
-promptExplorer.ts (MIT).
+promptExplorer.ts, brand mentions its lib/dataforseo/ai.ts and shared.ts (MIT).
 """
 
 from __future__ import annotations
@@ -613,6 +613,37 @@ def map_llm_response(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# Platforms LLM Mentions covers (shared.ts LlmPlatform); ChatGPT's data is US English only.
+LLM_PLATFORMS = ("chat_gpt", "google")
+CHATGPT_MARKET = (2840, "en")
+
+
+def llm_target(kind: str, value: str) -> dict[str, Any]:
+    """shared.ts buildLlmTarget: a domain with its subdomains, or a word-matched brand."""
+    if kind == "domain":
+        return {
+            "domain": value,
+            "include_subdomains": True,
+            "search_filter": "include",
+            "search_scope": ["any"],
+        }
+    return {
+        "keyword": value,
+        "search_filter": "include",
+        "search_scope": ["any", "brand_entities"],
+        "match_type": "word_match",
+    }
+
+
+def map_llm_aggregated(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """aggregated_metrics' per-platform totals."""
+    total = result.get("total") or {}
+    groups = total.get("platform") if isinstance(total, dict) else None
+    if groups is not None and not isinstance(groups, list):
+        raise _MalformedResult
+    return [group for group in groups or [] if isinstance(group, dict)]
+
+
 class DataForSeoClient:
     def __init__(
         self, login: str, password: str, *, transport: httpx.AsyncBaseTransport | None = None
@@ -779,6 +810,79 @@ class DataForSeoClient:
             map_llm_response,
             timeout=AI_TIMEOUT_SECONDS,
         )
+
+    async def _llm_mentions(
+        self,
+        endpoint: str,
+        payload: dict[str, Any],
+        mapper: Callable[[dict[str, Any]], Any] = _item_list,
+    ) -> tuple[Any, float | None, dict[str, Any]]:
+        return await self._result(f"ai_optimization/llm_mentions/{endpoint}/live", payload, mapper)
+
+    async def llm_aggregated_metrics(
+        self, *, target: dict[str, Any], platform: str, location_code: int, language_code: str
+    ) -> tuple[list[dict[str, Any]], float | None, dict[str, Any]]:
+        """How often AI answers on ``platform`` mention ``target``, and their search volume."""
+        payload = {
+            "target": [target],
+            "platform": platform,
+            "location_code": location_code,
+            "language_code": language_code,
+            "internal_list_limit": 20,
+        }
+        return await self._llm_mentions("aggregated_metrics", payload, map_llm_aggregated)
+
+    async def llm_top_pages(
+        self, *, target: dict[str, Any], platform: str, location_code: int, language_code: str
+    ) -> tuple[list[dict[str, Any]], float | None, dict[str, Any]]:
+        """The pages those answers cite most."""
+        payload = {
+            "target": [target],
+            "platform": platform,
+            "location_code": location_code,
+            "language_code": language_code,
+            "links_scope": "sources",
+            "items_list_limit": 10,
+            "internal_list_limit": 5,
+        }
+        return await self._llm_mentions("top_pages", payload)
+
+    async def llm_mentions_search(
+        self,
+        *,
+        target: dict[str, Any],
+        platform: str,
+        location_code: int,
+        language_code: str,
+        limit: int,
+    ) -> tuple[list[dict[str, Any]], float | None, dict[str, Any]]:
+        """A sample of the prompts whose answers mention ``target``."""
+        payload = {
+            "target": [target],
+            "platform": platform,
+            "location_code": location_code,
+            "language_code": language_code,
+            "limit": limit,
+        }
+        return await self._llm_mentions("search", payload)
+
+    async def llm_cross_aggregated(
+        self,
+        *,
+        groups: list[tuple[str, dict[str, Any]]],
+        platform: str,
+        location_code: int,
+        language_code: str,
+    ) -> tuple[list[dict[str, Any]], float | None, dict[str, Any]]:
+        """Mentions of each ``(aggregation_key, target)`` group, compared in one call."""
+        payload = {
+            "targets": [{"aggregation_key": key, "target": [target]} for key, target in groups],
+            "platform": platform,
+            "location_code": location_code,
+            "language_code": language_code,
+            "internal_list_limit": 5,
+        }
+        return await self._llm_mentions("cross_aggregated_metrics", payload)
 
     async def domain_overview(
         self, *, target: str, location_code: int, language_code: str

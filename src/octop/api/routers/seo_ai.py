@@ -3,7 +3,7 @@ AI search lookups bought one at a time."""
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, Field
@@ -15,6 +15,7 @@ from octop.infra.seo.models import (
     AiCheckCreate,
     AiEnginesPut,
     AiPromptsAdd,
+    BrandLookupCreate,
     PromptLookupCreate,
 )
 from octop.infra.seo.service import SeoService
@@ -199,17 +200,105 @@ class PromptAnswer(BaseModel):
     cost_usd: float | None
 
 
+Platform = Literal["chat_gpt", "google"]
+
+
+class BrandRequest(BaseModel):
+    target: str = Field(description="The domain (subdomains count) or brand name looked up.")
+    target_type: Literal["domain", "keyword"]
+    competitors: list[str] = Field(description="Brands or domains compared for share of voice.")
+
+
+class BrandPlatform(BaseModel):
+    platform: Platform
+    status: Literal["completed", "failed"]
+    mentions: int | None = Field(description="AI answers mentioning the target.")
+    ai_search_volume: int | None = Field(description="Monthly searches of those prompts.")
+
+
+class BrandMonth(BaseModel):
+    year: int
+    month: int
+    volume: int
+
+
+class BrandShare(BaseModel):
+    label: str
+    is_target: bool
+    mentions: int | None = Field(description="null: no data, left out of the share.")
+    share_pct: float | None
+
+
+class BrandShareOfVoice(BaseModel):
+    platforms: list[Platform] = Field(description="The platforms whose comparison answered.")
+    entries: list[BrandShare]
+
+
+class BrandOverview(BaseModel):
+    chatgpt_counted: bool = Field(
+        description="ChatGPT data is US English only: it counts toward totals, the trend and "
+        "share of voice only when the project's market is US English."
+    )
+    total_mentions: int | None
+    total_ai_search_volume: int | None
+    platforms: list[BrandPlatform]
+    monthly_volume: list[BrandMonth] = Field(description="The last 12 months, oldest first.")
+    share_of_voice: BrandShareOfVoice | None = Field(
+        description="null without competitors or when no comparison answered."
+    )
+
+
+class BrandSource(BaseModel):
+    url: str
+    domain: str | None
+    title: str | None
+
+
+class BrandQuery(BaseModel):
+    section: Literal["query"]
+    platform: Platform
+    question: str = Field(description="A prompt whose AI answer mentions the target.")
+    ai_search_volume: int | None
+    first_seen_at: str | None
+    last_seen_at: str | None
+    cited_sources: list[BrandSource] = Field(description="Pages that answer cited, max 10.")
+    brands_mentioned: list[str] = Field(description="Brands that answer named, max 20.")
+
+
+class BrandPageKeyword(BaseModel):
+    question: str
+    ai_search_volume: int | None
+
+
+class BrandPage(BaseModel):
+    section: Literal["page"]
+    platform: Platform
+    url: str
+    domain: str | None
+    mentions: int | None = Field(description="Answers citing this page.")
+    captured_volume: int | None = Field(description="Monthly searches of those prompts.")
+    keywords: list[BrandPageKeyword] = Field(
+        description="Example prompts from the 100-prompt sample that cited it."
+    )
+
+
+BrandRow = Annotated[BrandQuery | BrandPage, Field(discriminator="section")]
+
+
 class AiLookupSummary(BaseModel):
     lookup_id: str
     project_id: str
-    kind: Literal["prompt"]
-    request: PromptRequest = Field(description="What was asked (kind prompt).")
+    kind: Literal["prompt", "brand"]
+    request: PromptRequest | BrandRequest = Field(
+        description="What was asked (prompt) or looked up (brand)."
+    )
+    overview: BrandOverview | None = Field(default=None, description="Brand totals (brand).")
     location_code: int = Field(description="The project's market; scopes reuse only.")
     language_code: str
     status: Literal["running", "completed", "failed", "unknown"] = Field(
-        description="completed when every model asked answered (one refused at no charge does "
-        "not count); a failed or unknown lookup keeps the other answers and is never reused. "
-        "Each answer has its own status."
+        description="completed when every call answered (prompt: a model refused at no charge "
+        "does not count); a failed or unknown lookup keeps what the others returned and is "
+        "never reused. Each prompt answer has its own status."
     )
     observed_at: str
     item_count: int
@@ -221,7 +310,10 @@ class AiLookupSummary(BaseModel):
 
 
 class AiLookup(AiLookupSummary):
-    items: list[PromptAnswer] = Field(description="One answer per model asked, in model order.")
+    items: list[PromptAnswer] | list[BrandRow] = Field(
+        description="One answer per model asked, in model order (prompt); cited pages, then the "
+        "prompts whose answers mention the target, by volume (brand)."
+    )
 
 
 _BASE = "/projects/{project_id}/ai-visibility"
@@ -356,6 +448,27 @@ async def buy_prompt_lookup(
     return found | {"item_count": len(found["items"])}
 
 
+@router.post(
+    _LOOKUPS + "/brand",
+    response_model=AiLookup,
+    summary="Look up a brand's AI mentions",
+    description="Requires explicit paid confirmation. Buys DataForSEO LLM Mentions for a domain "
+    "or brand name on ChatGPT (US English data) and Google AI Overviews (the project's market): "
+    "aggregated metrics, the most cited pages and a 100-prompt sample per platform, plus share "
+    "of voice against up to 5 competitors. About $0.80, $1.00 with competitors. No retries. The "
+    "same target and competitors within 12 hours are served from a non-empty lookup at no "
+    "charge. Reuse the idempotency key to read an existing attempt.",
+)
+async def buy_brand_lookup(
+    project_id: str,
+    body: BrandLookupCreate,
+    owner: int = Depends(seo_owner),
+    service: SeoService = Depends(seo_service),
+) -> Any:
+    found = await service.brand_lookup(owner, project_id, **body.model_dump())
+    return found | {"item_count": len(found["items"])}
+
+
 @router.get(
     _LOOKUPS,
     response_model=list[AiLookupSummary],
@@ -364,7 +477,7 @@ async def buy_prompt_lookup(
 )
 async def ai_lookups(
     project_id: str,
-    kind: Literal["prompt"] | None = Query(default=None),
+    kind: Literal["prompt", "brand"] | None = Query(default=None),
     owner: int = Depends(seo_owner),
     service: SeoService = Depends(seo_service),
 ) -> Any:
