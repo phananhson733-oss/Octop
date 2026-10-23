@@ -28,7 +28,6 @@ import {
   type SavedKeyword,
   type SeoReport,
 } from "../../../api/modules/seo";
-import { octopThreadsApi } from "../../../api/modules/octopThreads";
 import { useAgent } from "../../../context/AgentContext";
 import { useCurrentUser } from "../../../hooks/useCurrentUser";
 import { useServerTimezone } from "../../../hooks/useServerTimezone";
@@ -48,6 +47,7 @@ import { BrandLookupCard, PromptExplorerCard } from "./AiSearchCards";
 import { ProjectContextPanel } from "./ProjectContextPanel";
 import { SearchPerformancePanel } from "./SearchPerformancePanel";
 import { SerpPanel } from "./SerpPanel";
+import { AskExpertButton, AskExpertContext, openExpertChat } from "./AskExpert";
 import { useSearchTabs } from "./searchTabs";
 import styles from "./index.module.less";
 
@@ -60,6 +60,7 @@ export default function SeoWorkbench({
 }) {
   const { t } = useTranslation();
   const { agents } = useAgent();
+  const navigate = useNavigate();
   const [query, setQuery] = useSearchParams();
   const requestedProject = query.get("project");
   const user = useCurrentUser();
@@ -108,6 +109,24 @@ export default function SeoWorkbench({
     setQuery({ project: value, view: "research" }, { replace: true });
   };
   const project = projects.find((p) => p.project_id === projectId);
+  const chatAgentId = project?.chat_agent_id;
+  const askExpert =
+    project && chatAgentId
+      ? async (what: string) => {
+          setError("");
+          try {
+            await openExpertChat(navigate, chatAgentId, {
+              autoSendInput: t("seo.askExpertPrompt", {
+                projectId: project.project_id,
+                domain: project.domain,
+                what,
+              }),
+            });
+          } catch (err) {
+            setError(apiErrorMessage(err, t("seo.operationError"), t));
+          }
+        }
+      : null;
   async function submitDialog(values: Record<string, string>) {
     setBusy(true);
     setError("");
@@ -177,21 +196,23 @@ export default function SeoWorkbench({
           </Tag>
         </div>
         {project ? (
-          <ProjectWorkspace
-            key={project.project_id}
-            project={project}
-            configured={configured}
-            isVisible={isVisible}
-            isAdmin={isAdmin}
-            agents={owned}
-            onProject={(updated) =>
-              setProjects((list) =>
-                list.map((p) =>
-                  p.project_id === updated.project_id ? updated : p,
-                ),
-              )
-            }
-          />
+          <AskExpertContext.Provider value={askExpert}>
+            <ProjectWorkspace
+              key={project.project_id}
+              project={project}
+              configured={configured}
+              isVisible={isVisible}
+              isAdmin={isAdmin}
+              agents={owned}
+              onProject={(updated) =>
+                setProjects((list) =>
+                  list.map((p) =>
+                    p.project_id === updated.project_id ? updated : p,
+                  ),
+                )
+              }
+            />
+          </AskExpertContext.Provider>
         ) : (
           <Empty description={t("seo.emptyProjects")} />
         )}
@@ -305,7 +326,7 @@ function ProjectWorkspace({
   project: SeoProject;
   configured: boolean;
   isVisible: boolean;
-  /** Binding and report generation need the bound expert, which only its admin owner reaches. */
+  /** Binding needs the project's admin owner. */
   isAdmin: boolean;
   agents: { agent_id: string; name: string }[];
   onProject: (updated: SeoProject) => void;
@@ -563,26 +584,19 @@ function ProjectWorkspace({
       setBusy("");
     }
   }
+  // Results go to this account's own expert for the project, in a new chat.
+  const chatAgentId = project.chat_agent_id;
   async function generateReport() {
-    const agentId = project.agent_id;
-    if (!activeRun || !agentId) return;
+    if (!activeRun || !chatAgentId) return;
     setBusy("report");
     setError("");
     try {
-      const thread = await octopThreadsApi.create(agentId);
-      navigate(
-        `/chat/${encodeURIComponent(agentId)}/${encodeURIComponent(
-          thread.thread_id,
-        )}`,
-        {
-          state: {
-            prefillInput: t("seo.reportPrompt", {
-              projectId: id,
-              runId: activeRun.run_id,
-            }),
-          },
-        },
-      );
+      await openExpertChat(navigate, chatAgentId, {
+        prefillInput: t("seo.reportPrompt", {
+          projectId: id,
+          runId: activeRun.run_id,
+        }),
+      });
     } catch (err) {
       fail(err);
     } finally {
@@ -910,17 +924,25 @@ function ProjectWorkspace({
                       >
                         {t("seo.saveKeywords", { count: selected.length })}
                       </Button>
-                      {isAdmin && (
+                      {chatAgentId && (
                         <Button
-                          disabled={!!busy || !runHasRows || !project.agent_id}
+                          disabled={!!busy || !runHasRows}
                           loading={busy === "report"}
                           onClick={generateReport}
                         >
                           {t("seo.generateReport")}
                         </Button>
                       )}
+                      {activeRun && (
+                        <AskExpertButton
+                          disabled={!!busy || !runHasRows}
+                          what={t("seo.askExpertWhat.research", {
+                            id: activeRun.run_id,
+                          })}
+                        />
+                      )}
                     </div>
-                    {isAdmin && (
+                    {chatAgentId && (
                       <Text type="secondary">{t("seo.reportHelp")}</Text>
                     )}
                   </>

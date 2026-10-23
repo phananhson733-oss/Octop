@@ -292,6 +292,16 @@ def seo_project_for_agent(repos: RepoBundle, agent: Any) -> tuple[int, dict[str,
     return None
 
 
+def _chat_agents(repos: RepoBundle, user_id: int, owner_id: int) -> dict[str, str]:
+    """Project id → ``user_id``'s first expert that works on it in ``owner_id``'s data."""
+    found: dict[str, str] = {}
+    for agent in repos.agent_repo.list_by_user(user_id):
+        bound = seo_project_for_agent(repos, agent)
+        if bound is not None and bound[0] == owner_id:
+            found.setdefault(bound[1]["project_id"], agent.agent_id)
+    return found
+
+
 class SeoService:
     def __init__(self, repos: RepoBundle) -> None:
         self.repos = repos
@@ -310,6 +320,17 @@ class SeoService:
 
     async def list_projects(self, user_id: int) -> list[dict[str, Any]]:
         return await _db(self.repo.projects, user_id)
+
+    async def list_projects_for(self, user: User) -> list[dict[str, Any]]:
+        """The projects ``user`` works in, each with the expert ``user`` chats with about it.
+
+        An admin chats with the bound expert; an account holding the ``seo`` permission with
+        its own copy of it (see ``seo_project_for_agent``). ``None`` when there is none.
+        """
+        owner = await self.workspace_user_id(user)
+        projects = await self.list_projects(owner)
+        chat = await _db(_chat_agents, self.repos, user.id, owner)
+        return [p | {"chat_agent_id": chat.get(p["project_id"])} for p in projects]
 
     async def _project(self, user_id: int, project_id: str) -> dict[str, Any]:
         # SEO data lives under admins (see workspace_user_id). HTTP checks the seo permission;
@@ -359,7 +380,9 @@ class SeoService:
         previous = await _db(self.repo.set_agent, user_id, project_id, command.agent_id)
         if previous == "conflict":
             raise _error(ErrorCode.SEO_CONFLICT)
-        return await self._project(user_id, project_id), previous or None
+        project = await self._project(user_id, project_id)
+        # Only an admin binds, to its own expert, which is the one it chats with.
+        return project | {"chat_agent_id": command.agent_id}, previous or None
 
     async def create_project(
         self,
@@ -408,7 +431,7 @@ class SeoService:
         }
         if not await _db(self.repo.create_project, user_id, project):
             raise _error(ErrorCode.SEO_CONFLICT)
-        return project
+        return project | {"chat_agent_id": agent_id}
 
     async def provider_status(self, user_id: int) -> dict[str, bool]:
         return {

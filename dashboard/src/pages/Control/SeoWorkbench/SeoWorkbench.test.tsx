@@ -26,6 +26,10 @@ const translate = vi.hoisted(
   () => (key: string, values?: Record<string, unknown>) =>
     key === "seo.reportPrompt"
       ? `Report for ${values?.projectId}/${values?.runId}`
+      : key === "seo.askExpertPrompt"
+      ? `Ask about ${values?.what} in ${values?.projectId}`
+      : key.startsWith("seo.askExpertWhat.")
+      ? `${key.slice(18)} ${values?.id}`
       : key,
 );
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: translate }) }));
@@ -174,6 +178,7 @@ const project = {
   location_code: 2840,
   language_code: "en",
   created_at: "2026-10-14T12:00:00Z",
+  chat_agent_id: "agent-one",
 };
 const originalComputedStyle = window.getComputedStyle;
 beforeEach(() => {
@@ -226,6 +231,10 @@ async function startResearch() {
 describe("SEO native workflow", () => {
   it("lets an account with SEO access research the admin's project without its setup controls", async () => {
     currentUser.value = { id: 2, role: "01ROLE" };
+    // Without a copy of the bound expert the account has no one to hand results to.
+    vi.mocked(seoApi.projects).mockResolvedValue([
+      { ...project, chat_agent_id: null },
+    ]);
     setup();
     await startResearch();
     expect(await screen.findByText("zero volume")).toBeVisible();
@@ -234,6 +243,7 @@ describe("SEO native workflow", () => {
       "seo.createProject",
       "seo.provider",
       "seo.generateReport",
+      "seo.askExpert",
     ]) {
       expect(screen.queryByRole("button", { name })).not.toBeInTheDocument();
     }
@@ -283,6 +293,25 @@ describe("SEO native workflow", () => {
     expect(seoApi.research).toHaveBeenCalledTimes(1);
     expect(vi.mocked(seoApi.research).mock.calls[0][1].group_keywords).toBe(
       false,
+    );
+  });
+  it("hands a result to the account's own expert in a new chat that sends itself", async () => {
+    currentUser.value = { id: 2, role: "01ROLE" };
+    vi.mocked(seoApi.projects).mockResolvedValue([
+      { ...project, chat_agent_id: "member-copy" },
+    ]);
+    vi.mocked(seoApi.runs).mockResolvedValue([summary(run)]);
+    setup();
+    expect(await screen.findByText("zero volume")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "seo.askExpert" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/chat/member-copy/thread-one",
+      ),
+    );
+    expect(octopThreadsApi.create).toHaveBeenCalledWith("member-copy");
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      '{"autoSendInput":"Ask about research run-one in p1"}',
     );
   });
   it("preserves idempotency after an uncertain network failure and exposes recovery", async () => {
@@ -625,7 +654,7 @@ describe("SEO native workflow", () => {
   });
   it("keeps an unbound project readable and rebinds it to another expert", async () => {
     vi.mocked(seoApi.projects).mockResolvedValue([
-      { ...project, agent_id: null },
+      { ...project, agent_id: null, chat_agent_id: null },
     ]);
     vi.mocked(seoApi.runs).mockResolvedValue([summary(run)]);
     vi.mocked(seoApi.bindAgent).mockResolvedValue(project);
@@ -633,8 +662,8 @@ describe("SEO native workflow", () => {
     expect(await screen.findByText("zero volume")).toBeVisible();
     expect(screen.getByText("seo.unbound")).toBeVisible();
     expect(
-      screen.getByRole("button", { name: "seo.generateReport" }),
-    ).toBeDisabled();
+      screen.queryByRole("button", { name: "seo.generateReport" }),
+    ).not.toBeInTheDocument();
     fireEvent.mouseDown(screen.getByRole("combobox", { name: "seo.agent" }));
     fireEvent.click(await screen.findByTitle("My SEO"));
     fireEvent.click(screen.getByRole("button", { name: "seo.bindAgent" }));
@@ -729,6 +758,12 @@ describe("site audit", () => {
         "target_url: https://example.com/gone · target_status: 404",
       ),
     ).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "seo.askExpert" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        '{"autoSendInput":"Ask about audit audit-one in p1"}',
+      ),
+    );
   });
   it("blocks a second audit while one runs and cancels it", async () => {
     const running = {
@@ -2008,6 +2043,14 @@ describe("AI visibility", () => {
     expect(await within(card).findByText("Bad source")).toBeVisible();
     expect(within(card).queryByRole("link", { name: "Bad source" })).toBeNull();
     expect(within(card).getByText("Example")).toBeVisible();
+    fireEvent.click(
+      within(card).getByRole("button", { name: "seo.askExpert" }),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        '{"autoSendInput":"Ask about brand l-brand in p1"}',
+      ),
+    );
   });
 });
 describe("static private report preview", () => {

@@ -29,6 +29,7 @@ import { formatServerIsoDateTime } from "../../../utils/formatMessageTime";
 import { apiErrorMessage } from "../../../utils/apiError";
 import { attemptKey } from "./attemptKey";
 import { safeHttpUrl } from "./SerpPanel";
+import { AskExpertButton } from "./AskExpert";
 import styles from "./index.module.less";
 
 const { Text } = Typography;
@@ -568,6 +569,10 @@ export function RankTrackingPanel({
                     {t("seo.rankFailedChecks", { count: run.checks_failed })}
                   </Text>
                 )}
+                <AskExpertButton
+                  disabled={!!busy}
+                  what={t("seo.askExpertWhat.rank", { id: tracker.tracker_id })}
+                />
               </Space>
             ) : (
               <Text type="secondary">{t("seo.rankNever")}</Text>

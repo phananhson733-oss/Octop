@@ -9,6 +9,8 @@ export interface SeoProject {
   location_code: number;
   language_code: string;
   created_at: string;
+  /** This account's own expert for the project, to chat with about results; null when none. */
+  chat_agent_id?: string | null;
 }
 export interface KeywordRow {
   keyword: string;

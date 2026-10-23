@@ -32,6 +32,7 @@ import { formatServerIsoDateTime } from "../../../utils/formatMessageTime";
 import { apiErrorMessage } from "../../../utils/apiError";
 import { attemptKey } from "./attemptKey";
 import { safeHttpUrl } from "./SerpPanel";
+import { AskExpertButton } from "./AskExpert";
 import styles from "./index.module.less";
 
 const { Text, Paragraph } = Typography;
@@ -485,6 +486,11 @@ export function AiVisibilityPanel({
                   <Text type="warning">
                     {t("seo.aiFailedAnswers", { count: run.answers_failed })}
                   </Text>
+                )}
+                {run.status !== "running" && (
+                  <AskExpertButton
+                    what={t("seo.askExpertWhat.ai", { id: run.run_id })}
+                  />
                 )}
               </Space>
             ) : (

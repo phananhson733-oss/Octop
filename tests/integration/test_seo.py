@@ -994,6 +994,9 @@ async def test_seo_permission_shares_the_admin_workspace(env_with_agent, monkeyp
     # The member works in the admin's projects, on the admin's provider credentials.
     listed = (await client.get("/api/seo/projects", headers=member)).json()
     assert [p["project_id"] for p in listed] == [project_id]
+    # Only the admin owns the bound expert; the member has no copy of it to chat with.
+    assert created.json()["chat_agent_id"] == agent_id
+    assert listed[0]["chat_agent_id"] is None
     assert (await client.get("/api/seo/provider", headers=member)).json() == {"configured": True}
     request = {
         "keywords": ["example"],

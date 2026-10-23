@@ -21,6 +21,7 @@ import { useServerTimezone } from "../../../hooks/useServerTimezone";
 import { formatServerIsoDateTime } from "../../../utils/formatMessageTime";
 import { apiErrorMessage } from "../../../utils/apiError";
 import { attemptKey } from "./attemptKey";
+import { AskExpertButton } from "./AskExpert";
 import styles from "./index.module.less";
 
 const { Text } = Typography;
@@ -173,6 +174,14 @@ export function SerpPanel({
             })}
           </Text>
           {serp.cached && <Tag>{t("seo.cached")}</Tag>}
+          {serp.status !== "running" && serp.status !== "failed" && (
+            <AskExpertButton
+              what={t("seo.askExpertWhat.serp", {
+                id: serp.serp_id,
+                keyword: serp.keyword,
+              })}
+            />
+          )}
         </Space>
       )}
       {serp?.error && <Alert type="warning" message={serp.error} />}

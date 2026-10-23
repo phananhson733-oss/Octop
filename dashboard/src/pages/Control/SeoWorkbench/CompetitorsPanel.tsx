@@ -46,6 +46,7 @@ import { formatServerIsoDateTime } from "../../../utils/formatMessageTime";
 import { apiErrorMessage } from "../../../utils/apiError";
 import { attemptKey } from "./attemptKey";
 import { safeHttpUrl } from "./SerpPanel";
+import { AskExpertButton } from "./AskExpert";
 import styles from "./index.module.less";
 
 const { Text } = Typography;
@@ -202,6 +203,16 @@ export function LookupMeta({
           })}
         </Text>
         {lookup.cached && <Tag>{t("seo.cached")}</Tag>}
+        {(lookup.status === "completed" || lookup.status === "partial") && (
+          <AskExpertButton
+            what={t(
+              `seo.askExpertWhat.${
+                "request" in lookup ? lookup.kind : "lookup"
+              }`,
+              { id: lookup.lookup_id },
+            )}
+          />
+        )}
       </Space>
       {lookup.error && <Alert type="warning" message={lookup.error} />}
     </>

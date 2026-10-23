@@ -40,6 +40,12 @@ class Project(BaseModel):
     location_code: int
     language_code: str
     created_at: str
+    chat_agent_id: str | None = Field(
+        default=None,
+        description="Your expert that works on this project, to chat with about its results: "
+        "the bound expert for its admin, your own copy of it with the seo permission; null when "
+        "you have none.",
+    )
 
 
 class ProviderStatus(BaseModel):
@@ -537,9 +543,9 @@ def _snapshot(serp: dict[str, Any]) -> dict[str, Any]:
 
 @router.get("/projects", response_model=list[Project], summary="List your SEO projects")
 async def projects(
-    owner: int = Depends(seo_owner), service: SeoService = Depends(seo_service)
+    user: User = Depends(current_user), service: SeoService = Depends(seo_service)
 ) -> Any:
-    return await service.list_projects(owner)
+    return await service.list_projects_for(user)
 
 
 @router.post("/projects", response_model=Project, summary="Create an agent-bound SEO project")

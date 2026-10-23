@@ -428,7 +428,7 @@ rebound.
 
 | Method | Path | Auth | Notes |
 |--------|------|------|-------|
-| `GET`/`POST` | `/seo/projects` | seo / admin | list / create (bound to an owned, unshared expert) |
+| `GET`/`POST` | `/seo/projects` | seo / admin | list / create (bound to an owned, unshared expert); each project carries `chat_agent_id`, the caller's own expert for it (the bound one for its admin, the caller's copy of it otherwise, else `null`), which the workbench hands results to in chat |
 | `PATCH`  | `/seo/projects/{id}` | admin | body `{agent_id}` — rebind to another expert |
 | `GET`/`PUT` | `/seo/provider` | seo / admin | `{configured}`; `PUT {login, password}` stores encrypted credentials |
 | `POST`   | `/seo/projects/{id}/research` | seo | paid keyword research → full run |

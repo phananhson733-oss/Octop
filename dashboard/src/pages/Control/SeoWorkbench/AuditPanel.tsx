@@ -29,6 +29,7 @@ import { formatServerIsoDateTime } from "../../../utils/formatMessageTime";
 import { apiErrorMessage } from "../../../utils/apiError";
 import { attemptKey } from "./attemptKey";
 import { isServerUnreachable } from "./serverUnreachable";
+import { AskExpertButton } from "./AskExpert";
 import styles from "./index.module.less";
 
 const { Text, Paragraph } = Typography;
@@ -338,6 +339,12 @@ export function AuditPanel({
               {t("seo.auditDelete")}
             </Button>
           </Popconfirm>
+          {detail && !isActive(detail) && detail.pages_crawled > 0 && (
+            <AskExpertButton
+              disabled={!!busy}
+              what={t("seo.askExpertWhat.audit", { id: detail.audit_id })}
+            />
+          )}
         </div>
       ) : (
         <Empty description={t("seo.auditEmpty")} />

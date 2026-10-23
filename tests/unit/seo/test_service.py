@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from octop.infra.errors import OctopError
+from octop.infra.users.identity import User
 
 
 async def test_project_owner_and_agent_unique(context):
@@ -58,6 +59,33 @@ async def test_seo_permission_copy_works_in_the_admin_project(context):
     # Only its owner's threads can use it.
     with pytest.raises(OctopError):
         await service.project_for_agent(user, "bob-seo")
+
+
+async def test_each_account_chats_about_a_project_with_its_own_expert(context):
+    service, repos, user, other = context
+    repos.agent_repo.update_config("seo", published_expert_id="tpl-seo")
+    project = await service.create_project(
+        user, name="Example", domain="example.com", agent_id="seo"
+    )
+    assert project["chat_agent_id"] == "seo"
+    admin = User(id=user, username="alice", role="admin", display_name=None)
+    assert [p["chat_agent_id"] for p in await service.list_projects_for(admin)] == ["seo"]
+    member = User(id=other, username="bob", role="user", display_name=None, permissions=["seo"])
+    repos.user_repo.set_permissions(other, ["seo"])
+    # A member without a copy of the bound expert has no one to hand results to.
+    assert [p["chat_agent_id"] for p in await service.list_projects_for(member)] == [None]
+    repos.agent_repo.create(
+        agent_id="bob-blog", user_id=other, name="Blog", published_expert_id="tpl-blog"
+    )
+    repos.agent_repo.create(
+        agent_id="bob-seo", user_id=other, name="SEO", published_expert_id="tpl-seo"
+    )
+    (listed,) = await service.list_projects_for(member)
+    assert listed["project_id"] == project["project_id"]
+    assert listed["chat_agent_id"] == "bob-seo"
+    repos.agent_repo.create(agent_id="seo2", user_id=user, name="SEO 2")
+    rebound, _ = await service.bind_agent(user, project["project_id"], agent_id="seo2")
+    assert rebound["chat_agent_id"] == "seo2"
 
 
 async def test_provider_encrypted_and_status_only(context):

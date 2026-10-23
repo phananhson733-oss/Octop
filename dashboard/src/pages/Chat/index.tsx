@@ -25,6 +25,7 @@ import { useSessions, fetchAndSyncSessionArtifacts } from "./hooks/useSessions";
 import * as chatStore from "./hooks/chatStore";
 import { formatRunUsage, assistantTurnsFromEnd } from "./utils/chatMessages";
 import { useChatSidebarState } from "./hooks/useChatSidebarState";
+import { useHandOffSend } from "./hooks/useHandOffSend";
 import { useChatHistoryRail } from "./hooks/useChatHistoryRail";
 import { useChatDockPanel } from "./hooks/useChatDockPanel";
 import { useChatSend, type ChatSendOverrides } from "./hooks/useChatSend";
@@ -784,6 +785,18 @@ function ChatPageInner() {
       t,
     ],
   );
+
+  const prefillHandOff = useCallback(
+    (text: string) => chatInputRef.current?.setPrefillText(text),
+    [],
+  );
+  useHandOffSend({
+    threadId: activeThreadId,
+    ready: agentChatReady && historyHydrated && !historyLoading && !isStreaming,
+    failed: Boolean(historyError),
+    send: wrappedHandleSend,
+    fallback: prefillHandOff,
+  });
 
   const flushQueuedItem = useCallback(
     (item: QueuedChatItem, ctx: ChatQueueFlushContext): boolean => {
