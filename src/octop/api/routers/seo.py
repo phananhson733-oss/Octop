@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
 
 from octop.api.deps import current_user, get_server, require_admin, require_permission
+from octop.infra.seo import proposals
 from octop.infra.seo.audit.service import SeoAuditService
 from octop.infra.seo.models import (
     AuditCreate,
@@ -490,6 +491,21 @@ class AuditPages(BaseModel):
     pages: list[AuditPage]
 
 
+class ProposalConfirm(BaseModel):
+    purchase: dict[str, Any] = Field(
+        description="The purchase exactly as an seo_propose_* Agent tool returned it."
+    )
+    signature: str = Field(
+        min_length=64, max_length=64, description="The signature returned with the purchase."
+    )
+
+
+class ProposalBought(BaseModel):
+    kind: str
+    record_id: str = Field(description="The research run, SERP snapshot, lookup or check id.")
+    status: str
+
+
 class ReportContext(BaseModel):
     context_hash: str
     project: Project
@@ -687,6 +703,33 @@ async def buy_lookup(
     service: SeoService = Depends(seo_service),
 ) -> Any:
     return _snapshot(await service.lookup(owner, project_id, **body.model_dump()))
+
+
+@router.post(
+    "/projects/{project_id}/proposals/confirm",
+    response_model=ProposalBought,
+    summary="Buy what the SEO expert proposed",
+    description="The chat's confirm card for an seo_propose_* tool. Buys the signed purchase "
+    "through the same service call as its own route: a changed or unsigned purchase is refused "
+    "(403), and a rank or AI check whose keywords, prompts or settings changed since the "
+    "proposal is refused (409) until the expert proposes it again. Reusing the proposal reads "
+    "the first attempt.",
+)
+async def confirm_proposal(
+    project_id: str,
+    body: ProposalConfirm,
+    request: Request,
+    owner: int = Depends(seo_owner),
+    service: SeoService = Depends(seo_service),
+) -> Any:
+    return await proposals.confirm(
+        service,
+        owner,
+        project_id,
+        body.purchase,
+        body.signature,
+        locale=resolve_request_locale(request),
+    )
 
 
 @router.get(

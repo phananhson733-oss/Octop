@@ -1241,6 +1241,12 @@
         "busy": "an AI visibility check is already running for this project; wait for it to finish",
         "estimate_changed": "the prompts or engines changed since the estimate was shown; review the new estimate and confirm again"
       }
+    },
+    "proposal": {
+      "errors": {
+        "invalid": "this purchase card did not come from the SEO expert's proposal; buy on the workbench instead",
+        "changed": "the keywords, prompts or settings changed after the expert proposed this check; ask the expert to propose it again"
+      }
     }
   }
 }

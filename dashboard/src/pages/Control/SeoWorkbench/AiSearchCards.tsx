@@ -43,6 +43,7 @@ import {
   type LookupApi,
 } from "./CompetitorsPanel";
 import { safeHttpUrl } from "./SerpPanel";
+import { brandEstimateUsd, promptEstimate } from "../../../utils/seoCosts";
 import styles from "./index.module.less";
 
 /**
@@ -53,13 +54,6 @@ import styles from "./index.module.less";
 
 const { Text, Paragraph } = Typography;
 const MODELS: LlmModel[] = ["chat_gpt", "claude", "gemini", "perplexity"];
-// OpenSEO's per-answer reserves (pricing.ts): with web search, then without.
-const RESERVE_USD: Record<LlmModel, [number, number]> = {
-  chat_gpt: [0.09, 0.05],
-  claude: [0.18, 0.08],
-  gemini: [0.11, 0.05],
-  perplexity: [0.04, 0.04],
-};
 // The countries Claude documents; ChatGPT and Perplexity take them all, Gemini none.
 const COUNTRIES =
   "AR AT AU BE BR CA CH CL CN DE DK ES FI FR GB HK ID IN IT JP KR MX MY NL NO NZ PH PL PT RU SA SE TR TW US ZA".split(
@@ -236,14 +230,7 @@ export function PromptExplorerCard({
     type: "region",
   });
   const searchCountry = webSearch ? country : "";
-  // Gemini takes no country: it is skipped unsent, at no charge.
-  const charged = models.filter(
-    (model) => !(searchCountry && model === "gemini"),
-  );
-  const estimate = charged.reduce(
-    (sum, model) => sum + RESERVE_USD[model][webSearch ? 0 : 1],
-    0,
-  );
+  const { charged, usd: estimate } = promptEstimate(models, webSearch, country);
   const matcher = brandMatcher(brand);
   return (
     <Card size="small" title={t("seo.promptTitle")}>
@@ -309,7 +296,7 @@ export function PromptExplorerCard({
             label={t("seo.promptBuy")}
             description={t("seo.promptPaidConfirm", {
               count: charged.length,
-              cost: Number(estimate.toFixed(2)),
+              cost: estimate,
             })}
             disabled={!configured || !prompt.trim() || !models.length}
             buying={lookups.buying}
@@ -351,9 +338,6 @@ export function PromptExplorerCard({
 }
 
 const MAX_COMPETITORS = 5;
-// LLM Mentions costs $0.1 a call plus $0.001 a row: three calls a platform,
-// plus a comparison a platform when competitors are given.
-const BRAND_COST_USD = { alone: 0.81, compared: 1.02 };
 const amount = (value: number | null | undefined) =>
   value == null ? "—" : Math.round(value).toLocaleString();
 
@@ -440,9 +424,7 @@ export function BrandLookupCard({
           <BuyButton
             label={t("seo.brandBuy")}
             description={t("seo.brandPaidConfirm", {
-              cost: competitors.length
-                ? BRAND_COST_USD.compared
-                : BRAND_COST_USD.alone,
+              cost: brandEstimateUsd(competitors.length),
             })}
             disabled={!configured || !target.trim()}
             buying={lookups.buying}

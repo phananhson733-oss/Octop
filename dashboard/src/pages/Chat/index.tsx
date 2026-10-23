@@ -886,9 +886,24 @@ function ChatPageInner() {
 
   const handleAcpPermissionSelect = useCallback(
     (permissionMessage: string) => {
+      // A card's message can come while a turn runs or waits for an answer (a
+      // paid SEO check settles minutes after its click): queue it rather than
+      // cut that turn off or answer the question with it. The queue does not
+      // survive a reload, so the card is told it was only queued.
+      const snapshot = activeThreadId
+        ? chatStore.getSnapshot(activeThreadId)
+        : null;
+      if (
+        snapshot &&
+        (snapshot.isStreaming || hasPendingHitl(snapshot.messages))
+      ) {
+        enqueueQueued({ text: permissionMessage });
+        return false;
+      }
       wrappedHandleSend(permissionMessage);
+      return true;
     },
-    [wrappedHandleSend],
+    [activeThreadId, enqueueQueued, wrappedHandleSend],
   );
 
   const handleHitlDecision = useCallback(

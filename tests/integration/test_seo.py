@@ -963,8 +963,9 @@ async def test_ai_visibility_over_http(env_with_agent, monkeypatch):
 
 async def test_seo_permission_shares_the_admin_workspace(env_with_agent, monkeypatch):
     import octop.infra.seo.service as module
+    from octop.infra.seo import proposals
 
-    client, _server, auth, agent_id = env_with_agent
+    client, server, auth, agent_id = env_with_agent
     calls = []
 
     def supplier(request):
@@ -1007,6 +1008,29 @@ async def test_seo_permission_shares_the_admin_workspace(env_with_agent, monkeyp
     assert [r["run_id"] for r in (await client.get(base + "/runs", headers=auth)).json()] == [
         run_id
     ]
+
+    # The chat's confirm card buys a signed proposal, for the member too; a changed one is
+    # refused before anything is bought.
+    purchase = {
+        "kind": "research",
+        "project_id": project_id,
+        "idempotency_key": "agent-card",
+        "input": {"keywords": ["example card"], "mode": "ideas", "result_limit": 150},
+    }
+    signature = await proposals.sign(module.SeoService(server.services.repos), purchase)
+    confirm = base + "/proposals/confirm"
+    tampered = purchase | {"input": purchase["input"] | {"result_limit": 500}}
+    refused = await client.post(
+        confirm, headers=member, json={"purchase": tampered, "signature": signature}
+    )
+    assert refused.status_code == 403
+    assert len(calls) == 1
+    bought = await client.post(
+        confirm, headers=member, json={"purchase": purchase, "signature": signature}
+    )
+    assert bought.status_code == 200, bought.text
+    assert bought.json()["kind"] == "research"
+    assert len(calls) == 2
 
     # Project setup, provider credentials and Google accounts stay with the admin.
     for method, path, body in [

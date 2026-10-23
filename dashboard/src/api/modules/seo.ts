@@ -922,6 +922,15 @@ export const seoApi = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+  /** Buy what the expert proposed in chat, as its seo_propose_* tool signed it. */
+  confirmProposal: (
+    id: string,
+    data: { purchase: Record<string, unknown>; signature: string },
+  ) =>
+    request<{ kind: string; record_id: string; status: string }>(
+      `${projectPath(id)}/proposals/confirm`,
+      { method: "POST", body: JSON.stringify(data) },
+    ),
   aiVisibility: (
     id: string,
     query: { run_id?: string; branded: AiBranded; gap: boolean },

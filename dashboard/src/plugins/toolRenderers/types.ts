@@ -39,7 +39,8 @@ export interface ToolRenderProps {
   output?: string;
   isStreaming: boolean;
   hideMediaPreview?: boolean;
-  onAcpPermissionSelect?: (message: string) => void;
+  /** Sends a message as the user's; false when the chat queued it behind a running turn or an open question. */
+  onAcpPermissionSelect?: (message: string) => boolean | void;
   agentId?: string | null;
 }
 

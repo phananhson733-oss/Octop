@@ -61,6 +61,8 @@ def tool_env(monkeypatch):
         list_runs=AsyncMock(return_value=[]),
         list_reports=AsyncMock(return_value=[]),
         save_keywords=AsyncMock(return_value={"saved": 2}),
+        provider_status=AsyncMock(return_value={"configured": True}),
+        repos=SimpleNamespace(secret_repo=SimpleNamespace(get_or_create=lambda _k, _f: b"k" * 32)),
     )
     service.ranks = SimpleNamespace(
         list_trackers=AsyncMock(return_value=[]),
@@ -158,7 +160,7 @@ async def test_report_provenance_uses_validated_thread(tool_env):
         skill="keyword-research",
         thread_id="thread-a",
     )
-    assert "seo_research_keywords" not in tools  # Paid requests require the explicit UI action.
+    assert "seo_research_keywords" not in tools  # Paid requests are only proposed.
 
 
 async def test_agent_context_writes_are_attributed_and_serps_are_read_only(tool_env):
@@ -208,7 +210,13 @@ async def test_agent_context_writes_are_attributed_and_serps_are_read_only(tool_
         await tools["seo_get_ai_visibility"].ainvoke({"view": "answers"})
     await tools["seo_get_ai_answer"].ainvoke({"run_id": "r", "prompt_id": "p", "engine": "gemini"})
     service.ai.answer.assert_awaited_once_with(7, "project-a", "r", "p", "gemini")
-    assert not any(word in name for name in tools for word in ("buy", "fetch", "check"))
+    # Proposals buy nothing; any other tool named after a purchase would buy it directly.
+    assert not any(
+        word in name
+        for name in tools
+        if not name.startswith("seo_propose_")
+        for word in ("buy", "fetch", "check")
+    )
 
 
 async def test_free_writes_call_the_routes_services_on_the_owner_data(tool_env):
@@ -245,6 +253,96 @@ async def test_free_writes_call_the_routes_services_on_the_owner_data(tool_env):
     service.audits.cancel.assert_awaited_once_with(1, "project-a", "a")
     # Deleting a tracker, an audit or a report drops data: those stay on the page.
     assert not any(name.startswith(("seo_delete", "seo_remove_rank_tracker")) for name in tools)
+
+
+async def test_proposals_validate_like_the_routes_and_buy_nothing(tool_env):
+    _config, _threads, service, tools = tool_env
+    service.project_for_agent.return_value = (1, {"project_id": "project-a"})
+    first = json.loads(
+        await tools["seo_propose_competitor_lookup"].ainvoke(
+            {"kind": "backlinks", "domain": "rival.com"}
+        )
+    )
+    purchase = first["purchase"]
+    assert first["status"] == "awaiting_confirmation"
+    assert (purchase["kind"], purchase["project_id"]) == ("lookup", "project-a")
+    # Validated and dumped as the route reads it, without the key or the confirmation.
+    assert purchase["input"] == {"kind": "backlinks", "domain": "rival.com"}
+    assert purchase["idempotency_key"].startswith("agent-")
+    # Signed whole, so the card can only buy what this tool returned.
+    assert len(first["signature"]) == 64
+    service.provider_status.assert_awaited_with(1)
+    again = json.loads(
+        await tools["seo_propose_competitor_lookup"].ainvoke(
+            {"kind": "backlinks", "domain": "rival.com"}
+        )
+    )
+    assert again["purchase"]["idempotency_key"] != purchase["idempotency_key"]
+    prompt = json.loads(
+        await tools["seo_propose_prompt_lookup"].ainvoke(
+            {"prompt": "  best crm?  ", "models": ["claude", "gemini"]}
+        )
+    )
+    assert prompt["purchase"]["input"] == {
+        "prompt": "best crm?",
+        "models": ["claude", "gemini"],
+        "web_search": True,
+    }
+    for name, args in (
+        ("seo_propose_research", {"keywords": ["a", "b", "c", "d", "e", "f"]}),
+        ("seo_propose_serp", {"keyword": "crm", "depth": 50}),
+        ("seo_propose_competitor_lookup", {"kind": "competitors", "domain": "rival.com"}),
+        ("seo_propose_brand_lookup", {"target": "acme", "competitors": list("abcdef")}),
+    ):
+        with pytest.raises(OctopError) as invalid:
+            await tools[name].ainvoke(args)
+        assert invalid.value.code == "SEO_INVALID_INPUT", name
+    service.provider_status.return_value = {"configured": False}
+    with pytest.raises(OctopError) as missing:
+        await tools["seo_propose_serp"].ainvoke({"keyword": "crm"})
+    assert missing.value.code == "SEO_PROVIDER_REQUIRED"
+
+
+async def test_check_proposals_carry_the_server_estimate(tool_env):
+    _config, _threads, service, tools = tool_env
+    rows = [{"keyword_id": f"k{n}", "keyword": f"crm {n}"} for n in range(25)]
+    service.ranks.results.return_value = {
+        "tracker": {"tracker_id": "t", "domain": "acme.com", "devices": "both", "depth": 20}
+        | {"keyword_count": 25, "estimate_usd": 0.1},
+        "run": None,
+        "rows": rows,
+    }
+    rank = json.loads(await tools["seo_propose_rank_check"].ainvoke({"tracker_id": "t"}))
+    service.ranks.results.assert_awaited_with(7, "project-a", "t")
+    assert rank["purchase"]["input"] == {"max_cost_usd": 0.1}
+    assert (rank["purchase"]["tracker_id"], rank["purchase"]["checks"]) == ("t", 50)
+    # The card lists the first keywords; the fingerprint covers all of them.
+    assert rank["purchase"]["keywords"] == [f"crm {n}" for n in range(20)]
+    assert rank["purchase"]["keyword_count"] == 25
+    fingerprint = rank["purchase"]["content_hash"]
+    rows[24]["keyword"] = "erp"
+    again = json.loads(await tools["seo_propose_rank_check"].ainvoke({"tracker_id": "t"}))
+    assert again["purchase"]["content_hash"] != fingerprint
+    prompts = [{"prompt_id": f"p{n}", "prompt": f"best crm {n}?"} for n in (1, 2, 3)]
+    service.ai.results.return_value = {
+        "settings": {"engines": ["chatgpt", "gemini"], "estimate_usd": 0.024}
+        | {"location_code": 2840, "language_code": "en"},
+        "prompts": prompts,
+    }
+    check = json.loads(await tools["seo_propose_ai_check"].ainvoke({}))
+    assert check["purchase"]["input"] == {"max_cost_usd": 0.024}
+    assert check["purchase"]["answers"] == 6
+    assert check["purchase"]["prompts"] == ["best crm 1?", "best crm 2?", "best crm 3?"]
+    assert len(check["purchase"]["content_hash"]) == 64
+    service.ranks.results.return_value["tracker"]["keyword_count"] = 0
+    service.ai.results.return_value["prompts"] = []
+    for name, args in (
+        ("seo_propose_rank_check", {"tracker_id": "t"}),
+        ("seo_propose_ai_check", {}),
+    ):
+        with pytest.raises(OctopError) as empty:
+            await tools[name].ainvoke(args)
+        assert empty.value.code == "SEO_INVALID_INPUT", name
 
 
 def _row(keyword: str, volume: int | None) -> dict:

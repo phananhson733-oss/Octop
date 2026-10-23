@@ -1,4 +1,4 @@
-"""Project-bound report tools; paid keyword requests stay behind the explicit UI action."""
+"""Project-bound SEO tools; a paid request is only proposed, the user confirms it on a card."""
 
 from __future__ import annotations
 
@@ -9,8 +9,18 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.tools import StructuredTool
 from langgraph.config import get_config
+from pydantic import BaseModel, ValidationError
 
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.seo.models import (
+    AiCheckCreate,
+    BrandLookupCreate,
+    LookupCreate,
+    PromptLookupCreate,
+    RankCheckCreate,
+    ResearchCreate,
+    SerpCreate,
+)
 from octop.infra.utils.ulid import new_ulid
 
 if TYPE_CHECKING:
@@ -29,6 +39,8 @@ _CONTEXT_PREVIEW_CHARS = 20_000
 _INSPECT_TEXT_CHARS = 24_000
 # AI answer text shown by seo_get_ai_answer (OpenSEO ANSWER_LIMIT).
 _ANSWER_TEXT_CHARS = 24_000
+# Keywords or prompts a check proposal lists on its confirm card.
+_PROPOSAL_PREVIEW = 20
 
 _REPORT_GUIDE = """Write one complete self-contained HTML keyword-research report from the returned
 research and saved-keyword evidence. Include the business opportunity, a prioritized table,
@@ -47,7 +59,8 @@ seo_get_serp, competitor lookups with seo_list_competitor_lookups and
 seo_get_competitor_lookup, tracked rankings with seo_list_rank_trackers,
 seo_get_rank_results and seo_get_rank_history, AI visibility with seo_list_ai_prompts,
 seo_get_ai_visibility and seo_get_ai_answer, prompts asked of AI models and brand mentions in AI
-answers with seo_list_ai_lookups and seo_get_ai_lookup; you cannot buy new ones. Trend entries are [year, month, search_volume]. Use inline CSS and static HTML/SVG only: no
+answers with seo_list_ai_lookups and seo_get_ai_lookup. Do not buy data for a report: propose
+a purchase with a seo_propose_* tool only when the user asks for more data. Trend entries are [year, month, search_volume]. Use inline CSS and static HTML/SVG only: no
 scripts, forms, remote images, remote CSS, or external data fetches. The document must contain
 <html and end with </html>, under 500000 UTF-8 bytes (aim below 80000). Write the actual
 analysis, then call seo_save_report with this exact run_id and context_hash, a title <=120
@@ -57,6 +70,22 @@ hash. Saving creates a private immutable report; it does not publish it or buy a
 After saving, record what you concluded with seo_update_project_context
 append_research_log; the research log is not part of context_hash.
 """
+
+
+_PROPOSE = (
+    "Propose a purchase to the user; nothing is bought and nothing is charged by this tool. "
+    "Use it only when the user wants the data or agrees to buy it. "
+)
+_PROPOSAL_NEXT = (
+    "Nothing is bought yet. The dashboard chat shows the user a card with what this buys "
+    "and what it may cost, the same estimate as the workbench tab. Clicking 确认购买 buys "
+    "it and sends you a message with the record id and status; declining sends you one "
+    "too. End your turn now and wait for that message; do not propose the same purchase "
+    "again. A rank or AI check buys only the keywords, prompts and settings it listed: "
+    "changing them before the user answers makes the card refuse, and it must be proposed "
+    "again. Outside the dashboard chat there is no card: ask the user to buy it on the "
+    "workbench tab instead."
+)
 
 
 def _metrics(row: dict[str, Any]) -> dict[str, Any]:
@@ -286,6 +315,7 @@ def build_seo_tools(
     service: SeoService, bound_agent_id: str, thread_repo: ThreadRepo
 ) -> list[StructuredTool]:
     """Bind identity outside model arguments and revalidate it after every resume."""
+    from octop.infra.seo import proposals  # noqa: PLC0415
     from octop.infra.seo.ai_visibility import SeoAiService  # noqa: PLC0415
     from octop.infra.seo.audit.inspect import trim_texts  # noqa: PLC0415
     from octop.infra.seo.audit.service import SeoAuditService  # noqa: PLC0415
@@ -806,6 +836,118 @@ def build_seo_tools(
         await ranks.remove_keyword(user_id, project_id, tracker_id, keyword_id)
         return json.dumps({"removed": keyword_id})
 
+    async def propose(
+        kind: str, command: type[BaseModel], data: dict[str, Any], **shown: Any
+    ) -> str:
+        """Validate a purchase as its route would and hand it to the chat's confirm card.
+
+        Nothing is bought here: the card sends the signed purchase back only when the user
+        clicks, and the server buys exactly that (see ``proposals``). The key makes a second
+        click, or a click after a reload, read the first attempt instead of buying again.
+        """
+        user_id, project_id, _thread_id = await context()
+        if not (await service.provider_status(user_id))["configured"]:
+            raise OctopError.localized(ErrorCode.SEO_PROVIDER_REQUIRED)
+        key = f"agent-{new_ulid()}"
+        try:
+            valid = command.model_validate(data | {"idempotency_key": key, "confirm_paid": True})
+        except ValidationError as exc:
+            raise OctopError.localized(ErrorCode.SEO_INVALID_INPUT) from exc
+        purchase = {
+            "kind": kind,
+            "project_id": project_id,
+            "idempotency_key": key,
+            "input": valid.model_dump(
+                exclude={"idempotency_key", "confirm_paid"}, exclude_none=True
+            ),
+        } | shown
+        return json.dumps(
+            {
+                "purchase": purchase,
+                "signature": await proposals.sign(service, purchase),
+                "status": "awaiting_confirmation",
+                "next": _PROPOSAL_NEXT,
+            },
+            ensure_ascii=False,
+        )
+
+    async def propose_research(
+        keywords: list[str],
+        mode: str = "auto",
+        result_limit: int = 150,
+        clickstream: bool = False,
+        group_keywords: bool = False,
+    ) -> str:
+        data = {
+            "keywords": keywords,
+            "mode": mode,
+            "result_limit": result_limit,
+            "clickstream": clickstream,
+            "group_keywords": group_keywords,
+        }
+        return await propose("research", ResearchCreate, data)
+
+    async def propose_serp(keyword: str, device: str = "desktop", depth: int = 20) -> str:
+        data = {"keyword": keyword, "device": device, "depth": depth}
+        return await propose("serp", SerpCreate, data)
+
+    async def propose_competitor_lookup(
+        kind: str, domain: str = "", keywords: list[str] | None = None
+    ) -> str:
+        data = {"kind": kind, "domain": domain or None, "keywords": keywords}
+        return await propose("lookup", LookupCreate, data)
+
+    async def propose_rank_check(tracker_id: str) -> str:
+        user_id, project_id, _thread_id = await context()
+        found = await ranks.results(user_id, project_id, tracker_id)
+        tracker = found["tracker"]
+        if not tracker["keyword_count"]:
+            raise OctopError.localized(ErrorCode.SEO_INVALID_INPUT)
+        devices = 2 if tracker["devices"] == "both" else 1
+        return await propose(
+            "rank_check",
+            RankCheckCreate,
+            {"max_cost_usd": tracker["estimate_usd"]},
+            tracker_id=tracker_id,
+            domain=tracker["domain"],
+            checks=tracker["keyword_count"] * devices,
+            keyword_count=tracker["keyword_count"],
+            keywords=[row["keyword"] for row in found["rows"][:_PROPOSAL_PREVIEW]],
+            content_hash=proposals.rank_content(found),
+        )
+
+    async def propose_ai_check() -> str:
+        user_id, project_id, _thread_id = await context()
+        found = await ai.results(user_id, project_id)
+        settings = found["settings"]
+        if not found["prompts"]:
+            raise OctopError.localized(ErrorCode.SEO_INVALID_INPUT)
+        return await propose(
+            "ai_check",
+            AiCheckCreate,
+            {"max_cost_usd": settings["estimate_usd"]},
+            engines=settings["engines"],
+            answers=len(found["prompts"]) * len(settings["engines"]),
+            prompt_count=len(found["prompts"]),
+            prompts=[prompt["prompt"] for prompt in found["prompts"][:_PROPOSAL_PREVIEW]],
+            content_hash=proposals.ai_content(found),
+        )
+
+    async def propose_prompt_lookup(
+        prompt: str, models: list[str], web_search: bool = True, country: str = ""
+    ) -> str:
+        data = {
+            "prompt": prompt,
+            "models": models,
+            "web_search": web_search,
+            "country": country or None,
+        }
+        return await propose("prompt", PromptLookupCreate, data)
+
+    async def propose_brand_lookup(target: str, competitors: list[str] | None = None) -> str:
+        data = {"target": target, "competitors": competitors or []}
+        return await propose("brand", BrandLookupCreate, data)
+
     definitions: list[tuple[str, Any, str]] = [
         (
             "seo_get_report_context",
@@ -858,7 +1000,8 @@ def build_seo_tools(
             "seo_list_serps",
             serps,
             "List Google SERP snapshots already bought for this agent's project, newest first, "
-            "optionally for one keyword. Free; you cannot buy new snapshots. Pass next_offset "
+            "optionally for one keyword. Free; propose a new one with seo_propose_serp. Pass "
+            "next_offset "
             "as offset to read more.",
         ),
         (
@@ -877,8 +1020,8 @@ def build_seo_tools(
             "(the domain's 100 pages drawing the most organic traffic), kind backlinks (its "
             "backlink totals in overview, a year of monthly history, and its top 100 backlinks, "
             "referring domains and linked pages) and kind competitors (the domains ranking for "
-            "a keyword set). Filter with kind. Free; you "
-            "cannot buy new lookups, the user buys them on the Competitors tab. Pass "
+            "a keyword set). Filter with kind. Free; propose a new lookup with "
+            "seo_propose_competitor_lookup. Pass "
             "next_offset as offset to read more.",
         ),
         (
@@ -907,8 +1050,8 @@ def build_seo_tools(
             rank_trackers,
             "List this agent's project rank trackers: a domain (subdomains count) tracked for "
             "a keyword list in the project's market, with devices, depth (results crawled per "
-            "check), keyword_count and last_checked_at. Free; you cannot run checks, the user "
-            "runs them on the Rank tracking tab. Pass next_offset as offset to read more.",
+            "check), keyword_count and last_checked_at. Free; propose a paid check with "
+            "seo_propose_rank_check. Pass next_offset as offset to read more.",
         ),
         (
             "seo_get_rank_results",
@@ -934,8 +1077,8 @@ def build_seo_tools(
             "List the prompts this agent's project asks AI engines for AI visibility, with "
             "topic and branded (names the project's brand or domain), and settings: the "
             "engines a check asks (chatgpt, gemini, google_ai_overview) in the project's "
-            "market. Free; you cannot run checks, the user runs them on the AI visibility tab. "
-            "Pass next_offset as offset to read more.",
+            "market. Free; propose a paid check with seo_propose_ai_check. Pass next_offset as "
+            "offset to read more.",
         ),
         (
             "seo_get_ai_visibility",
@@ -970,8 +1113,8 @@ def build_seo_tools(
             "country) and kind brand (request: a domain or brand name and competitors; "
             "overview: mentions and AI search volume per platform, chat_gpt being US English "
             "data counted in totals only when chatgpt_counted, a 12-month trend and share of "
-            "voice). Filter with kind. Free; you cannot buy new ones, the user buys them on "
-            "the AI visibility tab. Pass next_offset as offset to read more.",
+            "voice). Filter with kind. Free; propose a new one with seo_propose_prompt_lookup "
+            "or seo_propose_brand_lookup. Pass next_offset as offset to read more.",
         ),
         (
             "seo_get_ai_lookup",
@@ -1179,6 +1322,66 @@ def build_seo_tools(
             remove_rank_keyword,
             "Stop tracking one keyword (keyword_id from seo_get_rank_results). Its past positions "
             "stay readable with seo_get_rank_history. Free.",
+        ),
+        (
+            "seo_propose_research",
+            propose_research,
+            _PROPOSE
+            + "Paid keyword research (DataForSEO Labs) for 1-5 seed keywords: mode auto, related, "
+            "suggestions or ideas (auto: suggestions and ideas); result_limit 150, 300 or 500 "
+            "per seed; clickstream asks for clickstream data; group_keywords groups variants "
+            "that share one search volume. Read the result with seo_list_research_rows.",
+        ),
+        (
+            "seo_propose_serp",
+            propose_serp,
+            _PROPOSE + "A paid Google SERP snapshot of one keyword in the project's market: device "
+            "desktop or mobile, depth 20 or 100. The same keyword, device and market within 12 "
+            "hours is served at no charge. Read it with seo_get_serp.",
+        ),
+        (
+            "seo_propose_competitor_lookup",
+            propose_competitor_lookup,
+            _PROPOSE
+            + "A paid competitor lookup, kind domain (a domain's organic footprint and top 100 "
+            "keywords), pages (its 100 pages drawing the most organic traffic) or backlinks "
+            "(its backlink profile) with a domain, or kind competitors with 1-200 keywords "
+            "(the domains ranking for them). The same target and market within 12 hours is "
+            "served at no charge. Read it with seo_get_competitor_lookup.",
+        ),
+        (
+            "seo_propose_rank_check",
+            propose_rank_check,
+            _PROPOSE + "A paid check of every keyword of one rank tracker (tracker_id from "
+            "seo_list_rank_trackers), on its devices and depth, at most the tracker's "
+            "estimate_usd. Change devices, depth or keywords first with the free tools if "
+            "needed. Results arrive over a few minutes: read them with seo_get_rank_results.",
+        ),
+        (
+            "seo_propose_ai_check",
+            propose_ai_check,
+            _PROPOSE
+            + "A paid AI visibility check: every listed prompt asked of every chosen engine, at "
+            "most the settings' estimate_usd. Add prompts or change engines first with the "
+            "free tools if needed. Answers arrive over a few minutes: read them with "
+            "seo_get_ai_visibility.",
+        ),
+        (
+            "seo_propose_prompt_lookup",
+            propose_prompt_lookup,
+            _PROPOSE
+            + "Ask one prompt (up to 500 characters) of 1-4 AI models among chat_gpt, claude, "
+            "gemini and perplexity, with or without web search; country (ISO alpha-2, e.g. US) "
+            "only geolocates the web search and Gemini takes none. Read each model's answer "
+            "with seo_get_ai_lookup.",
+        ),
+        (
+            "seo_propose_brand_lookup",
+            propose_brand_lookup,
+            _PROPOSE
+            + "A paid look at a domain's or brand's mentions in ChatGPT and Google AI Overviews "
+            "answers, compared with up to 5 competitors (about $0.81 alone, $1.02 compared). "
+            "Read it with seo_get_ai_lookup.",
         ),
     ]
     return [
