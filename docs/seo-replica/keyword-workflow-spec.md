@@ -187,3 +187,15 @@ balancebiketoddler.com 的审计只报了三类小问题，同一个站 ChatGPT 
 - **专家工具：** `seo_list_ai_prompts`、`seo_get_ai_visibility`（rows / brands / sources 三个视图分页）、`seo_get_ai_answer`（正文前 24000 字和引用），只读、免费，不能发起查询。
 
 表 `seo_ai_settings`、`seo_ai_prompts`、`seo_ai_runs`、`seo_ai_answers` 追加在 `seo_workbench.sql` / `.pg.sql`，版本号不变。
+
+## 2026-10-23 R5：补齐 OpenSEO 的另外四块
+
+用户看了「虾仁 SEO」的抖音视频（seo.fuckseo.io），想把它集成进工作台。拆它公开的前端包后确认：它就是上游 OpenSEO（约 10-19/20 的版本）加一层页面文字替换式的中文、AI 改用 DeepSeek、用户自己填 Key，没有自研功能。所以这一轮不接它的网站，而是从上游 OpenSEO 2d8236a 原生移植我们还缺的四块。用户定了「四块都做：页面维度、外链、提示词探索、品牌查询，按顺序一块一提交。付费都在页面上点」。四块都存在 `seo_lookups` 里（新的 kind），不加新表；规矩和 R3 一样：只在页面上手动确认后购买，不重试，同一请求标识重放原记录，专家工具只读。
+
+### ① 热门页面（kind `pages`）
+
+移植 `features/domain/services/domainPagesPage.ts`：买 DataForSEO Labs `relevant_pages`，按自然流量估算（`metrics.organic.etv`）倒序取前 100 个页面，记下总页数。每行是网址、估算流量、排名词数和排在第 1 / 2-3 / 4-10 名的词数；没有网址的行丢掉，缺的数保持未知、不当 0。上游按页翻、带包含 / 排除词和区间筛选，这里一次买前 100 个，在页面上排序。
+
+- **购买和复用：** 和域名概况同一套：同一个域名和市场 12 小时内有非空的成功记录就直接复用、不收费；和同一个域名的「域名概况」是两次独立购买。约 $0.012 一次加每行 $0.00012，100 行约 $0.024。
+- **页面：** 「竞争对手」标签里在「域名概况」下面加「热门页面」卡片，域名框同样可选自己的网站和项目背景里的竞争对手；链接只放 http(s)。前 3 / 前 10 的词数由 1 / 2-3 / 4-10 相加，有一项未知就显示未知。
+- **专家工具：** 沿用 `seo_list_competitor_lookups` / `seo_get_competitor_lookup`（kind 多了 `pages`）。

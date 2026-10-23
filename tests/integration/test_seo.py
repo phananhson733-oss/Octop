@@ -536,6 +536,9 @@ async def test_competitor_lookups_over_http(env_with_agent, monkeypatch):
                 "ranked_serp_element": {"serp_item": {"rank_group": 1, "rank_absolute": 2}},
             }
             result = {"total_count": 3, "items": [row]}
+        elif "relevant_pages" in request.url.path:
+            page = {"page_address": "https://rival.com/a", "metrics": {"organic": {"etv": 9.5}}}
+            result = {"total_count": 7, "items": [page]}
         else:
             result = {"items": [{"domain": "rival.com", "visibility": 0.5}]}
         task = {"status_code": 20000, "cost": 0.01, "result": [result]}
@@ -594,6 +597,25 @@ async def test_competitor_lookups_over_http(env_with_agent, monkeypatch):
             "keywords_positions": {},
         }
     ]
+    pages = (
+        await client.post(
+            base + "/lookups",
+            headers=auth,
+            json=request | {"kind": "pages", "idempotency_key": "p"},
+        )
+    ).json()
+    # Page rows keep their own fields through the response model's union.
+    assert pages["items"] == [
+        {
+            "url": "https://rival.com/a",
+            "etv": 9.5,
+            "keywords": None,
+            "pos_1": None,
+            "pos_2_3": None,
+            "pos_4_10": None,
+        }
+    ]
+    assert (pages["kind"], pages["total_count"]) == ("pages", 7)
     for bad in (
         request | {"idempotency_key": "x", "confirm_paid": False},
         request | {"idempotency_key": "y", "keywords": ["a"]},
@@ -601,7 +623,7 @@ async def test_competitor_lookups_over_http(env_with_agent, monkeypatch):
     ):
         assert (await client.post(base + "/lookups", headers=auth, json=bad)).status_code == 422
     summaries = (await client.get(base + "/lookups", headers=auth)).json()
-    assert [row["kind"] for row in summaries] == ["competitors", "domain"]
+    assert [row["kind"] for row in summaries] == ["pages", "competitors", "domain"]
     assert "items" not in summaries[0]
     only = (await client.get(base + "/lookups", headers=auth, params={"kind": "domain"})).json()
     assert [row["lookup_id"] for row in only] == [domain["lookup_id"]]
@@ -611,7 +633,7 @@ async def test_competitor_lookups_over_http(env_with_agent, monkeypatch):
     read = (await client.get(base + "/lookups/" + domain["lookup_id"], headers=auth)).json()
     assert read["items"] == domain["items"]
     assert (await client.get(base + "/lookups/nope", headers=auth)).status_code == 404
-    assert len(calls) == 3
+    assert len(calls) == 4
 
     other = await create_user(client, auth, username="seo-r3-other")
     for method, path, body in [

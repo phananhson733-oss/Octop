@@ -66,6 +66,9 @@ SERP_CACHE_SECONDS = 12 * 60 * 60
 LOOKUP_CACHE_SECONDS = 12 * 60 * 60
 DOMAIN_KEYWORDS_LIMIT = 100
 COMPETITORS_LIMIT = 50
+# OpenSEO pages a domain's relevant_pages by traffic (domainPagesPage.ts); one lookup buys
+# the top 100, like ranked keywords.
+DOMAIN_PAGES_LIMIT = 100
 # Project memory caps from OpenSEO contextUpdateOps.ts / ProjectContextService.ts.
 PROSE_MAX_CHARS = 4000
 MAX_CUSTOM_SECTIONS = 20
@@ -787,7 +790,8 @@ class SeoService:
         """Buy, or reuse within 12 hours, one competitor-research lookup for the market.
 
         kind ``domain``: the domain's organic footprint and its top ranked keywords (two
-        calls); kind ``competitors``: the domains ranking for a keyword set (one call).
+        calls); kind ``pages``: the domain's pages drawing the most organic traffic (one
+        call); kind ``competitors``: the domains ranking for a keyword set (one call).
         """
         project = await self._project(user_id, project_id)
         try:
@@ -891,6 +895,12 @@ class SeoService:
                 )
                 spent(cost, receipt)
                 lookup.update(total_count=ranked["total_count"], items=ranked["rows"])
+            elif lookup["kind"] == "pages":
+                pages, cost, receipt = await client.relevant_pages(
+                    target=lookup["domain"], limit=DOMAIN_PAGES_LIMIT, **market
+                )
+                spent(cost, receipt)
+                lookup.update(total_count=pages["total_count"], items=pages["rows"])
             else:
                 rows, cost, receipt = await client.serp_competitors(
                     keywords=lookup["keywords"], limit=COMPETITORS_LIMIT, **market

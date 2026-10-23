@@ -3,7 +3,8 @@
 Labs mapping follows OpenSEO d7ea785 research-data.ts/helpers.ts, SERP mapping
 follows lib/dataforseo/serp.ts and mcp/tools/get-serp-results.ts, competitor research
 follows lib/dataforseo/labs.ts, features/domain/services and mcp/tools/
-dataforseo-research-tools.ts, AI answers follow lib/dataforseo/ai-tracking.ts and
+dataforseo-research-tools.ts (top pages follow OpenSEO 2d8236a domainPagesPage.ts), AI
+answers follow lib/dataforseo/ai-tracking.ts and
 features/ai-visibility/providers/dataforseoEvidence.ts (MIT).
 """
 
@@ -219,6 +220,27 @@ def map_ranked_keywords(result: dict[str, Any]) -> dict[str, Any]:
                 "intent": normalize_intent(
                     (data.get("search_intent_info") or {}).get("main_intent")
                 ),
+            }
+        )
+    return {"total_count": result.get("total_count"), "rows": rows}
+
+
+def map_relevant_pages(result: dict[str, Any]) -> dict[str, Any]:
+    """relevant_pages rows (domainPagesPage.ts mapPageItem) and the domain's page count."""
+    rows: list[dict[str, Any]] = []
+    for item in _item_list(result):
+        url = item.get("page_address")
+        if not isinstance(url, str) or not url:
+            continue
+        organic = (item.get("metrics") or {}).get("organic") or {}
+        rows.append(
+            {
+                "url": url,
+                "etv": organic.get("etv"),
+                "keywords": organic.get("count"),
+                "pos_1": organic.get("pos_1"),
+                "pos_2_3": organic.get("pos_2_3"),
+                "pos_4_10": organic.get("pos_4_10"),
             }
         )
     return {"total_count": result.get("total_count"), "rows": rows}
@@ -523,6 +545,21 @@ class DataForSeoClient:
         }
         return await self._result(
             "dataforseo_labs/google/ranked_keywords/live", payload, map_ranked_keywords
+        )
+
+    async def relevant_pages(
+        self, *, target: str, location_code: int, language_code: str, limit: int
+    ) -> tuple[dict[str, Any], float | None, dict[str, Any]]:
+        """The domain's pages that draw the most estimated organic traffic."""
+        payload = {
+            "target": target,
+            "location_code": location_code,
+            "language_code": language_code,
+            "limit": limit,
+            "order_by": ["metrics.organic.etv,desc"],
+        }
+        return await self._result(
+            "dataforseo_labs/google/relevant_pages/live", payload, map_relevant_pages
         )
 
     async def serp_competitors(

@@ -69,9 +69,10 @@ class SerpCreate(Command):
 
 
 class LookupCreate(Command):
-    """One competitor-research purchase: a domain's footprint, or who ranks for keywords."""
+    """One competitor-research purchase: a domain's footprint or its top pages, or who
+    ranks for keywords."""
 
-    kind: Literal["domain", "competitors"]
+    kind: Literal["domain", "competitors", "pages"]
     domain: str | None = Field(default=None, min_length=1, max_length=253)
     # DataForSEO serp_competitors takes up to 200 keywords.
     keywords: list[Annotated[str, StringConstraints(max_length=200)]] | None = Field(
@@ -82,10 +83,9 @@ class LookupCreate(Command):
 
     @model_validator(mode="after")
     def _one_target(self) -> "LookupCreate":
-        if (self.domain is None) != (self.kind == "competitors") or (self.keywords is None) != (
-            self.kind == "domain"
-        ):
-            raise ValueError("domain lookups take a domain, competitor lookups keywords")
+        takes_keywords = self.kind == "competitors"
+        if (self.domain is None) != takes_keywords or (self.keywords is None) == takes_keywords:
+            raise ValueError("competitor lookups take keywords, the others a domain")
         return self
 
 

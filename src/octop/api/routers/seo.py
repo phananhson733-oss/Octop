@@ -175,11 +175,20 @@ class SerpCompetitor(BaseModel):
     )
 
 
+class RankedPage(BaseModel):
+    url: str
+    etv: float | None = Field(description="Estimated monthly organic visits to this page.")
+    keywords: int | None = Field(description="Organic keywords the page ranks for.")
+    pos_1: int | None = None
+    pos_2_3: int | None = None
+    pos_4_10: int | None = None
+
+
 class LookupSummary(BaseModel):
     lookup_id: str
     project_id: str
-    kind: str = Field(description="domain or competitors.")
-    domain: str | None = Field(description="The domain looked up (kind domain).")
+    kind: str = Field(description="domain, pages or competitors.")
+    domain: str | None = Field(description="The domain looked up (kinds domain and pages).")
     keywords: list[str] | None = Field(description="The keyword set (kind competitors).")
     location_code: int
     language_code: str
@@ -188,7 +197,9 @@ class LookupSummary(BaseModel):
     item_count: int
     overview: DomainOverview | None = None
     total_count: int | None = Field(
-        default=None, description="All keywords the domain ranks for; items holds the top 100."
+        default=None,
+        description="All keywords (domain) or pages (pages) the domain ranks with; items holds "
+        "the top 100.",
     )
     cost_usd: float | None
     cost_known_usd: float = 0
@@ -198,8 +209,9 @@ class LookupSummary(BaseModel):
 
 
 class Lookup(LookupSummary):
-    items: list[RankedKeyword] | list[SerpCompetitor] = Field(
-        description="Ranked keywords (domain) or competitor domains (competitors)."
+    items: list[RankedKeyword] | list[SerpCompetitor] | list[RankedPage] = Field(
+        description="Ranked keywords (domain), competitor domains (competitors) or pages "
+        "by traffic (pages)."
     )
 
 
@@ -578,8 +590,9 @@ async def serp(
     response_model=Lookup,
     summary="Buy a competitor-research lookup",
     description="Requires explicit paid confirmation. kind domain with a domain buys DataForSEO "
-    "Labs domain_rank_overview and the top 100 ranked_keywords by traffic; kind competitors "
-    "with 1-200 keywords buys serp_competitors (top 50 domains). No retries. The same target "
+    "Labs domain_rank_overview and the top 100 ranked_keywords by traffic; kind pages with a "
+    "domain buys the top 100 relevant_pages by traffic; kind competitors with 1-200 keywords "
+    "buys serp_competitors (top 50 domains). No retries. The same target "
     "and market within 12 hours is served from a non-empty lookup at no charge. Reuse the "
     "idempotency key to read an existing attempt.",
 )
@@ -600,7 +613,7 @@ async def buy_lookup(
 )
 async def lookups(
     project_id: str,
-    kind: str | None = Query(default=None, pattern="^(domain|competitors)$"),
+    kind: str | None = Query(default=None, pattern="^(domain|competitors|pages)$"),
     owner: int = Depends(seo_owner),
     service: SeoService = Depends(seo_service),
 ) -> Any:

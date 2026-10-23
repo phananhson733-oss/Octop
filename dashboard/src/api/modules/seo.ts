@@ -109,9 +109,19 @@ export interface SerpCompetitor {
   keywords_count: number | null;
   keywords_positions: Record<string, number[]>;
 }
+export interface RankedPage {
+  url: string;
+  /** Estimated monthly organic visits to this page. */
+  etv: number | null;
+  /** Organic keywords the page ranks for. */
+  keywords: number | null;
+  pos_1: number | null;
+  pos_2_3: number | null;
+  pos_4_10: number | null;
+}
 export interface LookupSummary {
   lookup_id: string;
-  kind: "domain" | "competitors";
+  kind: "domain" | "competitors" | "pages";
   domain: string | null;
   keywords: string[] | null;
   status: ResearchRun["status"];
@@ -124,7 +134,7 @@ export interface LookupSummary {
     pos_2_3: number | null;
     pos_4_10: number | null;
   } | null;
-  /** Every keyword the domain ranks for; items holds the top 100. */
+  /** Every keyword (domain) or page (pages) the domain ranks with; items holds the top 100. */
   total_count: number | null;
   cost_usd: number | null;
   cached: boolean;
@@ -132,7 +142,7 @@ export interface LookupSummary {
   error?: string | null;
 }
 export interface Lookup extends LookupSummary {
-  items: RankedKeyword[] | SerpCompetitor[];
+  items: RankedKeyword[] | SerpCompetitor[] | RankedPage[];
 }
 export type RankDevices = "both" | "desktop" | "mobile";
 export type RankCompare = "1d" | "7d" | "30d" | "90d";
@@ -635,7 +645,7 @@ export const seoApi = {
   buyLookup: (
     id: string,
     data: (
-      | { kind: "domain"; domain: string }
+      | { kind: "domain" | "pages"; domain: string }
       | { kind: "competitors"; keywords: string[] }
     ) & { idempotency_key: string; confirm_paid: true },
   ) =>

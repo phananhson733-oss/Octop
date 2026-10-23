@@ -1240,12 +1240,16 @@ describe("competitors", () => {
       ],
     });
     setup("/workbench/seo-workbench.main?project=p1&view=competitors");
-    expect(await screen.findAllByText("seo.lookupNotBought")).toHaveLength(2);
+    expect(await screen.findAllByText("seo.lookupNotBought")).toHaveLength(3);
     expect(seoApi.lookups).toHaveBeenCalledWith("p1", "domain");
+    expect(seoApi.lookups).toHaveBeenCalledWith("p1", "pages");
     expect(seoApi.lookups).toHaveBeenCalledWith("p1", "competitors");
     expect(seoApi.buyLookup).not.toHaveBeenCalled();
 
-    const domainBox = screen.getByRole("combobox", {
+    const domainCard = screen
+      .getByText("seo.lookupDomainTitle")
+      .closest(".ant-card") as HTMLElement;
+    const domainBox = within(domainCard).getByRole("combobox", {
       name: "seo.lookupDomain",
     });
     fireEvent.change(domainBox, {
@@ -1260,7 +1264,9 @@ describe("competitors", () => {
       confirm_paid: true,
     });
     expect(screen.getByText("5,000")).toBeVisible();
-    const top10 = screen.getByText("seo.lookupTop10").closest(".ant-card");
+    const top10 = within(domainCard)
+      .getByText("seo.lookupTop10")
+      .closest(".ant-card");
     expect(within(top10 as HTMLElement).getByText("10")).toBeVisible();
     expect(screen.getByText("/guide")).toHaveAttribute(
       "href",
@@ -1301,6 +1307,65 @@ describe("competitors", () => {
     ]);
     expect(await within(rival).findByText("seo.lookupSaved")).toBeVisible();
     expect(within(rival).queryByRole("button")).toBeNull();
+  });
+  it("buys a domain's top pages on a confirmed click and sums its top-3 and top-10 counts", async () => {
+    vi.mocked(seoApi.context).mockResolvedValue(emptyContext);
+    vi.mocked(seoApi.lookups).mockResolvedValue([]);
+    vi.mocked(seoApi.buyLookup).mockResolvedValue({
+      ...lookupBase,
+      lookup_id: "l-pages",
+      kind: "pages",
+      domain: "rival.com",
+      keywords: null,
+      item_count: 2,
+      total_count: 640,
+      items: [
+        {
+          url: "https://rival.com/blog/best",
+          etv: 812.4,
+          keywords: 140,
+          pos_1: 4,
+          pos_2_3: 9,
+          pos_4_10: 30,
+        },
+        {
+          url: "javascript:alert(1)",
+          etv: 3,
+          keywords: null,
+          pos_1: null,
+          pos_2_3: 1,
+          pos_4_10: 2,
+        },
+      ],
+    });
+    setup("/workbench/seo-workbench.main?project=p1&view=competitors");
+    const card = (await screen.findByText("seo.lookupPagesTitle")).closest(
+      ".ant-card",
+    ) as HTMLElement;
+    fireEvent.change(
+      within(card).getByRole("combobox", { name: "seo.lookupDomain" }),
+      { target: { value: "www.rival.com" } },
+    );
+    await confirmBuy("seo.lookupPagesBuy");
+    expect(seoApi.buyLookup).toHaveBeenCalledWith("p1", {
+      kind: "pages",
+      domain: "rival.com",
+      idempotency_key: expect.any(String),
+      confirm_paid: true,
+    });
+    const best = (await within(card).findByText("/blog/best")).closest("tr")!;
+    expect(within(best).getByRole("link")).toHaveAttribute(
+      "href",
+      "https://rival.com/blog/best",
+    );
+    expect(within(best).getByText("812")).toBeVisible();
+    expect(within(best).getByText("13")).toBeVisible();
+    expect(within(best).getByText("43")).toBeVisible();
+    const unsafe = within(card).getByText("javascript:alert(1)").closest("tr")!;
+    expect(within(unsafe).queryByRole("link")).toBeNull();
+    // An unknown count leaves the sum unknown instead of undercounting.
+    expect(within(unsafe).getAllByText("—")).toHaveLength(3);
+    expect(within(card).getByText("seo.lookupPagesTopOf")).toBeVisible();
   });
 });
 describe("rank tracking", () => {

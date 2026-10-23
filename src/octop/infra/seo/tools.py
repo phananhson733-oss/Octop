@@ -399,7 +399,7 @@ def build_seo_tools(
 
     async def lookups(kind: str = "", offset: int = 0) -> str:
         user_id, project_id, _thread_id = await context()
-        if kind not in ("", "domain", "competitors"):
+        if kind not in ("", "domain", "competitors", "pages"):
             raise OctopError.localized(ErrorCode.SEO_INVALID_INPUT)
         rows = await service.list_lookups(user_id, project_id, kind=kind or None)
         return _page([_lookup_summary(row) for row in rows], offset, "lookups")
@@ -762,8 +762,9 @@ def build_seo_tools(
             lookups,
             "List competitor research already bought for this agent's project, newest first: "
             "kind domain (one domain's organic footprint: estimated monthly organic traffic, "
-            "keyword count, top-3/top-10 counts, and its top 100 ranked keywords) and kind "
-            "competitors (the domains ranking for a keyword set). Filter with kind. Free; you "
+            "keyword count, top-3/top-10 counts, and its top 100 ranked keywords), kind pages "
+            "(the domain's 100 pages drawing the most organic traffic) and kind competitors "
+            "(the domains ranking for a keyword set). Filter with kind. Free; you "
             "cannot buy new lookups, the user buys them on the Competitors tab. Pass "
             "next_offset as offset to read more.",
         ),
@@ -773,7 +774,10 @@ def build_seo_tools(
             "Read one competitor lookup's rows. kind domain: ranked keywords with rank (all "
             "SERP elements), organic_rank (organic only), url, etv (estimated monthly visits "
             "from the keyword), search_volume, cpc, keyword_difficulty and intent; "
-            "domain_keyword_total counts every keyword the domain ranks for. kind competitors: domains with visibility, "
+            "domain_keyword_total counts every keyword the domain ranks for. kind pages: url, "
+            "etv (estimated monthly organic visits), keywords (organic keywords it ranks for), "
+            "pos_1, pos_2_3 and pos_4_10 (how many of them rank there); domain_keyword_total "
+            "then counts the domain's ranking pages. kind competitors: domains with visibility, "
             "avg_position, median_position, etv, keywords_count and keywords_positions (each "
             "keyword it ranks for). Third-party estimates, not the site's real traffic. Free. "
             "Pass next_offset as offset to read more.",

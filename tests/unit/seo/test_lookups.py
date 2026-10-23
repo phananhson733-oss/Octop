@@ -171,6 +171,77 @@ async def test_competitor_lookup_sorts_by_visibility_and_keys_on_the_keyword_set
     assert len(bodies) == 2
 
 
+PAGES = [
+    {
+        "page_address": "https://rival.com/blog/top-dramas",
+        "metrics": {
+            "organic": {"etv": 812.4, "count": 140, "pos_1": 4, "pos_2_3": 9, "pos_4_10": 30},
+            "paid": {"etv": 3},
+        },
+    },
+    {"page_address": "https://rival.com/", "metrics": {}},
+    {"metrics": {"organic": {"etv": 5}}},
+]
+
+
+async def test_pages_lookup_buys_top_pages_by_traffic(context, monkeypatch):
+    calls = []
+
+    def handler(request):
+        calls.append((request.url.path, json.loads(request.content)[0]))
+        return labs({"total_count": 420, "items": PAGES}, cost=0.0132)
+
+    project_id = await configured(context, monkeypatch, handler)
+    service, _repos, user, _ = context
+    found = await service.lookup(user, project_id, **domain("p1", kind="pages"))
+    assert calls == [
+        (
+            "/v3/dataforseo_labs/google/relevant_pages/live",
+            {
+                "target": "rival.com",
+                "location_code": 2840,
+                "language_code": "en",
+                "limit": 100,
+                "order_by": ["metrics.organic.etv,desc"],
+            },
+        )
+    ]
+    assert (found["status"], found["kind"], found["domain"], found["overview"]) == (
+        "completed",
+        "pages",
+        "rival.com",
+        None,
+    )
+    assert found["total_count"] == 420 and found["cost_usd"] == pytest.approx(0.0132)
+    # A page without an address is dropped; missing metrics stay unknown, not zero.
+    assert found["items"] == [
+        {
+            "url": "https://rival.com/blog/top-dramas",
+            "etv": 812.4,
+            "keywords": 140,
+            "pos_1": 4,
+            "pos_2_3": 9,
+            "pos_4_10": 30,
+        },
+        {
+            "url": "https://rival.com/",
+            "etv": None,
+            "keywords": None,
+            "pos_1": None,
+            "pos_2_3": None,
+            "pos_4_10": None,
+        },
+    ]
+    # Pages and the domain overview of the same domain are separate purchases.
+    reused = await service.lookup(user, project_id, **domain("p2", kind="pages"))
+    assert reused["cached"] and len(calls) == 1
+    assert [row["kind"] for row in await service.list_lookups(user, project_id, kind="pages")] == [
+        "pages",
+        "pages",
+    ]
+    assert await service.list_lookups(user, project_id, kind="domain") == []
+
+
 async def test_lookup_rejects_bad_input_before_buying(context, monkeypatch):
     calls = []
     project_id = await configured(
@@ -185,6 +256,9 @@ async def test_lookup_rejects_bad_input_before_buying(context, monkeypatch):
         competitors("e", ["  "]),
         competitors("f", ["x"], domain="rival.com"),
         {"kind": "domain", "idempotency_key": "g", "confirm_paid": True},
+        {"kind": "pages", "idempotency_key": "i", "confirm_paid": True},
+        domain("j", kind="pages", keywords=["x"]),
+        competitors("k", ["x"], kind="pages"),
     ):
         with pytest.raises(OctopError):
             await service.lookup(user, project_id, **bad)

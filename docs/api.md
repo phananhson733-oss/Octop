@@ -437,7 +437,7 @@ rebound.
 | `POST`   | `/seo/projects/{id}/serps` | seo | body `{keyword, device, depth: 20\|100}` — paid Google SERP; a repeat within 12 h is served from the saved copy at no charge |
 | `GET`    | `/seo/projects/{id}/serps?keyword=` | seo | snapshot summaries, newest first |
 | `GET`    | `/seo/projects/{id}/serps/{serp_id}` | seo | one snapshot with result rows |
-| `POST`   | `/seo/projects/{id}/lookups` | seo | body `{kind: domain, domain}` (organic footprint + top 100 ranked keywords by traffic) or `{kind: competitors, keywords: [1-200]}` (top 50 domains ranking for them) — paid DataForSEO Labs; a repeat within 12 h is served from the saved copy at no charge |
+| `POST`   | `/seo/projects/{id}/lookups` | seo | body `{kind: domain, domain}` (organic footprint + top 100 ranked keywords by traffic), `{kind: pages, domain}` (top 100 pages by organic traffic) or `{kind: competitors, keywords: [1-200]}` (top 50 domains ranking for them) — paid DataForSEO Labs; a repeat within 12 h is served from the saved copy at no charge |
 | `GET`    | `/seo/projects/{id}/lookups?kind=` | seo | lookup summaries, newest first |
 | `GET`    | `/seo/projects/{id}/lookups/{lookup_id}` | seo | one lookup with its rows |
 | `GET`/`POST` | `/seo/projects/{id}/rank-trackers` | seo | trackers / create one `{domain?, devices: both\|desktop\|mobile, depth: 10-100 in tens, keywords}` (free; the project's own domain when omitted; 20 per project, 200 keywords each) |

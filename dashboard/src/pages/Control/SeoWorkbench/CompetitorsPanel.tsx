@@ -19,6 +19,7 @@ import {
   type LookupSummary,
   type ProjectContext,
   type RankedKeyword,
+  type RankedPage,
   type SerpCompetitor,
 } from "../../../api/modules/seo";
 import { useServerTimezone } from "../../../hooks/useServerTimezone";
@@ -31,7 +32,7 @@ import styles from "./index.module.less";
 const { Text } = Typography;
 type Kind = LookupSummary["kind"];
 type Target =
-  | { kind: "domain"; domain: string }
+  | { kind: "domain" | "pages"; domain: string }
   | {
       kind: "competitors";
       keywords: string[];
@@ -363,6 +364,136 @@ function DomainCard({
   );
 }
 
+function PagesCard({
+  projectId,
+  domain,
+  competitors,
+  configured,
+}: {
+  projectId: string;
+  domain: string;
+  competitors: string[];
+  configured: boolean;
+}) {
+  const { t } = useTranslation();
+  const lookups = useLookups(projectId, "pages");
+  const [target, setTarget] = useState("");
+  const current = lookups.current;
+  const rows = (current?.kind === "pages" ? current.items : []) as RankedPage[];
+  const sum = (...values: (number | null)[]) =>
+    values.some((value) => value == null)
+      ? null
+      : values.reduce<number>((total, value) => total + (value ?? 0), 0);
+  return (
+    <Card size="small" title={t("seo.lookupPagesTitle")}>
+      <div className={styles.stack}>
+        <Text type="secondary">{t("seo.lookupPagesHelp")}</Text>
+        {lookups.error && (
+          <Alert type="error" showIcon message={lookups.error} />
+        )}
+        <div className={styles.toolbar}>
+          <AutoComplete
+            aria-label={t("seo.lookupDomain")}
+            className={styles.projectSelect}
+            value={target}
+            onChange={setTarget}
+            placeholder={t("seo.lookupDomainPlaceholder")}
+            options={[...new Set([domain, ...competitors])].map((value) => ({
+              value,
+            }))}
+          />
+          <BuyButton
+            label={t("seo.lookupPagesBuy")}
+            disabled={!configured || !hostOf(target)}
+            buying={lookups.buying}
+            onConfirm={() =>
+              lookups.buy({ kind: "pages", domain: hostOf(target) })
+            }
+          />
+          <HistorySelect
+            history={lookups.history}
+            current={current}
+            onOpen={lookups.open}
+          />
+        </div>
+        {current && (
+          <>
+            <Text strong>{current.domain}</Text>
+            <LookupMeta lookup={current} />
+          </>
+        )}
+        <Table<RankedPage>
+          rowKey="url"
+          loading={lookups.loading}
+          dataSource={rows}
+          pagination={{ pageSize: 20, showSizeChanger: false }}
+          locale={{
+            emptyText: t(current ? "seo.lookupEmpty" : "seo.lookupNotBought"),
+          }}
+          columns={[
+            {
+              title: t("seo.serpPage"),
+              dataIndex: "url",
+              render: (value: string) => {
+                const url = safeHttpUrl(value);
+                return url ? (
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={url}
+                  >
+                    {new URL(url).pathname}
+                  </a>
+                ) : (
+                  value
+                );
+              },
+            },
+            {
+              title: t("seo.lookupTraffic"),
+              dataIndex: "etv",
+              width: 100,
+              defaultSortOrder: "descend",
+              sorter: (a, b) => (a.etv ?? -1) - (b.etv ?? -1),
+              render: number,
+            },
+            {
+              title: t("seo.lookupOrganicKeywords"),
+              dataIndex: "keywords",
+              width: 110,
+              sorter: (a, b) => (a.keywords ?? -1) - (b.keywords ?? -1),
+              render: number,
+            },
+            {
+              key: "top3",
+              title: t("seo.lookupTop3"),
+              width: 110,
+              render: (_, row) => number(sum(row.pos_1, row.pos_2_3)),
+            },
+            {
+              key: "top10",
+              title: t("seo.lookupTop10"),
+              width: 110,
+              render: (_, row) =>
+                number(sum(row.pos_1, row.pos_2_3, row.pos_4_10)),
+            },
+          ]}
+        />
+        {current && <Text type="secondary">{t("seo.lookupEstimates")}</Text>}
+        {current?.total_count != null && (
+          <Text type="secondary">
+            {t("seo.lookupPagesTopOf", {
+              shown: rows.length,
+              total: current.total_count.toLocaleString(),
+            })}
+          </Text>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function SerpCompetitorsCard({
   projectId,
   domain,
@@ -545,8 +676,8 @@ function SerpCompetitorsCard({
 
 /**
  * Competitor research (OpenSEO Domain overview and find_serp_competitors):
- * one domain's organic footprint, and who ranks for a keyword set. Bought from
- * DataForSEO Labs on a confirmed click; backlinks are not part of it.
+ * one domain's organic footprint, its top pages by traffic, and who ranks for a
+ * keyword set. Bought from DataForSEO Labs on a confirmed click.
  */
 export function CompetitorsPanel({
   projectId,
@@ -582,6 +713,12 @@ export function CompetitorsPanel({
       )}
       {error && <Alert type="error" showIcon message={error} />}
       <DomainCard
+        projectId={projectId}
+        domain={domain}
+        competitors={competitors}
+        configured={configured}
+      />
+      <PagesCard
         projectId={projectId}
         domain={domain}
         competitors={competitors}
