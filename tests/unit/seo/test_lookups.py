@@ -306,3 +306,179 @@ async def test_lookup_failures_keep_costs_and_empty_results_are_not_reused(conte
     with pytest.raises(OctopError) as missing:
         await service.get_lookup(user, project_id, "nope")
     assert missing.value.code == "NOT_FOUND"
+
+
+BACKLINK_REPLIES = {
+    "summary": {
+        "target": "rival.com",
+        "rank": 41,
+        "backlinks": 8123,
+        "referring_pages": 6000,
+        "referring_domains": 512,
+        "broken_backlinks": 7,
+        "broken_pages": 2,
+        "backlinks_spam_score": 12,
+        "info": {"target_spam_score": 3},
+        "new_backlinks": 40,
+        "lost_backlinks": 11,
+        "new_reffering_domains": 5,
+        "lost_referring_domains": 2,
+    },
+    "history": {
+        "items": [
+            {"date": "2026-09-01 00:00:00 +00:00", "backlinks": 8000, "referring_domains": 500},
+            {"date": "2025-11-01 00:00:00 +00:00", "backlinks": 7000, "new_reffering_domains": 9},
+            {"backlinks": 1},
+        ]
+    },
+    "backlinks": {
+        "total_count": 640,
+        "items": [
+            {
+                "domain_from": "blog.example.org",
+                "url_from": "https://blog.example.org/post",
+                "url_to": "https://rival.com/",
+                "anchor": "Rival",
+                "item_type": "anchor",
+                "dofollow": True,
+                "rank": 30,
+                "domain_from_rank": 55,
+                "backlink_spam_score": 4,
+                "first_seen": "2026-01-02 00:00:00 +00:00",
+                "last_seen": "2026-10-20 00:00:00 +00:00",
+                "lost_date": None,
+            }
+        ],
+    },
+    "referring_domains": {
+        "total_count": 512,
+        "items": [{"domain": "example.org", "backlinks": 3, "rank": 55, "backlinks_spam_score": 4}],
+    },
+    "domain_pages_summary": {
+        "total_count": 90,
+        "items": [{"page": "https://rival.com/", "backlinks": 4000, "referring_domains": 300}],
+    },
+}
+
+
+def backlinks_handler(calls, *, fail=None):
+    def handler(request):
+        section = request.url.path.split("/")[3]
+        calls.append((section, json.loads(request.content)[0]))
+        if section == fail:
+            return labs(None, task_status=40204, cost=0)
+        return labs(BACKLINK_REPLIES[section], cost=0.025)
+
+    return handler
+
+
+async def test_backlinks_lookup_buys_five_sections_at_once(context, monkeypatch):
+    calls = []
+    project_id = await configured(context, monkeypatch, backlinks_handler(calls))
+    service, _repos, user, _ = context
+    found = await service.lookup(user, project_id, **domain("b1", kind="backlinks"))
+    bodies = dict(calls)
+    assert sorted(bodies) == [
+        "backlinks",
+        "domain_pages_summary",
+        "history",
+        "referring_domains",
+        "summary",
+    ]
+    common = {
+        "target": "rival.com",
+        "include_subdomains": True,
+        "include_indirect_links": True,
+        "exclude_internal_backlinks": True,
+        "backlinks_status_type": "live",
+        "rank_scale": "one_hundred",
+    }
+    assert bodies["summary"] == common
+    assert bodies["backlinks"] == common | {
+        "limit": 100,
+        "order_by": ["rank,desc"],
+        "mode": "one_per_domain",
+        "filters": [["backlink_spam_score", "<", 40], "or", ["backlink_spam_score", "=", None]],
+    }
+    assert bodies["referring_domains"] == common | {
+        "limit": 100,
+        "order_by": ["backlinks,desc"],
+        "filters": ["backlinks_spam_score", "<=", 40],
+    }
+    assert bodies["domain_pages_summary"] == common | {"limit": 100, "order_by": ["backlinks,desc"]}
+    # A year of history up to yesterday (UTC), on the bare hostname.
+    yesterday = datetime.now(UTC).date() - timedelta(days=1)
+    try:
+        year_before = yesterday.replace(year=yesterday.year - 1)
+    except ValueError:
+        year_before = yesterday.replace(year=yesterday.year - 1, day=28)
+    assert bodies["history"] == {
+        "target": "rival.com",
+        "date_from": year_before.isoformat(),
+        "date_to": yesterday.isoformat(),
+        "rank_scale": "one_hundred",
+    }
+    assert (found["status"], found["kind"]) == ("completed", "backlinks")
+    assert found["cost_usd"] == pytest.approx(0.125) and len(found["receipts"]) == 5
+    # Both spellings of DataForSEO's referring-domain counters are read.
+    assert found["overview"] == {
+        "rank": 41,
+        "backlinks": 8123,
+        "referring_pages": 6000,
+        "referring_domains": 512,
+        "broken_backlinks": 7,
+        "broken_pages": 2,
+        "backlinks_spam_score": 12,
+        "target_spam_score": 3,
+        "new_backlinks": 40,
+        "lost_backlinks": 11,
+        "new_referring_domains": 5,
+        "lost_referring_domains": 2,
+    }
+    assert [row["section"] for row in found["items"]] == [
+        "backlink",
+        "referring_domain",
+        "page",
+        "history",
+        "history",
+    ]
+    assert found["items"][0] == {
+        "section": "backlink",
+        "domain_from": "blog.example.org",
+        "url_from": "https://blog.example.org/post",
+        "url_to": "https://rival.com/",
+        "anchor": "Rival",
+        "item_type": "anchor",
+        "dofollow": True,
+        "rank": 30,
+        "domain_from_rank": 55,
+        "spam_score": 4,
+        "first_seen": "2026-01-02 00:00:00 +00:00",
+        "last_seen": "2026-10-20 00:00:00 +00:00",
+        "is_lost": False,
+        "is_broken": False,
+    }
+    assert found["items"][1]["spam_score"] == 4 and found["items"][2]["url"] == "https://rival.com/"
+    # History is monthly, oldest first; a row without a date is dropped.
+    assert [(row["date"], row["new_referring_domains"]) for row in found["items"][3:]] == [
+        ("2025-11-01", 9),
+        ("2026-09-01", None),
+    ]
+    reused = await service.lookup(user, project_id, **domain("b2", kind="backlinks"))
+    assert reused["cached"] and len(calls) == 5
+
+
+async def test_backlinks_failure_keeps_the_sections_that_answered(context, monkeypatch):
+    calls = []
+    project_id = await configured(
+        context, monkeypatch, backlinks_handler(calls, fail="referring_domains")
+    )
+    service, _repos, user, _ = context
+    found = await service.lookup(user, project_id, **domain("b1", kind="backlinks"))
+    assert (found["status"], found["error"]) == ("failed", "provider_rejected")
+    assert found["overview"]["backlinks"] == 8123
+    assert "referring_domain" not in {row["section"] for row in found["items"]}
+    assert found["cost_usd"] == pytest.approx(0.1) and len(found["receipts"]) == 5
+    # A failed lookup is never reused: the next click buys all five again.
+    await service.lookup(user, project_id, **domain("b2", kind="backlinks"))
+    assert len(calls) == 10

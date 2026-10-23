@@ -69,10 +69,10 @@ class SerpCreate(Command):
 
 
 class LookupCreate(Command):
-    """One competitor-research purchase: a domain's footprint or its top pages, or who
-    ranks for keywords."""
+    """One competitor-research purchase: a domain's footprint, its top pages or its
+    backlinks, or who ranks for keywords."""
 
-    kind: Literal["domain", "competitors", "pages"]
+    kind: Literal["domain", "competitors", "pages", "backlinks"]
     domain: str | None = Field(default=None, min_length=1, max_length=253)
     # DataForSEO serp_competitors takes up to 200 keywords.
     keywords: list[Annotated[str, StringConstraints(max_length=200)]] | None = Field(

@@ -1240,9 +1240,12 @@ describe("competitors", () => {
       ],
     });
     setup("/workbench/seo-workbench.main?project=p1&view=competitors");
-    expect(await screen.findAllByText("seo.lookupNotBought")).toHaveLength(3);
+    await waitFor(() =>
+      expect(screen.getAllByText("seo.lookupNotBought")).toHaveLength(4),
+    );
     expect(seoApi.lookups).toHaveBeenCalledWith("p1", "domain");
     expect(seoApi.lookups).toHaveBeenCalledWith("p1", "pages");
+    expect(seoApi.lookups).toHaveBeenCalledWith("p1", "backlinks");
     expect(seoApi.lookups).toHaveBeenCalledWith("p1", "competitors");
     expect(seoApi.buyLookup).not.toHaveBeenCalled();
 
@@ -1366,6 +1369,120 @@ describe("competitors", () => {
     // An unknown count leaves the sum unknown instead of undercounting.
     expect(within(unsafe).getAllByText("—")).toHaveLength(3);
     expect(within(card).getByText("seo.lookupPagesTopOf")).toBeVisible();
+  });
+  it("buys a domain's backlinks on a confirmed click and shows each section", async () => {
+    vi.mocked(seoApi.context).mockResolvedValue(emptyContext);
+    vi.mocked(seoApi.lookups).mockResolvedValue([]);
+    vi.mocked(seoApi.buyLookup).mockResolvedValue({
+      ...lookupBase,
+      lookup_id: "l-links",
+      kind: "backlinks",
+      domain: "rival.com",
+      keywords: null,
+      item_count: 4,
+      cost_usd: 0.13,
+      overview: {
+        rank: 41,
+        backlinks: 12000,
+        referring_pages: 9000,
+        referring_domains: 640,
+        broken_backlinks: 3,
+        broken_pages: 1,
+        backlinks_spam_score: 7,
+        target_spam_score: 2,
+        new_backlinks: 50,
+        lost_backlinks: 20,
+        new_referring_domains: 6,
+        lost_referring_domains: 2,
+      },
+      items: [
+        {
+          section: "backlink",
+          domain_from: "blog.test",
+          url_from: "https://blog.test/review",
+          url_to: "https://rival.com/drama",
+          anchor: "best dramas",
+          item_type: "anchor",
+          dofollow: false,
+          rank: 30,
+          domain_from_rank: 55,
+          spam_score: 4,
+          first_seen: "2026-03-01 10:00:00 +00:00",
+          last_seen: null,
+          is_lost: false,
+          is_broken: false,
+        },
+        {
+          section: "referring_domain",
+          domain: "news.test",
+          backlinks: 12,
+          rank: 60,
+          spam_score: 1,
+          first_seen: "2025-01-02 00:00:00 +00:00",
+        },
+        {
+          section: "page",
+          url: "javascript:alert(1)",
+          backlinks: 99,
+          referring_domains: 10,
+          broken_backlinks: 0,
+          rank: 20,
+        },
+        {
+          section: "history",
+          date: "2026-09-01",
+          rank: 40,
+          backlinks: 11000,
+          referring_domains: 600,
+          new_backlinks: 100,
+          lost_backlinks: 50,
+        },
+      ],
+    });
+    setup("/workbench/seo-workbench.main?project=p1&view=competitors");
+    const card = (await screen.findByText("seo.backlinksTitle")).closest(
+      ".ant-card",
+    ) as HTMLElement;
+    fireEvent.change(
+      within(card).getByRole("combobox", { name: "seo.lookupDomain" }),
+      { target: { value: "https://rival.com/" } },
+    );
+    fireEvent.click(
+      within(card).getByRole("button", { name: "seo.backlinksBuy" }),
+    );
+    expect(
+      await screen.findByText("seo.backlinksPaidConfirm"),
+    ).toBeInTheDocument();
+    const confirm = await screen.findAllByRole("button", {
+      name: "seo.serpConfirmBuy",
+    });
+    await act(async () => {
+      fireEvent.click(confirm[confirm.length - 1]);
+    });
+    expect(seoApi.buyLookup).toHaveBeenCalledWith("p1", {
+      kind: "backlinks",
+      domain: "rival.com",
+      idempotency_key: expect.any(String),
+      confirm_paid: true,
+    });
+    expect(await within(card).findByText("12,000")).toBeVisible();
+    expect(within(card).getByText("50 / 20")).toBeVisible();
+    const link = within(card).getByText("best dramas").closest("tr")!;
+    expect(within(link).getByText("nofollow")).toBeVisible();
+    expect(within(link).getByText("/review")).toHaveAttribute(
+      "href",
+      "https://blog.test/review",
+    );
+    expect(within(link).getByText("2026-03-01")).toBeVisible();
+
+    fireEvent.click(within(card).getByText("seo.backlinksDomainsTab"));
+    expect(await within(card).findByText("news.test")).toBeVisible();
+    fireEvent.click(within(card).getByText("seo.backlinksPagesTab"));
+    const page = (await within(card).findByText("javascript:alert(1)")).closest(
+      "tr",
+    )!;
+    expect(within(page).queryByRole("link")).toBeNull();
+    expect(within(page).getByText("99")).toBeVisible();
   });
 });
 describe("rank tracking", () => {

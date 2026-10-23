@@ -9,17 +9,35 @@ import {
   Select,
   Space,
   Table,
+  Tabs,
   Tag,
   Typography,
 } from "antd";
 import { useTranslation } from "react-i18next";
 import {
+  CartesianGrid,
+  Legend,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip as RechartsTooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
+import {
   seoApi,
+  type Backlink,
+  type BacklinksMonth,
+  type BacklinksRow,
+  type BacklinksSummary,
+  type DomainOverview,
+  type LinkedPage,
   type Lookup,
   type LookupSummary,
   type ProjectContext,
   type RankedKeyword,
   type RankedPage,
+  type ReferringDomain,
   type SerpCompetitor,
 } from "../../../api/modules/seo";
 import { useServerTimezone } from "../../../hooks/useServerTimezone";
@@ -32,7 +50,7 @@ import styles from "./index.module.less";
 const { Text } = Typography;
 type Kind = LookupSummary["kind"];
 type Target =
-  | { kind: "domain" | "pages"; domain: string }
+  | { kind: "domain" | "pages" | "backlinks"; domain: string }
   | {
       kind: "competitors";
       keywords: string[];
@@ -191,17 +209,19 @@ function BuyButton({
   disabled,
   buying,
   onConfirm,
+  description,
 }: {
   label: string;
   disabled: boolean;
   buying: boolean;
   onConfirm: () => void;
+  description?: string;
 }) {
   const { t } = useTranslation();
   return (
     <Popconfirm
       title={label}
-      description={t("seo.lookupPaidConfirm")}
+      description={description ?? t("seo.lookupPaidConfirm")}
       okText={t("seo.serpConfirmBuy")}
       cancelText={t("seo.cancel")}
       onConfirm={onConfirm}
@@ -232,7 +252,8 @@ function DomainCard({
   const rows = (
     current?.kind === "domain" ? current.items : []
   ) as RankedKeyword[];
-  const overview = current?.overview;
+  const overview =
+    current?.kind === "domain" ? (current.overview as DomainOverview) : null;
   const top3 =
     overview?.pos_1 == null || overview.pos_2_3 == null
       ? null
@@ -494,6 +515,347 @@ function PagesCard({
   );
 }
 
+const day = (value: string | null) => (value ? value.slice(0, 10) : "—");
+
+function PageLink({ value }: { value: string | null }) {
+  const url = safeHttpUrl(value);
+  if (!url) return <>{value ?? "—"}</>;
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" title={url}>
+      {new URL(url).pathname}
+    </a>
+  );
+}
+
+function BacklinksCard({
+  projectId,
+  domain,
+  competitors,
+  configured,
+}: {
+  projectId: string;
+  domain: string;
+  competitors: string[];
+  configured: boolean;
+}) {
+  const { t } = useTranslation();
+  const lookups = useLookups(projectId, "backlinks");
+  const [target, setTarget] = useState("");
+  const current = lookups.current;
+  const rows = (
+    current?.kind === "backlinks" ? current.items : []
+  ) as BacklinksRow[];
+  const summary =
+    current?.kind === "backlinks"
+      ? (current.overview as BacklinksSummary | null)
+      : null;
+  const links = rows.filter(
+    (row): row is Backlink => row.section === "backlink",
+  );
+  const domains = rows.filter(
+    (row): row is ReferringDomain => row.section === "referring_domain",
+  );
+  const pages = rows.filter((row): row is LinkedPage => row.section === "page");
+  const history = rows.filter(
+    (row): row is BacklinksMonth => row.section === "history",
+  );
+  const pair = (a: number | null | undefined, b: number | null | undefined) =>
+    `${number(a)} / ${number(b)}`;
+  const table = { pagination: { pageSize: 20, showSizeChanger: false } };
+  return (
+    <Card size="small" title={t("seo.backlinksTitle")}>
+      <div className={styles.stack}>
+        <Text type="secondary">{t("seo.backlinksHelp")}</Text>
+        {lookups.error && (
+          <Alert type="error" showIcon message={lookups.error} />
+        )}
+        <div className={styles.toolbar}>
+          <AutoComplete
+            aria-label={t("seo.lookupDomain")}
+            className={styles.projectSelect}
+            value={target}
+            onChange={setTarget}
+            placeholder={t("seo.lookupDomainPlaceholder")}
+            options={[...new Set([domain, ...competitors])].map((value) => ({
+              value,
+            }))}
+          />
+          <BuyButton
+            label={t("seo.backlinksBuy")}
+            description={t("seo.backlinksPaidConfirm")}
+            disabled={!configured || !hostOf(target)}
+            buying={lookups.buying}
+            onConfirm={() =>
+              lookups.buy({ kind: "backlinks", domain: hostOf(target) })
+            }
+          />
+          <HistorySelect
+            history={lookups.history}
+            current={current}
+            onOpen={lookups.open}
+          />
+        </div>
+        {!current && !lookups.loading && (
+          <Text type="secondary">{t("seo.lookupNotBought")}</Text>
+        )}
+        {current && (
+          <>
+            <Text strong>{current.domain}</Text>
+            <LookupMeta lookup={current} />
+            {summary && (
+              <div className={styles.metrics}>
+                {(
+                  [
+                    ["seo.backlinksTotal", number(summary.backlinks)],
+                    [
+                      "seo.backlinksReferringDomains",
+                      number(summary.referring_domains),
+                    ],
+                    ["seo.backlinksRank", number(summary.rank)],
+                    [
+                      "seo.backlinksSpamScore",
+                      number(summary.backlinks_spam_score),
+                    ],
+                    [
+                      "seo.backlinksNewLost",
+                      pair(summary.new_backlinks, summary.lost_backlinks),
+                    ],
+                    [
+                      "seo.backlinksNewLostDomains",
+                      pair(
+                        summary.new_referring_domains,
+                        summary.lost_referring_domains,
+                      ),
+                    ],
+                  ] as const
+                ).map(([label, value]) => (
+                  <Card key={label} size="small">
+                    <Text type="secondary">{t(label)}</Text>
+                    <div className={styles.metricValue}>{value}</div>
+                  </Card>
+                ))}
+              </div>
+            )}
+            {history.length > 1 && (
+              <div className={styles.chart}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={0}>
+                  <LineChart data={history}>
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke="var(--fn-border-secondary)"
+                    />
+                    <XAxis dataKey="date" />
+                    <YAxis yAxisId="links" />
+                    <YAxis yAxisId="domains" orientation="right" />
+                    <RechartsTooltip />
+                    <Legend />
+                    <Line
+                      yAxisId="links"
+                      dataKey="backlinks"
+                      name={t("seo.backlinksTotal")}
+                      stroke="#1677ff"
+                      dot={false}
+                    />
+                    <Line
+                      yAxisId="domains"
+                      dataKey="referring_domains"
+                      name={t("seo.backlinksReferringDomains")}
+                      stroke="#52c41a"
+                      dot={false}
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            <Tabs
+              items={[
+                {
+                  key: "links",
+                  label: t("seo.backlinksLinksTab", { count: links.length }),
+                  children: (
+                    <Table<Backlink>
+                      {...table}
+                      rowKey={(row) => `${row.url_from}>${row.url_to}`}
+                      dataSource={links}
+                      locale={{ emptyText: t("seo.lookupEmpty") }}
+                      columns={[
+                        {
+                          title: t("seo.backlinksFrom"),
+                          dataIndex: "url_from",
+                          render: (value: string | null, row) => {
+                            const url = safeHttpUrl(value);
+                            return (
+                              <Space direction="vertical" size={0}>
+                                <Text>{row.domain_from ?? "—"}</Text>
+                                {url && (
+                                  <a
+                                    href={url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    title={url}
+                                  >
+                                    {new URL(url).pathname}
+                                  </a>
+                                )}
+                              </Space>
+                            );
+                          },
+                        },
+                        {
+                          title: t("seo.backlinksTo"),
+                          dataIndex: "url_to",
+                          render: (value: string | null) => (
+                            <PageLink value={value} />
+                          ),
+                        },
+                        {
+                          title: t("seo.backlinksAnchor"),
+                          dataIndex: "anchor",
+                          render: (value: string | null, row) => (
+                            <Space wrap>
+                              <Text>{value || "—"}</Text>
+                              {row.dofollow === false && <Tag>nofollow</Tag>}
+                            </Space>
+                          ),
+                        },
+                        {
+                          title: t("seo.backlinksDomainRank"),
+                          dataIndex: "domain_from_rank",
+                          width: 100,
+                          defaultSortOrder: "descend",
+                          sorter: (a, b) =>
+                            (a.domain_from_rank ?? -1) -
+                            (b.domain_from_rank ?? -1),
+                          render: number,
+                        },
+                        {
+                          title: t("seo.backlinksSpam"),
+                          dataIndex: "spam_score",
+                          width: 80,
+                          render: number,
+                        },
+                        {
+                          title: t("seo.backlinksFirstSeen"),
+                          dataIndex: "first_seen",
+                          width: 110,
+                          sorter: (a, b) =>
+                            (a.first_seen ?? "").localeCompare(
+                              b.first_seen ?? "",
+                            ),
+                          render: day,
+                        },
+                      ]}
+                    />
+                  ),
+                },
+                {
+                  key: "domains",
+                  label: t("seo.backlinksDomainsTab", {
+                    count: domains.length,
+                  }),
+                  children: (
+                    <Table<ReferringDomain>
+                      {...table}
+                      rowKey={(row) => row.domain ?? ""}
+                      dataSource={domains}
+                      locale={{ emptyText: t("seo.lookupEmpty") }}
+                      columns={[
+                        {
+                          title: t("seo.lookupDomain"),
+                          dataIndex: "domain",
+                          render: (value: string | null) => value ?? "—",
+                        },
+                        {
+                          title: t("seo.backlinksTotal"),
+                          dataIndex: "backlinks",
+                          width: 100,
+                          defaultSortOrder: "descend",
+                          sorter: (a, b) =>
+                            (a.backlinks ?? -1) - (b.backlinks ?? -1),
+                          render: number,
+                        },
+                        {
+                          title: t("seo.backlinksDomainRank"),
+                          dataIndex: "rank",
+                          width: 100,
+                          sorter: (a, b) => (a.rank ?? -1) - (b.rank ?? -1),
+                          render: number,
+                        },
+                        {
+                          title: t("seo.backlinksSpam"),
+                          dataIndex: "spam_score",
+                          width: 80,
+                          render: number,
+                        },
+                        {
+                          title: t("seo.backlinksFirstSeen"),
+                          dataIndex: "first_seen",
+                          width: 110,
+                          sorter: (a, b) =>
+                            (a.first_seen ?? "").localeCompare(
+                              b.first_seen ?? "",
+                            ),
+                          render: day,
+                        },
+                      ]}
+                    />
+                  ),
+                },
+                {
+                  key: "pages",
+                  label: t("seo.backlinksPagesTab", { count: pages.length }),
+                  children: (
+                    <Table<LinkedPage>
+                      {...table}
+                      rowKey={(row) => row.url ?? ""}
+                      dataSource={pages}
+                      locale={{ emptyText: t("seo.lookupEmpty") }}
+                      columns={[
+                        {
+                          title: t("seo.serpPage"),
+                          dataIndex: "url",
+                          render: (value: string | null) => (
+                            <PageLink value={value} />
+                          ),
+                        },
+                        {
+                          title: t("seo.backlinksTotal"),
+                          dataIndex: "backlinks",
+                          width: 100,
+                          defaultSortOrder: "descend",
+                          sorter: (a, b) =>
+                            (a.backlinks ?? -1) - (b.backlinks ?? -1),
+                          render: number,
+                        },
+                        {
+                          title: t("seo.backlinksReferringDomains"),
+                          dataIndex: "referring_domains",
+                          width: 110,
+                          sorter: (a, b) =>
+                            (a.referring_domains ?? -1) -
+                            (b.referring_domains ?? -1),
+                          render: number,
+                        },
+                        {
+                          title: t("seo.backlinksBroken"),
+                          dataIndex: "broken_backlinks",
+                          width: 100,
+                          render: number,
+                        },
+                      ]}
+                    />
+                  ),
+                },
+              ]}
+            />
+            <Text type="secondary">{t("seo.backlinksEstimates")}</Text>
+          </>
+        )}
+      </div>
+    </Card>
+  );
+}
+
 function SerpCompetitorsCard({
   projectId,
   domain,
@@ -675,9 +1037,10 @@ function SerpCompetitorsCard({
 }
 
 /**
- * Competitor research (OpenSEO Domain overview and find_serp_competitors):
- * one domain's organic footprint, its top pages by traffic, and who ranks for a
- * keyword set. Bought from DataForSEO Labs on a confirmed click.
+ * Competitor research (OpenSEO Domain overview, Backlinks and
+ * find_serp_competitors): one domain's organic footprint, its top pages by
+ * traffic and its backlinks, and who ranks for a keyword set. Each is bought
+ * from DataForSEO on a confirmed click.
  */
 export function CompetitorsPanel({
   projectId,
@@ -719,6 +1082,12 @@ export function CompetitorsPanel({
         configured={configured}
       />
       <PagesCard
+        projectId={projectId}
+        domain={domain}
+        competitors={competitors}
+        configured={configured}
+      />
+      <BacklinksCard
         projectId={projectId}
         domain={domain}
         competitors={competitors}

@@ -149,7 +149,7 @@ async def test_agent_context_writes_are_attributed_and_serps_are_read_only(tool_
     await tools["seo_list_competitor_lookups"].ainvoke({"kind": "domain"})
     service.list_lookups.assert_awaited_once_with(7, "project-a", kind="domain")
     with pytest.raises(OctopError):
-        await tools["seo_list_competitor_lookups"].ainvoke({"kind": "backlinks"})
+        await tools["seo_list_competitor_lookups"].ainvoke({"kind": "keywords"})
     await tools["seo_get_rank_results"].ainvoke({"tracker_id": "t", "compare": "30d"})
     service.ranks.results.assert_awaited_once_with(7, "project-a", "t", compare="30d")
     await tools["seo_get_rank_history"].ainvoke({"tracker_id": "t", "keyword_id": "k"})

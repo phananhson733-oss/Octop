@@ -69,6 +69,8 @@ COMPETITORS_LIMIT = 50
 # OpenSEO pages a domain's relevant_pages by traffic (domainPagesPage.ts); one lookup buys
 # the top 100, like ranked keywords.
 DOMAIN_PAGES_LIMIT = 100
+# OpenSEO's backlinks tabs load 100 rows each (BACKLINKS_DEFAULT_LIMIT) and a year of history.
+BACKLINKS_LIMIT = 100
 # Project memory caps from OpenSEO contextUpdateOps.ts / ProjectContextService.ts.
 PROSE_MAX_CHARS = 4000
 MAX_CUSTOM_SECTIONS = 20
@@ -791,7 +793,9 @@ class SeoService:
 
         kind ``domain``: the domain's organic footprint and its top ranked keywords (two
         calls); kind ``pages``: the domain's pages drawing the most organic traffic (one
-        call); kind ``competitors``: the domains ranking for a keyword set (one call).
+        call); kind ``backlinks``: the domain's backlink totals, a year of history, and its
+        top backlinks, referring domains and linked pages (five calls at once); kind
+        ``competitors``: the domains ranking for a keyword set (one call).
         """
         project = await self._project(user_id, project_id)
         try:
@@ -872,7 +876,65 @@ class SeoService:
         return lookup
 
     @staticmethod
+    async def _buy_backlinks(client: DataForSeoClient, lookup: dict[str, Any]) -> None:
+        """Five Backlinks API calls at once; each answer is kept even when another fails."""
+        target = lookup["domain"]
+        # backlinksServiceData.ts buildBacklinksDateRange: the year up to yesterday (UTC).
+        date_to = datetime.now(UTC).date() - timedelta(days=1)
+        try:
+            date_from = date_to.replace(year=date_to.year - 1)
+        except ValueError:  # 29 February
+            date_from = date_to.replace(year=date_to.year - 1, day=28)
+        results = await asyncio.gather(
+            client.backlinks_summary(target=target),
+            client.backlinks_history(
+                target=target, date_from=date_from.isoformat(), date_to=date_to.isoformat()
+            ),
+            client.backlinks(target=target, limit=BACKLINKS_LIMIT),
+            client.referring_domains(target=target, limit=BACKLINKS_LIMIT),
+            client.linked_pages(target=target, limit=BACKLINKS_LIMIT),
+            return_exceptions=True,
+        )
+        costs: list[float | None] = []
+        failures: list[ProviderFailure] = []
+        rows: list[dict[str, Any]] = []
+        for index, result in enumerate(results):
+            if isinstance(result, ProviderFailure):
+                costs.append(result.cost)
+                lookup["receipts"].append(result.receipt)
+                failures.append(result)
+                continue
+            if isinstance(result, BaseException):
+                raise result
+            data, cost, receipt = result
+            costs.append(cost)
+            lookup["receipts"].append(receipt)
+            if index == 0:
+                lookup["overview"] = data
+            elif index == 1:
+                rows.extend(data)
+            else:
+                rows.extend(data["rows"])
+        # Linked rows first, the monthly history last.
+        lookup["items"] = [row for row in rows if row["section"] != "history"] + [
+            row for row in rows if row["section"] == "history"
+        ]
+        if failures:
+            lookup.update(
+                status="unknown" if any(f.unknown for f in failures) else "failed",
+                error=str(failures[0]),
+            )
+        else:
+            lookup["status"] = "completed"
+        known = [c for c in costs if c is not None]
+        lookup["cost_known_usd"] = sum(known)
+        lookup["cost_usd"] = sum(known) if len(known) == len(costs) else None
+
+    @staticmethod
     async def _buy_lookup(client: DataForSeoClient, lookup: dict[str, Any]) -> None:
+        if lookup["kind"] == "backlinks":
+            await SeoService._buy_backlinks(client, lookup)
+            return
         market = {
             "location_code": lookup["location_code"],
             "language_code": lookup["language_code"],

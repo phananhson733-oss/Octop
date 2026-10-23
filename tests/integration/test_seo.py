@@ -536,6 +536,17 @@ async def test_competitor_lookups_over_http(env_with_agent, monkeypatch):
                 "ranked_serp_element": {"serp_item": {"rank_group": 1, "rank_absolute": 2}},
             }
             result = {"total_count": 3, "items": [row]}
+        elif request.url.path.startswith("/v3/backlinks/summary"):
+            result = {"rank": 41, "backlinks": 812, "referring_domains": 51}
+        elif request.url.path.startswith("/v3/backlinks/history"):
+            result = {"items": [{"date": "2026-09-01 00:00:00 +00:00", "backlinks": 800}]}
+        elif request.url.path.startswith("/v3/backlinks/backlinks"):
+            link = {"domain_from": "a.org", "url_from": "https://a.org/x", "url_to": None}
+            result = {"items": [link]}
+        elif request.url.path.startswith("/v3/backlinks/referring_domains"):
+            result = {"items": [{"domain": "a.org", "backlinks": 2}]}
+        elif request.url.path.startswith("/v3/backlinks/domain_pages_summary"):
+            result = {"items": [{"page": "https://rival.com/", "backlinks": 700}]}
         elif "relevant_pages" in request.url.path:
             page = {"page_address": "https://rival.com/a", "metrics": {"organic": {"etv": 9.5}}}
             result = {"total_count": 7, "items": [page]}
@@ -616,6 +627,34 @@ async def test_competitor_lookups_over_http(env_with_agent, monkeypatch):
         }
     ]
     assert (pages["kind"], pages["total_count"]) == ("pages", 7)
+    links = (
+        await client.post(
+            base + "/lookups",
+            headers=auth,
+            json=request | {"kind": "backlinks", "idempotency_key": "b"},
+        )
+    ).json()
+    # Backlink totals and rows keep their own fields through the response unions.
+    assert links["overview"]["backlinks"] == 812 and "organic_traffic" not in links["overview"]
+    assert [row["section"] for row in links["items"]] == [
+        "backlink",
+        "referring_domain",
+        "page",
+        "history",
+    ]
+    assert links["items"][0]["url_from"] == "https://a.org/x"
+    assert links["items"][1]["domain"] == "a.org" and links["items"][2]["backlinks"] == 700
+    assert links["items"][3] == {
+        "section": "history",
+        "date": "2026-09-01",
+        "backlinks": 800,
+        "referring_domains": None,
+        "rank": None,
+        "new_backlinks": None,
+        "lost_backlinks": None,
+        "new_referring_domains": None,
+        "lost_referring_domains": None,
+    }
     for bad in (
         request | {"idempotency_key": "x", "confirm_paid": False},
         request | {"idempotency_key": "y", "keywords": ["a"]},
@@ -623,17 +662,17 @@ async def test_competitor_lookups_over_http(env_with_agent, monkeypatch):
     ):
         assert (await client.post(base + "/lookups", headers=auth, json=bad)).status_code == 422
     summaries = (await client.get(base + "/lookups", headers=auth)).json()
-    assert [row["kind"] for row in summaries] == ["pages", "competitors", "domain"]
+    assert [row["kind"] for row in summaries] == ["backlinks", "pages", "competitors", "domain"]
     assert "items" not in summaries[0]
     only = (await client.get(base + "/lookups", headers=auth, params={"kind": "domain"})).json()
     assert [row["lookup_id"] for row in only] == [domain["lookup_id"]]
     assert (
-        await client.get(base + "/lookups", headers=auth, params={"kind": "backlinks"})
+        await client.get(base + "/lookups", headers=auth, params={"kind": "prompt"})
     ).status_code == 422
     read = (await client.get(base + "/lookups/" + domain["lookup_id"], headers=auth)).json()
     assert read["items"] == domain["items"]
     assert (await client.get(base + "/lookups/nope", headers=auth)).status_code == 404
-    assert len(calls) == 4
+    assert len(calls) == 9
 
     other = await create_user(client, auth, username="seo-r3-other")
     for method, path, body in [

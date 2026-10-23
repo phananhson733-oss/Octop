@@ -399,7 +399,7 @@ def build_seo_tools(
 
     async def lookups(kind: str = "", offset: int = 0) -> str:
         user_id, project_id, _thread_id = await context()
-        if kind not in ("", "domain", "competitors", "pages"):
+        if kind not in ("", "domain", "competitors", "pages", "backlinks"):
             raise OctopError.localized(ErrorCode.SEO_INVALID_INPUT)
         rows = await service.list_lookups(user_id, project_id, kind=kind or None)
         return _page([_lookup_summary(row) for row in rows], offset, "lookups")
@@ -763,8 +763,10 @@ def build_seo_tools(
             "List competitor research already bought for this agent's project, newest first: "
             "kind domain (one domain's organic footprint: estimated monthly organic traffic, "
             "keyword count, top-3/top-10 counts, and its top 100 ranked keywords), kind pages "
-            "(the domain's 100 pages drawing the most organic traffic) and kind competitors "
-            "(the domains ranking for a keyword set). Filter with kind. Free; you "
+            "(the domain's 100 pages drawing the most organic traffic), kind backlinks (its "
+            "backlink totals in overview, a year of monthly history, and its top 100 backlinks, "
+            "referring domains and linked pages) and kind competitors (the domains ranking for "
+            "a keyword set). Filter with kind. Free; you "
             "cannot buy new lookups, the user buys them on the Competitors tab. Pass "
             "next_offset as offset to read more.",
         ),
@@ -777,7 +779,14 @@ def build_seo_tools(
             "domain_keyword_total counts every keyword the domain ranks for. kind pages: url, "
             "etv (estimated monthly organic visits), keywords (organic keywords it ranks for), "
             "pos_1, pos_2_3 and pos_4_10 (how many of them rank there); domain_keyword_total "
-            "then counts the domain's ranking pages. kind competitors: domains with visibility, "
+            "then counts the domain's ranking pages. kind backlinks: rows carry a section: "
+            "backlink (the strongest live link from each linking domain, spam score under 40 "
+            "or unknown: domain_from, url_from, url_to, anchor, dofollow, rank and "
+            "domain_from_rank on a 0-100 scale, spam_score, first_seen), referring_domain "
+            "(domain, backlinks, rank, spam_score, first_seen), page (the most linked-to pages: "
+            "url, backlinks, referring_domains) and history (one row per month); overview "
+            "holds the totals (backlinks, referring_domains, rank, spam scores, new and lost). "
+            "kind competitors: domains with visibility, "
             "avg_position, median_position, etv, keywords_count and keywords_positions (each "
             "keyword it ranks for). Third-party estimates, not the site's real traffic. Free. "
             "Pass next_offset as offset to read more.",

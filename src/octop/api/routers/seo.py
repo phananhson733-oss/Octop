@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from pydantic import BaseModel, ConfigDict, Field
@@ -184,18 +184,97 @@ class RankedPage(BaseModel):
     pos_4_10: int | None = None
 
 
+class BacklinksSummary(BaseModel):
+    rank: int | None = Field(description="DataForSEO authority score, 0-100.")
+    backlinks: int | None = Field(description="Live backlinks to the domain and its subdomains.")
+    referring_pages: int | None = None
+    referring_domains: int | None = Field(description="Unique domains linking to it.")
+    broken_backlinks: int | None = None
+    broken_pages: int | None = None
+    backlinks_spam_score: int | None = Field(
+        default=None, description="Estimated spam risk of the links pointing here, 0-100."
+    )
+    target_spam_score: int | None = Field(
+        default=None, description="Estimated spam risk of the domain itself, 0-100."
+    )
+    new_backlinks: int | None = None
+    lost_backlinks: int | None = None
+    new_referring_domains: int | None = None
+    lost_referring_domains: int | None = None
+
+
+class Backlink(BaseModel):
+    section: Literal["backlink"]
+    domain_from: str | None
+    url_from: str | None
+    url_to: str | None
+    anchor: str | None = None
+    item_type: str | None = None
+    dofollow: bool | None = None
+    rank: int | None = Field(default=None, description="Authority of the linking page, 0-100.")
+    domain_from_rank: int | None = Field(
+        default=None, description="Authority of the linking domain, 0-100."
+    )
+    spam_score: int | None = None
+    first_seen: str | None = None
+    last_seen: str | None = None
+    is_lost: bool = False
+    is_broken: bool = False
+
+
+class ReferringDomain(BaseModel):
+    section: Literal["referring_domain"]
+    domain: str | None
+    backlinks: int | None = None
+    referring_pages: int | None = None
+    rank: int | None = None
+    spam_score: int | None = None
+    first_seen: str | None = None
+    broken_backlinks: int | None = None
+
+
+class LinkedPage(BaseModel):
+    section: Literal["page"]
+    url: str | None
+    backlinks: int | None = None
+    referring_domains: int | None = None
+    rank: int | None = None
+    broken_backlinks: int | None = None
+
+
+class BacklinksMonth(BaseModel):
+    section: Literal["history"]
+    date: str
+    backlinks: int | None = None
+    referring_domains: int | None = None
+    rank: int | None = None
+    new_backlinks: int | None = None
+    lost_backlinks: int | None = None
+    new_referring_domains: int | None = None
+    lost_referring_domains: int | None = None
+
+
+BacklinksRow = Annotated[
+    Backlink | ReferringDomain | LinkedPage | BacklinksMonth, Field(discriminator="section")
+]
+
+
 class LookupSummary(BaseModel):
     lookup_id: str
     project_id: str
-    kind: str = Field(description="domain, pages or competitors.")
-    domain: str | None = Field(description="The domain looked up (kinds domain and pages).")
+    kind: str = Field(description="domain, pages, backlinks or competitors.")
+    domain: str | None = Field(
+        description="The domain looked up (kinds domain, pages and backlinks)."
+    )
     keywords: list[str] | None = Field(description="The keyword set (kind competitors).")
     location_code: int
     language_code: str
     status: str
     observed_at: str
     item_count: int
-    overview: DomainOverview | None = None
+    overview: DomainOverview | BacklinksSummary | None = Field(
+        default=None, description="Organic footprint (domain) or backlink totals (backlinks)."
+    )
     total_count: int | None = Field(
         default=None,
         description="All keywords (domain) or pages (pages) the domain ranks with; items holds "
@@ -209,9 +288,12 @@ class LookupSummary(BaseModel):
 
 
 class Lookup(LookupSummary):
-    items: list[RankedKeyword] | list[SerpCompetitor] | list[RankedPage] = Field(
-        description="Ranked keywords (domain), competitor domains (competitors) or pages "
-        "by traffic (pages)."
+    items: list[RankedKeyword] | list[SerpCompetitor] | list[RankedPage] | list[BacklinksRow] = (
+        Field(
+            description="Ranked keywords (domain), competitor domains (competitors), pages by "
+            "traffic (pages), or backlinks rows by section: backlink, referring_domain, page and "
+            "the monthly history (backlinks)."
+        )
     )
 
 
@@ -591,7 +673,9 @@ async def serp(
     summary="Buy a competitor-research lookup",
     description="Requires explicit paid confirmation. kind domain with a domain buys DataForSEO "
     "Labs domain_rank_overview and the top 100 ranked_keywords by traffic; kind pages with a "
-    "domain buys the top 100 relevant_pages by traffic; kind competitors with 1-200 keywords "
+    "domain buys the top 100 relevant_pages by traffic; kind backlinks with a domain buys the "
+    "Backlinks API summary, a year of history and the top 100 backlinks (one per domain, likely "
+    "spam left out), referring domains and linked pages; kind competitors with 1-200 keywords "
     "buys serp_competitors (top 50 domains). No retries. The same target "
     "and market within 12 hours is served from a non-empty lookup at no charge. Reuse the "
     "idempotency key to read an existing attempt.",
@@ -613,7 +697,7 @@ async def buy_lookup(
 )
 async def lookups(
     project_id: str,
-    kind: str | None = Query(default=None, pattern="^(domain|competitors|pages)$"),
+    kind: str | None = Query(default=None, pattern="^(domain|competitors|pages|backlinks)$"),
     owner: int = Depends(seo_owner),
     service: SeoService = Depends(seo_service),
 ) -> Any:

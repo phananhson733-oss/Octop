@@ -119,21 +119,92 @@ export interface RankedPage {
   pos_2_3: number | null;
   pos_4_10: number | null;
 }
+export interface BacklinksSummary {
+  /** DataForSEO authority score, 0-100. */
+  rank: number | null;
+  backlinks: number | null;
+  referring_pages: number | null;
+  referring_domains: number | null;
+  broken_backlinks: number | null;
+  broken_pages: number | null;
+  /** Estimated spam risk of the links pointing here, 0-100. */
+  backlinks_spam_score: number | null;
+  /** Estimated spam risk of the domain itself, 0-100. */
+  target_spam_score: number | null;
+  new_backlinks: number | null;
+  lost_backlinks: number | null;
+  new_referring_domains: number | null;
+  lost_referring_domains: number | null;
+}
+export interface Backlink {
+  section: "backlink";
+  domain_from: string | null;
+  url_from: string | null;
+  url_to: string | null;
+  anchor: string | null;
+  item_type: string | null;
+  dofollow: boolean | null;
+  /** Authority of the linking page, 0-100. */
+  rank: number | null;
+  /** Authority of the linking domain, 0-100. */
+  domain_from_rank: number | null;
+  spam_score: number | null;
+  first_seen: string | null;
+  last_seen: string | null;
+  is_lost: boolean;
+  is_broken: boolean;
+}
+export interface ReferringDomain {
+  section: "referring_domain";
+  domain: string | null;
+  backlinks: number | null;
+  referring_pages: number | null;
+  rank: number | null;
+  spam_score: number | null;
+  first_seen: string | null;
+  broken_backlinks: number | null;
+}
+export interface LinkedPage {
+  section: "page";
+  url: string | null;
+  backlinks: number | null;
+  referring_domains: number | null;
+  rank: number | null;
+  broken_backlinks: number | null;
+}
+export interface BacklinksMonth {
+  section: "history";
+  date: string;
+  backlinks: number | null;
+  referring_domains: number | null;
+  rank: number | null;
+  new_backlinks: number | null;
+  lost_backlinks: number | null;
+  new_referring_domains: number | null;
+  lost_referring_domains: number | null;
+}
+export type BacklinksRow =
+  | Backlink
+  | ReferringDomain
+  | LinkedPage
+  | BacklinksMonth;
+export interface DomainOverview {
+  organic_traffic: number | null;
+  organic_keywords: number | null;
+  pos_1: number | null;
+  pos_2_3: number | null;
+  pos_4_10: number | null;
+}
 export interface LookupSummary {
   lookup_id: string;
-  kind: "domain" | "competitors" | "pages";
+  kind: "domain" | "competitors" | "pages" | "backlinks";
   domain: string | null;
   keywords: string[] | null;
   status: ResearchRun["status"];
   observed_at: string;
   item_count: number;
-  overview: {
-    organic_traffic: number | null;
-    organic_keywords: number | null;
-    pos_1: number | null;
-    pos_2_3: number | null;
-    pos_4_10: number | null;
-  } | null;
+  /** Organic footprint (domain) or backlink totals (backlinks). */
+  overview: DomainOverview | BacklinksSummary | null;
   /** Every keyword (domain) or page (pages) the domain ranks with; items holds the top 100. */
   total_count: number | null;
   cost_usd: number | null;
@@ -142,7 +213,7 @@ export interface LookupSummary {
   error?: string | null;
 }
 export interface Lookup extends LookupSummary {
-  items: RankedKeyword[] | SerpCompetitor[] | RankedPage[];
+  items: RankedKeyword[] | SerpCompetitor[] | RankedPage[] | BacklinksRow[];
 }
 export type RankDevices = "both" | "desktop" | "mobile";
 export type RankCompare = "1d" | "7d" | "30d" | "90d";
@@ -645,7 +716,7 @@ export const seoApi = {
   buyLookup: (
     id: string,
     data: (
-      | { kind: "domain" | "pages"; domain: string }
+      | { kind: "domain" | "pages" | "backlinks"; domain: string }
       | { kind: "competitors"; keywords: string[] }
     ) & { idempotency_key: string; confirm_paid: true },
   ) =>

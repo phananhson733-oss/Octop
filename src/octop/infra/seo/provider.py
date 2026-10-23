@@ -3,8 +3,8 @@
 Labs mapping follows OpenSEO d7ea785 research-data.ts/helpers.ts, SERP mapping
 follows lib/dataforseo/serp.ts and mcp/tools/get-serp-results.ts, competitor research
 follows lib/dataforseo/labs.ts, features/domain/services and mcp/tools/
-dataforseo-research-tools.ts (top pages follow OpenSEO 2d8236a domainPagesPage.ts), AI
-answers follow lib/dataforseo/ai-tracking.ts and
+dataforseo-research-tools.ts (top pages follow OpenSEO 2d8236a domainPagesPage.ts,
+backlinks its lib/dataforseo/backlinks.ts and features/backlinks/services), AI answers follow lib/dataforseo/ai-tracking.ts and
 features/ai-visibility/providers/dataforseoEvidence.ts (MIT).
 """
 
@@ -244,6 +244,123 @@ def map_relevant_pages(result: dict[str, Any]) -> dict[str, Any]:
             }
         )
     return {"total_count": result.get("total_count"), "rows": rows}
+
+
+# OpenSEO's "best links only" view (DEFAULT_BACKLINKS_SPAM_THRESHOLD in schemas/backlinks.ts).
+BACKLINKS_SPAM_THRESHOLD = 40
+
+
+def _either(item: dict[str, Any], *keys: str) -> Any:
+    """The first key present: DataForSEO sends both ``*_reffering_*`` and the fixed spelling."""
+    return next((item[key] for key in keys if item.get(key) is not None), None)
+
+
+def map_backlinks_summary(result: dict[str, Any]) -> dict[str, Any]:
+    """backlinks/summary totals (backlinksServiceData.ts buildOverviewResult)."""
+    return {
+        "rank": result.get("rank"),
+        "backlinks": result.get("backlinks"),
+        "referring_pages": result.get("referring_pages"),
+        "referring_domains": result.get("referring_domains"),
+        "broken_backlinks": result.get("broken_backlinks"),
+        "broken_pages": result.get("broken_pages"),
+        "backlinks_spam_score": result.get("backlinks_spam_score"),
+        "target_spam_score": (result.get("info") or {}).get("target_spam_score"),
+        "new_backlinks": result.get("new_backlinks"),
+        "lost_backlinks": result.get("lost_backlinks"),
+        "new_referring_domains": _either(result, "new_referring_domains", "new_reffering_domains"),
+        "lost_referring_domains": _either(
+            result, "lost_referring_domains", "lost_reffering_domains"
+        ),
+    }
+
+
+def map_backlinks_history(result: dict[str, Any]) -> list[dict[str, Any]]:
+    """Monthly backlink totals, oldest first; rows without a date are dropped."""
+    rows = [
+        {
+            "section": "history",
+            "date": item["date"][:10],
+            "backlinks": item.get("backlinks"),
+            "referring_domains": item.get("referring_domains"),
+            "rank": item.get("rank"),
+            "new_backlinks": item.get("new_backlinks"),
+            "lost_backlinks": item.get("lost_backlinks"),
+            "new_referring_domains": _either(
+                item, "new_referring_domains", "new_reffering_domains"
+            ),
+            "lost_referring_domains": _either(
+                item, "lost_referring_domains", "lost_reffering_domains"
+            ),
+        }
+        for item in _item_list(result)
+        if isinstance(item.get("date"), str) and item["date"]
+    ]
+    return sorted(rows, key=lambda row: row["date"])
+
+
+def _counted(rows: list[dict[str, Any]], result: dict[str, Any]) -> dict[str, Any]:
+    return {"total_count": result.get("total_count"), "rows": rows}
+
+
+def map_backlinks(result: dict[str, Any]) -> dict[str, Any]:
+    """backlinks/backlinks rows (backlinksRowMappers.ts mapBacklinksRows)."""
+    rows = [
+        {
+            "section": "backlink",
+            "domain_from": item.get("domain_from"),
+            "url_from": item.get("url_from"),
+            "url_to": item.get("url_to"),
+            "anchor": item.get("anchor"),
+            "item_type": item.get("item_type"),
+            "dofollow": item.get("dofollow"),
+            "rank": item.get("rank"),
+            "domain_from_rank": item.get("domain_from_rank"),
+            "spam_score": _either(item, "backlink_spam_score", "backlinks_spam_score"),
+            "first_seen": item.get("first_seen"),
+            "last_seen": _either(item, "lost_date", "last_seen", "last_visited"),
+            "is_lost": item["is_lost"]
+            if item.get("is_lost") is not None
+            else bool(item.get("lost_date")),
+            "is_broken": bool(item.get("is_broken")),
+        }
+        for item in _item_list(result)
+    ]
+    return _counted(rows, result)
+
+
+def map_referring_domains(result: dict[str, Any]) -> dict[str, Any]:
+    """backlinks/referring_domains rows (mapReferringDomainsRows)."""
+    rows = [
+        {
+            "section": "referring_domain",
+            "domain": item.get("domain"),
+            "backlinks": item.get("backlinks"),
+            "referring_pages": item.get("referring_pages"),
+            "rank": item.get("rank"),
+            "spam_score": item.get("backlinks_spam_score"),
+            "first_seen": item.get("first_seen"),
+            "broken_backlinks": item.get("broken_backlinks"),
+        }
+        for item in _item_list(result)
+    ]
+    return _counted(rows, result)
+
+
+def map_linked_pages(result: dict[str, Any]) -> dict[str, Any]:
+    """backlinks/domain_pages_summary rows (mapTopPagesRows): the most linked-to pages."""
+    rows = [
+        {
+            "section": "page",
+            "url": _either(item, "page", "url"),
+            "backlinks": item.get("backlinks"),
+            "referring_domains": item.get("referring_domains"),
+            "rank": item.get("rank"),
+            "broken_backlinks": item.get("broken_backlinks"),
+        }
+        for item in _item_list(result)
+    ]
+    return _counted(rows, result)
 
 
 def map_serp_competitors(result: dict[str, Any]) -> list[dict[str, Any]]:
@@ -561,6 +678,74 @@ class DataForSeoClient:
         return await self._result(
             "dataforseo_labs/google/relevant_pages/live", payload, map_relevant_pages
         )
+
+    @staticmethod
+    def _backlinks_payload(target: str) -> dict[str, Any]:
+        # buildCommonPayload in backlinks.ts: the domain with its subdomains, live links only.
+        return {
+            "target": target,
+            "include_subdomains": True,
+            "include_indirect_links": True,
+            "exclude_internal_backlinks": True,
+            "backlinks_status_type": "live",
+            "rank_scale": "one_hundred",
+        }
+
+    async def backlinks_summary(
+        self, *, target: str
+    ) -> tuple[dict[str, Any], float | None, dict[str, Any]]:
+        return await self._result(
+            "backlinks/summary/live", self._backlinks_payload(target), map_backlinks_summary
+        )
+
+    async def backlinks_history(
+        self, *, target: str, date_from: str, date_to: str
+    ) -> tuple[list[dict[str, Any]], float | None, dict[str, Any]]:
+        # history/live takes a bare hostname and no subdomain switch.
+        payload = {
+            "target": target,
+            "date_from": date_from,
+            "date_to": date_to,
+            "rank_scale": "one_hundred",
+        }
+        return await self._result("backlinks/history/live", payload, map_backlinks_history)
+
+    async def backlinks(
+        self, *, target: str, limit: int
+    ) -> tuple[dict[str, Any], float | None, dict[str, Any]]:
+        """The strongest live backlinks, one per linking domain, likely spam left out."""
+        payload = self._backlinks_payload(target) | {
+            "limit": limit,
+            "order_by": ["rank,desc"],
+            "mode": "one_per_domain",
+            "filters": [
+                ["backlink_spam_score", "<", BACKLINKS_SPAM_THRESHOLD],
+                "or",
+                ["backlink_spam_score", "=", None],
+            ],
+        }
+        return await self._result("backlinks/backlinks/live", payload, map_backlinks)
+
+    async def referring_domains(
+        self, *, target: str, limit: int
+    ) -> tuple[dict[str, Any], float | None, dict[str, Any]]:
+        payload = self._backlinks_payload(target) | {
+            "limit": limit,
+            "order_by": ["backlinks,desc"],
+            "filters": ["backlinks_spam_score", "<=", BACKLINKS_SPAM_THRESHOLD],
+        }
+        return await self._result(
+            "backlinks/referring_domains/live", payload, map_referring_domains
+        )
+
+    async def linked_pages(
+        self, *, target: str, limit: int
+    ) -> tuple[dict[str, Any], float | None, dict[str, Any]]:
+        payload = self._backlinks_payload(target) | {
+            "limit": limit,
+            "order_by": ["backlinks,desc"],
+        }
+        return await self._result("backlinks/domain_pages_summary/live", payload, map_linked_pages)
 
     async def serp_competitors(
         self, *, keywords: list[str], location_code: int, language_code: str, limit: int
