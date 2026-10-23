@@ -60,6 +60,7 @@ def tool_env(monkeypatch):
         get_run=AsyncMock(return_value=run),
         list_runs=AsyncMock(return_value=[]),
         list_reports=AsyncMock(return_value=[]),
+        save_keywords=AsyncMock(return_value={"saved": 2}),
     )
     service.ranks = SimpleNamespace(
         list_trackers=AsyncMock(return_value=[]),
@@ -67,6 +68,10 @@ def tool_env(monkeypatch):
             return_value={"tracker": {"tracker_id": "t"}, "run": None, "compare": "7d", "rows": []}
         ),
         history=AsyncMock(return_value=[]),
+        create_tracker=AsyncMock(return_value={"tracker": {"tracker_id": "t"}, "rows": []}),
+        update_tracker=AsyncMock(return_value={"tracker": {"tracker_id": "t"}, "rows": []}),
+        add_keywords=AsyncMock(return_value={"added": 1}),
+        remove_keyword=AsyncMock(return_value=None),
     )
     monkeypatch.setattr("octop.infra.seo.rank.SeoRankService", lambda seo: seo.ranks)
     service.ai = SimpleNamespace(
@@ -85,8 +90,15 @@ def tool_env(monkeypatch):
         answer=AsyncMock(
             return_value={"run_id": "r", "answer_markdown": None, "citations": [], "brands": []}
         ),
+        add_prompts=AsyncMock(return_value={"added": 2}),
+        remove_prompt=AsyncMock(return_value=None),
+        set_engines=AsyncMock(return_value={"settings": {"engines": ["gemini"]}, "prompts": []}),
     )
     monkeypatch.setattr("octop.infra.seo.ai_visibility.SeoAiService", lambda seo: seo.ai)
+    service.audits = SimpleNamespace(
+        cancel=AsyncMock(return_value={"audit_id": "a", "status": "cancelled"})
+    )
+    monkeypatch.setattr("octop.infra.seo.audit.service.SeoAuditService", lambda seo: seo.audits)
     tools = {tool.name: tool for tool in build_seo_tools(service, "agent-a", threads)}
     return configurable, threads, service, tools
 
@@ -197,6 +209,42 @@ async def test_agent_context_writes_are_attributed_and_serps_are_read_only(tool_
     await tools["seo_get_ai_answer"].ainvoke({"run_id": "r", "prompt_id": "p", "engine": "gemini"})
     service.ai.answer.assert_awaited_once_with(7, "project-a", "r", "p", "gemini")
     assert not any(word in name for name in tools for word in ("buy", "fetch", "check"))
+
+
+async def test_free_writes_call_the_routes_services_on_the_owner_data(tool_env):
+    # The same service calls as the page's routes, in the data owner's project.
+    _config, _threads, service, tools = tool_env
+    service.project_for_agent.return_value = (1, {"project_id": "project-a"})
+    await tools["seo_save_keywords"].ainvoke({"run_id": "run-a", "keywords": ["crm", "erp"]})
+    service.save_keywords.assert_awaited_once_with(
+        1, "project-a", run_id="run-a", keywords=["crm", "erp"], tags=[], tag_mode="append"
+    )
+    await tools["seo_add_ai_prompts"].ainvoke({"prompts": ["best crm?"], "topic": "CRM"})
+    service.ai.add_prompts.assert_awaited_once_with(
+        1, "project-a", prompts=["best crm?"], topic="CRM"
+    )
+    await tools["seo_remove_ai_prompt"].ainvoke({"prompt_id": "p"})
+    service.ai.remove_prompt.assert_awaited_once_with(1, "project-a", "p")
+    engines = json.loads(await tools["seo_set_ai_engines"].ainvoke({"engines": ["gemini"]}))
+    service.ai.set_engines.assert_awaited_once_with(1, "project-a", engines=["gemini"])
+    assert engines == {"settings": {"engines": ["gemini"]}}
+    created = json.loads(
+        await tools["seo_create_rank_tracker"].ainvoke({"depth": 20, "keywords": ["crm"]})
+    )
+    service.ranks.create_tracker.assert_awaited_once_with(
+        1, "project-a", domain=None, devices="both", depth=20, keywords=["crm"]
+    )
+    assert created == {"tracker": {"tracker_id": "t"}}
+    await tools["seo_update_rank_tracker"].ainvoke({"tracker_id": "t", "depth": 30})
+    service.ranks.update_tracker.assert_awaited_once_with(1, "project-a", "t", depth=30)
+    await tools["seo_add_rank_keywords"].ainvoke({"tracker_id": "t", "keywords": ["erp"]})
+    service.ranks.add_keywords.assert_awaited_once_with(1, "project-a", "t", keywords=["erp"])
+    await tools["seo_remove_rank_keyword"].ainvoke({"tracker_id": "t", "keyword_id": "k"})
+    service.ranks.remove_keyword.assert_awaited_once_with(1, "project-a", "t", "k")
+    await tools["seo_cancel_audit"].ainvoke({"audit_id": "a"})
+    service.audits.cancel.assert_awaited_once_with(1, "project-a", "a")
+    # Deleting a tracker, an audit or a report drops data: those stay on the page.
+    assert not any(name.startswith(("seo_delete", "seo_remove_rank_tracker")) for name in tools)
 
 
 def _row(keyword: str, volume: int | None) -> dict:

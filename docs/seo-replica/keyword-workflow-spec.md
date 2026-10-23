@@ -243,3 +243,12 @@ balancebiketoddler.com 的审计只报了三类小问题，同一个站 ChatGPT 
 - **页面：** 「AI 可见度」标签最下面加「品牌查询」卡片：目标默认填项目域名，竞品回车添加；上面是合计和各平台数字、趋势图、占比表，下面两个分页签放被引用的网页（展开看引用它的问题）和提到它的问题（展开看引用的网页和提到的品牌）；链接只放 http(s)。上游的网址范围（只看某个路径）不做，只查整个域名或品牌名。
 - **专家工具：** 沿用 `seo_list_ai_lookups` / `seo_get_ai_lookup`（kind 多了 `brand`）；品牌记录的行分页读，每行带 `section`：`page` / `query`。
 - **HTTP：** `POST /seo/projects/{id}/ai-lookups/brand`；列表和单条读取和提示词探索共用。
+
+## 2026-10-23 R6：对话和工作台打通
+
+用户：「这套 SEO 工作台内置的功能，应该可以通过外面的对话（SEO 专家）拉起和使用，打通 SEO 工作台和 SEO Agent。」定下来的规矩（2026-10-23 用户选的）：免费的操作专家在对话里直接做；花钱的由专家填好参数，对话里出一张确认卡，用户点「确认购买」才扣钱，和页面按钮走同一个接口、同一份预估；反过来，工作台上的结果也能一键交给专家接着分析。一块一个提交。
+
+### ① 专家能直接做的免费操作
+
+- **新工具：** `seo_save_keywords`（把研究记录里的词存进已保存关键词，标签可追加或替换）、`seo_add_ai_prompts` / `seo_remove_ai_prompt`、`seo_set_ai_engines`、`seo_create_rank_tracker` / `seo_update_rank_tracker`、`seo_add_rank_keywords` / `seo_remove_rank_keyword`、`seo_cancel_audit`。每个都调和页面接口相同的服务方法，校验、上限（每个项目 100 条提问、20 个排名追踪，每个追踪 200 个词）和去重都一样，写进数据所有者（管理员）的项目。
+- **不给专家的：** 删排名追踪、删审计、删报告会连带删掉数据，留在页面上点；移除一条提问或一个追踪词不删历史，所以给了。建项目、改绑专家、填 DataForSEO 账号、连 Google 也留在页面上。
