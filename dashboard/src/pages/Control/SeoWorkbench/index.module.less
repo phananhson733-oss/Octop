@@ -47,3 +47,12 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.answers {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(320px, 100%), 1fr));
+  gap: 12px;
+}
+.answerText {
+  max-height: 360px;
+  overflow: auto;
+}

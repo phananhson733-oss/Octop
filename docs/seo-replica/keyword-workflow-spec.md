@@ -216,3 +216,17 @@ balancebiketoddler.com 的审计只报了三类小问题，同一个站 ChatGPT 
 - **购买和复用：** 同一个域名 12 小时内有非空的成功记录就直接复用、不收费。每个调用约 $0.02 加每行 $0.00003，一次约 $0.11-0.13，确认框里写明。
 - **页面：** 「竞争对手」标签里在「热门页面」下面加「外链」卡片：上面是概况数字和外链 / 引用域名的双轴趋势图，下面三个分页签分别放最强外链、引用域名和被链接最多的页面；nofollow 外链加标记，链接只放 http(s)。上游的单页明细、锚文本分布和翻页筛选这里不做。
 - **专家工具：** 沿用 `seo_list_competitor_lookups` / `seo_get_competitor_lookup`（kind 多了 `backlinks`），每行带 `section`：`backlink` / `referring_domain` / `page` / `history`。
+
+### ③ 提示词探索（kind `prompt`）
+
+移植 `features/ai-search/services/promptExplorer.ts`、`lib/dataforseo/llm-models.ts` 和 `lib/dataforseo/ai.ts` 的 `fetchLlmResponse`：一个问题（≤500 字）同时问 1-4 个模型（ChatGPT、Claude、Gemini、Perplexity），用 DataForSEO `ai_optimization/{model}/llm_responses/live`，并排显示回答、引用的网页和模型搜过的词。和 R4 的 AI 可见度不同：那边用 LLM scraper 批量跑项目里存的提示词，这里是临时问一个问题、能挑模型和搜索国家。
+
+- **选型号：** 先读免费的型号目录 `GET ai_optimization/{model}/llm_responses/models`。目录列着固定型号就用它（ChatGPT `gpt-5.6-luna`、Claude `claude-sonnet-5`），否则按上游规则取最高的不带后缀的主型号（`gpt-X`、`claude-sonnet-X`、`gemini-X-pro`、`sonar-reasoning-pro`），再不行取目录里有的备用型号。目录读不到时用上游 2026-08-25 的备用列表。最后选出的名字不在目录里就不发送：DataForSEO 对写错型号的任务也收费。上游把目录在进程里缓存 1 小时，这里每次购买现读（免费，点得少）。
+- **请求：** `user_prompt` 原样发；`max_output_tokens` 4096（推理模型的隐藏思考也占这个额度）；联网时只有 Claude 加 `force_web_search`（ChatGPT 会拒）；国家只在联网时发。Gemini 不收国家，Claude 只收 36 个国家（列表照上游）；不支持的组合不发送、不收费，那一行记 `unsupported_country`。页面上的国家下拉只给这 36 个国家（上游给全部 249 个）。
+- **结果：** 每个模型一行：型号名、状态、回答正文（`message` 段落用空行拼接）、引用（只收 http(s)、去重、最多 25 条、网址超过 2048 字符的丢掉）、模型搜过的词（最多 20 个）、输出 token、是否真的联网、这一行的费用。
+- **失败和复用：** 各模型并发；一个模型失败不影响其他模型，失败那行照记费用和回执。和外链查询一样，有一个模型的请求失败整条就记为失败（有结果未知的记为未知），保留其他模型的回答但不复用，再点一次就全部重买（2026-10-23 用户在验收时定的）；国家不支持、型号没列出这类没发出去、不收费的拒绝不算失败。同一个问题（只合并空白、保留大小写）、同一组模型、联网开关和国家 12 小时内有完成的记录就直接复用、不收费。上游按「问题 + 型号」各缓存 7 天，重试只补失败的模型；这里按整次提问缓存 12 小时，和其他查询一致。上游在模型没联网就作答时会自动再花钱问一次，这里不重试。
+- **费用：** 确认框按上游的预留价估最多多少钱：联网时 ChatGPT $0.09、Claude $0.18、Gemini $0.11、Perplexity $0.04，不联网时 $0.05 / $0.08 / $0.05 / $0.04。实际按 DataForSEO 回执记账。
+- **品牌高亮：** 不进请求，也不存。页面上按上游规则比对：引用的网址或标题包含品牌，或正文按词边界提到品牌，就标「提到了」。默认填项目域名的第一段，改了不用重新付费。
+- **页面：** 「AI 可见度」标签最下面加「提示词探索」卡片；回答只按纯文本显示，链接只放 http(s)。
+- **专家工具：** 新增只读的 `seo_list_ai_lookups` / `seo_get_ai_lookup`；后者一次读一个模型的回答（正文前 24000 字），引用分页。竞品查询的列表和工具都不会列出提问记录，反过来也一样。
+- **HTTP：** `POST /seo/projects/{id}/ai-lookups/prompt`、`GET /seo/projects/{id}/ai-lookups`、`GET /seo/projects/{id}/ai-lookups/{lookup_id}`。等待中的提问超过 6 分钟没结束记为中断（竞品查询还是 5 分钟）。

@@ -453,6 +453,9 @@ rebound.
 | `DELETE` | `/seo/projects/{id}/ai-visibility/prompts/{prompt_id}` | seo | stop asking a prompt; its answers stay with their checks |
 | `GET`    | `/seo/projects/{id}/ai-visibility/runs/{run_id}/answers/{prompt_id}/{engine}` | seo | one saved answer: its text (model output, shown as plain text) and cited pages marked own / competitor |
 | `POST`   | `/seo/projects/{id}/ai-visibility/checks` | seo | body `{max_cost_usd}` (≥ `estimate_usd`, $0.004 per prompt and engine) — paid: one live answer per prompt and engine (ChatGPT / Gemini LLM scrapers, AI Overviews from a live Google SERP), in the background → 202 run; one check at a time per project |
+| `POST`   | `/seo/projects/{id}/ai-lookups/prompt` | seo | body `{prompt (≤500), models: [chat_gpt, claude, gemini, perplexity] (1-4), web_search (default true), country? (ISO-2, only with web_search)}` — paid DataForSEO LLM Responses: every model answers at once on the newest name DataForSEO lists (≤ ~150 s); a failed model keeps the others' answers but fails the lookup; Gemini with a country, or a model with no listed name, is refused unsent at no charge and fails nothing; the same request within 12 h is served from a completed lookup at no charge |
+| `GET`    | `/seo/projects/{id}/ai-lookups?kind=` | seo | AI search lookup summaries (kind `prompt`), newest first |
+| `GET`    | `/seo/projects/{id}/ai-lookups/{lookup_id}` | seo | one lookup with one answer per model: text (model output, plain text), cited pages, the searches it ran |
 | `GET`/`PATCH` | `/seo/projects/{id}/context` | seo | project background; `PATCH {updates: [...]}` applies all ops or none |
 | `GET`/`POST` | `/seo/projects/{id}/keywords` | seo | saved keywords (paged) / save rows from a run |
 | `GET`    | `/seo/projects/{id}/report-context?run_id=` | seo | evidence and `context_hash` for an agent report |

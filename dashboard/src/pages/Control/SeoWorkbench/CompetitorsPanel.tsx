@@ -26,6 +26,7 @@ import {
 } from "recharts";
 import {
   seoApi,
+  type AiLookupSummary,
   type Backlink,
   type BacklinksMonth,
   type BacklinksRow,
@@ -59,6 +60,8 @@ type Target =
 const MAX_KEYWORDS = 200;
 const SAVED_KEYWORD_PICKS = 20;
 
+const clip = (text: string, max: number) =>
+  text.length > max ? `${text.slice(0, max)}…` : text;
 const number = (value: number | null | undefined) =>
   value == null ? "—" : Math.round(value).toLocaleString();
 const hostOf = (value: string) =>
@@ -69,14 +72,40 @@ const hostOf = (value: string) =>
     .replace(/[/?#].*$/, "")
     .replace(/^www\./, "");
 
+/** Where one family of lookups is listed, read and bought. */
+export interface LookupApi<
+  K extends string,
+  S extends { lookup_id: string; status: string; item_count: number },
+  L extends S,
+  T,
+> {
+  list: (projectId: string, kind: K) => Promise<S[]>;
+  get: (projectId: string, lookupId: string) => Promise<L>;
+  buy: (
+    projectId: string,
+    data: T & { idempotency_key: string; confirm_paid: true },
+  ) => Promise<L>;
+}
+
+const competitorLookups: LookupApi<Kind, LookupSummary, Lookup, Target> = {
+  list: (projectId, kind) => seoApi.lookups(projectId, kind),
+  get: (projectId, lookupId) => seoApi.lookup(projectId, lookupId),
+  buy: (projectId, data) => seoApi.buyLookup(projectId, data),
+};
+
 /**
  * Saved lookups of one kind, the one shown, and the confirmed purchase. Opening
  * the tab reads saved lookups only; every purchase is a confirmed click.
  */
-function useLookups(projectId: string, kind: Kind) {
+export function useLookups<
+  K extends string,
+  S extends { lookup_id: string; status: string; item_count: number },
+  L extends S,
+  T,
+>(projectId: string, kind: K, api: LookupApi<K, S, L, T>) {
   const { t } = useTranslation();
-  const [history, setHistory] = useState<LookupSummary[]>([]);
-  const [current, setCurrent] = useState<Lookup>();
+  const [history, setHistory] = useState<S[]>([]);
+  const [current, setCurrent] = useState<L>();
   const [loading, setLoading] = useState(true);
   const [buying, setBuying] = useState(false);
   const [error, setError] = useState("");
@@ -84,15 +113,15 @@ function useLookups(projectId: string, kind: Kind) {
   useEffect(() => {
     let active = true;
     setLoading(true);
-    seoApi
-      .lookups(projectId, kind)
+    api
+      .list(projectId, kind)
       .then(async (list) => {
         // A failed or empty lookup must not hide an earlier good one.
         const pick =
           list.find((item) => item.status === "completed" && item.item_count) ??
           list[0];
         const full = pick
-          ? await seoApi.lookup(projectId, pick.lookup_id)
+          ? await api.get(projectId, pick.lookup_id)
           : undefined;
         if (active) {
           setHistory(list);
@@ -108,19 +137,19 @@ function useLookups(projectId: string, kind: Kind) {
     return () => {
       active = false;
     };
-  }, [projectId, kind, t]);
+  }, [projectId, kind, api, t]);
   async function open(lookupId: string) {
     setLoading(true);
     setError("");
     try {
-      setCurrent(await seoApi.lookup(projectId, lookupId));
+      setCurrent(await api.get(projectId, lookupId));
     } catch (err) {
       setError(apiErrorMessage(err, t("seo.loadError"), t));
     } finally {
       setLoading(false);
     }
   }
-  async function buy(target: Target) {
+  async function buy(target: T) {
     const input = JSON.stringify(target);
     // An unchanged retry after an uncertain failure reuses the same key.
     if (attempt.current?.input !== input)
@@ -128,7 +157,7 @@ function useLookups(projectId: string, kind: Kind) {
     setBuying(true);
     setError("");
     try {
-      const bought = await seoApi.buyLookup(projectId, {
+      const bought = await api.buy(projectId, {
         ...target,
         idempotency_key: attempt.current.key,
         confirm_paid: true,
@@ -148,7 +177,11 @@ function useLookups(projectId: string, kind: Kind) {
   return { history, current, loading, buying, error, open, buy };
 }
 
-function LookupMeta({ lookup }: { lookup: Lookup }) {
+export function LookupMeta({
+  lookup,
+}: {
+  lookup: LookupSummary | AiLookupSummary;
+}) {
   const { t } = useTranslation();
   const timeZone = useServerTimezone();
   return (
@@ -175,13 +208,13 @@ function LookupMeta({ lookup }: { lookup: Lookup }) {
   );
 }
 
-function HistorySelect({
+export function HistorySelect({
   history,
   current,
   onOpen,
 }: {
-  history: LookupSummary[];
-  current?: Lookup;
+  history: (LookupSummary | AiLookupSummary)[];
+  current?: { lookup_id: string };
   onOpen: (lookupId: string) => void;
 }) {
   const { t } = useTranslation();
@@ -196,15 +229,19 @@ function HistorySelect({
       options={history.map((item) => ({
         value: item.lookup_id,
         label: `${
-          item.domain ??
-          t("seo.lookupKeywordCount", { count: item.keywords?.length ?? 0 })
+          "request" in item
+            ? clip(item.request.prompt, 40)
+            : item.domain ??
+              t("seo.lookupKeywordCount", {
+                count: item.keywords?.length ?? 0,
+              })
         } · ${formatServerIsoDateTime(item.observed_at, timeZone)}`,
       }))}
     />
   );
 }
 
-function BuyButton({
+export function BuyButton({
   label,
   disabled,
   buying,
@@ -246,7 +283,7 @@ function DomainCard({
   configured: boolean;
 }) {
   const { t } = useTranslation();
-  const lookups = useLookups(projectId, "domain");
+  const lookups = useLookups(projectId, "domain", competitorLookups);
   const [target, setTarget] = useState("");
   const current = lookups.current;
   const rows = (
@@ -397,7 +434,7 @@ function PagesCard({
   configured: boolean;
 }) {
   const { t } = useTranslation();
-  const lookups = useLookups(projectId, "pages");
+  const lookups = useLookups(projectId, "pages", competitorLookups);
   const [target, setTarget] = useState("");
   const current = lookups.current;
   const rows = (current?.kind === "pages" ? current.items : []) as RankedPage[];
@@ -539,7 +576,7 @@ function BacklinksCard({
   configured: boolean;
 }) {
   const { t } = useTranslation();
-  const lookups = useLookups(projectId, "backlinks");
+  const lookups = useLookups(projectId, "backlinks", competitorLookups);
   const [target, setTarget] = useState("");
   const current = lookups.current;
   const rows = (
@@ -870,7 +907,7 @@ function SerpCompetitorsCard({
   onContext: (context: ProjectContext) => void;
 }) {
   const { t } = useTranslation();
-  const lookups = useLookups(projectId, "competitors");
+  const lookups = useLookups(projectId, "competitors", competitorLookups);
   const [text, setText] = useState("");
   const [adding, setAdding] = useState("");
   const [error, setError] = useState("");

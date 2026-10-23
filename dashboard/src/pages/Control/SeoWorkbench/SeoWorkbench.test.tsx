@@ -46,6 +46,9 @@ vi.mock("../../../api/modules/seo", async (importOriginal) => ({
     buyLookup: vi.fn(),
     lookups: vi.fn(),
     lookup: vi.fn(),
+    buyPromptLookup: vi.fn(),
+    aiLookups: vi.fn(),
+    aiLookup: vi.fn(),
     context: vi.fn(),
     updateContext: vi.fn(),
     keywords: vi.fn(),
@@ -185,6 +188,7 @@ beforeEach(() => {
   vi.mocked(seoApi.keywords).mockResolvedValue({ rows: [], total_count: 0 });
   vi.mocked(seoApi.reports).mockResolvedValue([]);
   vi.mocked(seoApi.audits).mockResolvedValue([]);
+  vi.mocked(seoApi.aiLookups).mockResolvedValue([]);
   vi.mocked(seoApi.research).mockResolvedValue(run);
   vi.mocked(seoApi.run).mockImplementation(async (_, runId) => {
     if (runId !== run.run_id) throw new Error(`unexpected run ${runId}`);
@@ -1761,6 +1765,120 @@ describe("AI visibility", () => {
     });
     expect(await screen.findByText("seo.aiRunning")).toBeVisible();
     expect(screen.getByRole("button", { name: "seo.aiCheck" })).toBeDisabled();
+  });
+  it("asks a prompt of the chosen models on a confirmed click and shows each answer as plain text", async () => {
+    vi.mocked(seoApi.aiVisibility).mockRejectedValue(new Error("not needed"));
+    const answer = {
+      model_name: null,
+      status: "completed" as const,
+      error: null,
+      text: "",
+      citations: [],
+      fan_out_queries: [],
+      output_tokens: null,
+      web_search: null,
+      cost_usd: 0,
+    };
+    vi.mocked(seoApi.buyPromptLookup).mockResolvedValue({
+      lookup_id: "l-prompt",
+      kind: "prompt",
+      request: {
+        prompt: "best free apps",
+        models: ["chat_gpt", "claude", "gemini"],
+        web_search: true,
+        country: "US",
+      },
+      status: "completed",
+      observed_at: "2026-10-23T08:00:00Z",
+      item_count: 3,
+      cost_usd: 0.03,
+      cached: false,
+      items: [
+        {
+          ...answer,
+          model: "chat_gpt",
+          model_name: "gpt-5.6-luna",
+          text: "**Example** is great.<img src='x'>",
+          citations: [
+            {
+              url: "https://example.com/top",
+              domain: "example.com",
+              title: "Example top",
+            },
+            { url: "javascript:alert(1)", domain: null, title: "Bad link" },
+          ],
+          fan_out_queries: ["free drama apps"],
+          web_search: true,
+          cost_usd: 0.03,
+        },
+        {
+          ...answer,
+          model: "claude",
+          status: "failed",
+          error: "provider_rejected",
+        },
+        {
+          ...answer,
+          model: "gemini",
+          status: "failed",
+          error: "unsupported_country",
+        },
+      ],
+    });
+    setup("/workbench/seo-workbench.main?project=p1&view=ai");
+    const card = (await screen.findByText("seo.promptTitle")).closest(
+      ".ant-card",
+    ) as HTMLElement;
+    expect(await within(card).findByText("seo.lookupNotBought")).toBeVisible();
+    expect(seoApi.aiLookups).toHaveBeenCalledWith("p1", "prompt");
+    fireEvent.change(within(card).getByLabelText("seo.promptLabel"), {
+      target: { value: "  best free apps " },
+    });
+    fireEvent.click(
+      within(card).getByRole("checkbox", { name: "seo.llm_gemini" }),
+    );
+    fireEvent.click(
+      within(card).getByRole("button", { name: "seo.promptBuy" }),
+    );
+    expect(
+      await screen.findByText("seo.promptPaidConfirm"),
+    ).toBeInTheDocument();
+    expect(seoApi.buyPromptLookup).not.toHaveBeenCalled();
+    const confirm = await screen.findAllByRole("button", {
+      name: "seo.serpConfirmBuy",
+    });
+    await act(async () => {
+      fireEvent.click(confirm[confirm.length - 1]);
+    });
+    expect(seoApi.buyPromptLookup).toHaveBeenCalledWith("p1", {
+      prompt: "best free apps",
+      models: ["chat_gpt", "gemini"],
+      web_search: true,
+      idempotency_key: expect.any(String),
+      confirm_paid: true,
+    });
+    // Model output stays plain text: no markup is rendered.
+    expect(
+      await within(card).findByText("**Example** is great.<img src='x'>"),
+    ).toBeVisible();
+    expect(card.querySelector("img[src='x']")).toBeNull();
+    expect(within(card).getByText("seo.promptMentioned")).toBeVisible();
+    expect(within(card).getByText("seo.promptCited")).toBeVisible();
+    expect(
+      within(card).getByRole("link", { name: "Example top" }),
+    ).toHaveAttribute("href", "https://example.com/top");
+    expect(within(card).queryByRole("link", { name: "Bad link" })).toBeNull();
+    expect(within(card).getByText("free drama apps")).toBeVisible();
+    expect(within(card).getByText("seo.promptFailed")).toBeVisible();
+    expect(
+      within(card).getByText("seo.promptError_unsupported_country"),
+    ).toBeVisible();
+    // The brand is matched on the page: changing it buys nothing.
+    fireEvent.change(within(card).getByLabelText("seo.promptBrand"), {
+      target: { value: "nomatch" },
+    });
+    expect(within(card).getByText("seo.promptNotMentioned")).toBeVisible();
+    expect(seoApi.buyPromptLookup).toHaveBeenCalledTimes(1);
   });
 });
 describe("static private report preview", () => {

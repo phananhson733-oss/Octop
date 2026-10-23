@@ -44,6 +44,17 @@ def tool_env(monkeypatch):
         get_serp=AsyncMock(return_value={"serp_id": "serp-a", "items": []}),
         list_lookups=AsyncMock(return_value=[]),
         get_lookup=AsyncMock(return_value={"lookup_id": "lookup-a", "items": []}),
+        list_ai_lookups=AsyncMock(return_value=[]),
+        get_ai_lookup=AsyncMock(
+            return_value={
+                "lookup_id": "lookup-p",
+                "kind": "prompt",
+                "status": "unknown",
+                "error": "interrupted",
+                "request": {"models": ["chat_gpt"]},
+                "items": [],
+            }
+        ),
         save_report=AsyncMock(return_value={"report_id": "report-a"}),
         keyword_rows=AsyncMock(return_value=[]),
         get_run=AsyncMock(return_value=run),
@@ -150,6 +161,20 @@ async def test_agent_context_writes_are_attributed_and_serps_are_read_only(tool_
     service.list_lookups.assert_awaited_once_with(7, "project-a", kind="domain")
     with pytest.raises(OctopError):
         await tools["seo_list_competitor_lookups"].ainvoke({"kind": "keywords"})
+    await tools["seo_list_ai_lookups"].ainvoke({"kind": "prompt"})
+    service.list_ai_lookups.assert_awaited_once_with(7, "project-a", kind="prompt")
+    with pytest.raises(OctopError) as unasked:
+        await tools["seo_get_ai_lookup"].ainvoke({"lookup_id": "lookup-p", "model": "claude"})
+    assert unasked.value.code == "SEO_INVALID_INPUT"
+    # An asked model without an answer reads as the lookup's status, not a missing lookup.
+    pending = json.loads(
+        await tools["seo_get_ai_lookup"].ainvoke({"lookup_id": "lookup-p", "model": "chat_gpt"})
+    )
+    assert (pending["status"], pending["error"], pending["citations"]) == (
+        "unknown",
+        "interrupted",
+        [],
+    )
     await tools["seo_get_rank_results"].ainvoke({"tracker_id": "t", "compare": "30d"})
     service.ranks.results.assert_awaited_once_with(7, "project-a", "t", compare="30d")
     await tools["seo_get_rank_history"].ainvoke({"tracker_id": "t", "keyword_id": "k"})
@@ -376,6 +401,32 @@ async def test_every_tool_result_stays_readable_at_maximum_size(tool_env):
             for i in range(2000)
         ],
     }
+    request = {"prompt": "p" * 500, "models": ["chat_gpt"], "web_search": True, "country": "US"}
+    answer = {
+        "model": "chat_gpt",
+        "model_name": "gpt-5.6-luna",
+        "status": "completed",
+        "error": None,
+        "text": "a" * 100_000,
+        "citations": [
+            {"url": f"https://x.com/{i}{'u' * 2000}", "domain": "x.com", "title": "t" * 300}
+            for i in range(25)
+        ],
+        "fan_out_queries": ["q" * 500] * 20,
+        "output_tokens": 4096,
+        "web_search": True,
+        "cost_usd": 0.09,
+    }
+    service.get_ai_lookup.return_value = {
+        "lookup_id": "lookup-p",
+        "kind": "prompt",
+        "request": request,
+        "items": [answer],
+    }
+    service.list_ai_lookups.return_value = [
+        {"lookup_id": f"p{i}", "kind": "prompt", "request": request, "item_count": 4}
+        for i in range(300)
+    ]
     service.get_run.return_value = run
     service.keyword_rows.return_value = saved
     service.list_runs.return_value = [run] * 300
@@ -413,6 +464,14 @@ async def test_every_tool_result_stays_readable_at_maximum_size(tool_env):
             "run_id",
         ),
         ("seo_list_ai_prompts", {}, "prompts", 100, "prompt_id"),
+        ("seo_list_ai_lookups", {}, "lookups", 300, "lookup_id"),
+        (
+            "seo_get_ai_lookup",
+            {"lookup_id": "lookup-p", "model": "chat_gpt"},
+            "citations",
+            25,
+            "url",
+        ),
         ("seo_get_ai_visibility", {}, "rows", 300, "prompt_id"),
         ("seo_get_ai_visibility", {"view": "brands"}, "brands", 101, "domain"),
         ("seo_get_ai_visibility", {"view": "sources"}, "sources", 50, None),

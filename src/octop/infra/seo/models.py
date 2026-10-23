@@ -89,6 +89,20 @@ class LookupCreate(Command):
         return self
 
 
+class PromptLookupCreate(Command):
+    """One prompt asked of 1-4 AI models (OpenSEO Prompt Explorer)."""
+
+    prompt: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=500)]
+    models: list[Literal["chat_gpt", "claude", "gemini", "perplexity"]] = Field(
+        min_length=1, max_length=4
+    )
+    web_search: bool = True
+    # ISO 3166-1 alpha-2; only geolocates the web search, so it is dropped without one.
+    country: str | None = Field(default=None, pattern=r"^[A-Z]{2}$")
+    idempotency_key: str = Field(min_length=1, max_length=100)
+    confirm_paid: Literal[True]
+
+
 # Rank tracking, ported from OpenSEO rank-tracking.ts schemas.
 TrackedKeyword = Annotated[str, StringConstraints(max_length=200)]
 Devices = Literal["both", "desktop", "mobile"]

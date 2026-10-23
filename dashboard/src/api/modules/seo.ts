@@ -215,6 +215,49 @@ export interface LookupSummary {
 export interface Lookup extends LookupSummary {
   items: RankedKeyword[] | SerpCompetitor[] | RankedPage[] | BacklinksRow[];
 }
+export type LlmModel = "chat_gpt" | "claude" | "gemini" | "perplexity";
+export interface PromptRequest {
+  prompt: string;
+  models: LlmModel[];
+  web_search: boolean;
+  /** ISO 3166-1 alpha-2 country the web search was placed in. */
+  country: string | null;
+}
+export interface PromptCitation {
+  url: string;
+  domain: string | null;
+  title: string | null;
+}
+export interface PromptAnswer {
+  model: LlmModel;
+  model_name: string | null;
+  status: "completed" | "failed" | "unknown";
+  /** unsupported_country and unknown_model were refused unsent, at no charge. */
+  error: string | null;
+  /** Model output: plain text, never rendered as markdown or HTML. */
+  text: string;
+  citations: PromptCitation[];
+  fan_out_queries: string[];
+  output_tokens: number | null;
+  /** Whether the model actually searched the web. */
+  web_search: boolean | null;
+  cost_usd: number | null;
+}
+export interface AiLookupSummary {
+  lookup_id: string;
+  kind: "prompt";
+  request: PromptRequest;
+  status: ResearchRun["status"];
+  observed_at: string;
+  item_count: number;
+  cost_usd: number | null;
+  cached: boolean;
+  source_lookup_id?: string | null;
+  error?: string | null;
+}
+export interface AiLookup extends AiLookupSummary {
+  items: PromptAnswer[];
+}
 export type RankDevices = "both" | "desktop" | "mobile";
 export type RankCompare = "1d" | "7d" | "30d" | "90d";
 export interface RankTrackerSummary {
@@ -731,6 +774,26 @@ export const seoApi = {
   lookup: (id: string, lookupId: string) =>
     request<Lookup>(
       `${projectPath(id)}/lookups/${encodeURIComponent(lookupId)}`,
+    ),
+  buyPromptLookup: (
+    id: string,
+    data: Omit<PromptRequest, "country"> & {
+      country?: string;
+      idempotency_key: string;
+      confirm_paid: true;
+    },
+  ) =>
+    request<AiLookup>(`${projectPath(id)}/ai-lookups/prompt`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  aiLookups: (id: string, kind: AiLookupSummary["kind"]) =>
+    request<AiLookupSummary[]>(
+      `${projectPath(id)}/ai-lookups?${new URLSearchParams({ kind })}`,
+    ),
+  aiLookup: (id: string, lookupId: string) =>
+    request<AiLookup>(
+      `${projectPath(id)}/ai-lookups/${encodeURIComponent(lookupId)}`,
     ),
   rankTrackers: (id: string) =>
     request<RankTrackerSummary[]>(`${projectPath(id)}/rank-trackers`),

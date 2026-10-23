@@ -7,7 +7,7 @@ import hashlib
 import json
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from functools import partial
 from typing import Any
@@ -32,6 +32,7 @@ from octop.infra.seo.models import (
     LookupCreate,
     ProjectCreate,
     ProjectUpdate,
+    PromptLookupCreate,
     ProviderPut,
     RemoveCompetitorsOp,
     RemoveKeyPagesOp,
@@ -42,10 +43,13 @@ from octop.infra.seo.models import (
     SerpCreate,
 )
 from octop.infra.seo.provider import (
+    LLM_MODELS,
     DataForSeoClient,
     ProviderFailure,
     interleave,
     normalize_keyword,
+    pick_llm_model_name,
+    supports_search_country,
 )
 from octop.infra.users.identity import Role, User
 from octop.infra.utils.ulid import new_ulid
@@ -71,6 +75,15 @@ COMPETITORS_LIMIT = 50
 DOMAIN_PAGES_LIMIT = 100
 # OpenSEO's backlinks tabs load 100 rows each (BACKLINKS_DEFAULT_LIMIT) and a year of history.
 BACKLINKS_LIMIT = 100
+# Competitor research is read on the Competitors tab; AI search lookups on the AI tab.
+COMPETITOR_LOOKUP_KINDS = ("domain", "competitors", "pages", "backlinks")
+AI_LOOKUP_KINDS = ("prompt",)
+# Minutes before a running lookup counts as interrupted. Competitor lookups make at most two
+# sequential 60 s calls; a prompt lookup reads the model catalogs, then waits up to 150 s for
+# the slowest model.
+_LOOKUP_STALE_MINUTES = {"prompt": 6}
+# Prompt models refused before any request, at no charge.
+_PROMPT_REFUSALS = ("unsupported_country", "unknown_model")
 # Project memory caps from OpenSEO contextUpdateOps.ts / ProjectContextService.ts.
 PROSE_MAX_CHARS = 4000
 MAX_CUSTOM_SECTIONS = 20
@@ -782,8 +795,7 @@ class SeoService:
         return await self._settle_serp(serp)
 
     async def _settle_lookup(self, lookup: dict[str, Any]) -> dict[str, Any]:
-        # At most two live calls of at most 60s each.
-        if _stale(lookup, 5):
+        if _stale(lookup, _LOOKUP_STALE_MINUTES.get(lookup["kind"], 5)):
             lookup.update(status="unknown", error="interrupted")
             await _db(self.repo.update_lookup, lookup)
         return lookup
@@ -801,9 +813,9 @@ class SeoService:
         try:
             command = LookupCreate.model_validate(kwargs)
             if command.domain is not None:
-                domain: str | None = _bare_host(command.domain)
+                target_key = _bare_host(command.domain)
+                domain: str | None = target_key
                 keywords: list[str] | None = None
-                target_key = domain
             else:
                 domain = None
                 keywords = sorted({normalize_keyword(k) for k in command.keywords or []} - {""})
@@ -812,12 +824,60 @@ class SeoService:
                 target_key = hashlib.sha256("\n".join(keywords).encode()).hexdigest()
         except ValueError as exc:
             raise _error() from exc
+        return await self._purchase_lookup(
+            user_id,
+            project,
+            kind=command.kind,
+            target_key=target_key,
+            key=command.idempotency_key,
+            fields={"domain": domain, "keywords": keywords},
+            buy=self._buy_lookup,
+        )
+
+    async def prompt_lookup(self, user_id: int, project_id: str, **kwargs: Any) -> dict[str, Any]:
+        """Buy, or reuse within 12 hours, one prompt asked of 1-4 AI models at once."""
+        project = await self._project(user_id, project_id)
+        try:
+            command = PromptLookupCreate.model_validate(kwargs)
+        except ValueError as exc:
+            raise _error() from exc
+        request = {
+            "prompt": command.prompt,
+            "models": [model for model in LLM_MODELS if model in command.models],
+            "web_search": command.web_search,
+            "country": command.country if command.web_search else None,
+        }
+        # promptExplorer.ts keys on the prompt with whitespace collapsed, case kept.
+        key_fields = request | {"prompt": " ".join(command.prompt.split())}
+        return await self._purchase_lookup(
+            user_id,
+            project,
+            kind="prompt",
+            target_key=hashlib.sha256(json.dumps(key_fields, sort_keys=True).encode()).hexdigest(),
+            key=command.idempotency_key,
+            fields={"domain": None, "keywords": None, "request": request},
+            buy=self._buy_prompt,
+        )
+
+    async def _purchase_lookup(
+        self,
+        user_id: int,
+        project: dict[str, Any],
+        *,
+        kind: str,
+        target_key: str,
+        key: str,
+        fields: dict[str, Any],
+        buy: Callable[[DataForSeoClient, dict[str, Any]], Awaitable[None]],
+    ) -> dict[str, Any]:
+        """Replay ``key``, reuse a non-empty lookup of the target and market, or ``buy`` one."""
+        project_id = project["project_id"]
 
         async def replay() -> dict[str, Any] | None:
-            previous = await _db(self.repo.lookup_for_key, project_id, command.idempotency_key)
+            previous = await _db(self.repo.lookup_for_key, project_id, key)
             if previous is None:
                 return None
-            if (previous["kind"], previous["target_key"]) != (command.kind, target_key):
+            if (previous["kind"], previous["target_key"]) != (kind, target_key):
                 raise _error(ErrorCode.SEO_CONFLICT)
             return await self._settle_lookup(previous)
 
@@ -826,10 +886,9 @@ class SeoService:
         lookup: dict[str, Any] = {
             "lookup_id": new_ulid(),
             "project_id": project_id,
-            "kind": command.kind,
+            "kind": kind,
             "target_key": target_key,
-            "domain": domain,
-            "keywords": keywords,
+            **fields,
             "location_code": project["location_code"],
             "language_code": project["language_code"],
             "status": "running",
@@ -859,7 +918,7 @@ class SeoService:
                 source_lookup_id=cached["lookup_id"],
                 receipts=cached["receipts"],
             )
-        if not await _db(self.repo.start_lookup, lookup, command.idempotency_key):
+        if not await _db(self.repo.start_lookup, lookup, key):
             previous = await replay()
             assert previous is not None
             return previous
@@ -867,13 +926,93 @@ class SeoService:
             return lookup
         assert client is not None
         try:
-            await self._buy_lookup(client, lookup)
+            await buy(client, lookup)
         except BaseException:
             lookup.update(status="unknown", error="interrupted")
             await asyncio.shield(_db(self.repo.update_lookup, lookup))
             raise
         await _db(self.repo.update_lookup, lookup)
         return lookup
+
+    @staticmethod
+    async def _buy_prompt(client: DataForSeoClient, lookup: dict[str, Any]) -> None:
+        """Every model asked at once (promptExplorer.ts); one model's failure keeps the others.
+
+        Unlike OpenSEO, an answer given without a web search is not bought a second time.
+        """
+        request = lookup["request"]
+        country = request["country"]
+        costs: list[float | None] = []
+
+        async def ask(model: str) -> dict[str, Any]:
+            row: dict[str, Any] = {
+                "model": model,
+                "model_name": None,
+                "status": "failed",
+                "error": None,
+                "text": "",
+                "citations": [],
+                "fan_out_queries": [],
+                "output_tokens": None,
+                "web_search": None,
+                "cost_usd": 0.0,
+            }
+            if country and not supports_search_country(model, country):
+                # Refused before any request, as OpenSEO does: nothing is charged.
+                row["error"] = "unsupported_country"
+                return row
+            names = await client.llm_model_names(model)
+            name = pick_llm_model_name(model, names)
+            if name not in names:
+                # DataForSEO bills a task naming an unknown model; never send one.
+                row["error"] = "unknown_model"
+                return row
+            try:
+                data, cost, receipt = await client.llm_response(
+                    model=model,
+                    model_name=name,
+                    prompt=request["prompt"],
+                    web_search=request["web_search"],
+                    country=country,
+                )
+            except ProviderFailure as exc:
+                costs.append(exc.cost)
+                lookup["receipts"].append(exc.receipt)
+                row.update(
+                    status="unknown" if exc.unknown else "failed", error=str(exc), cost_usd=exc.cost
+                )
+                return row
+            costs.append(cost)
+            lookup["receipts"].append(receipt)
+            row.update(data, model_name=data["model_name"] or name, status="completed")
+            row["cost_usd"] = cost
+            return row
+
+        try:
+            results = await asyncio.gather(
+                *(ask(model) for model in request["models"]), return_exceptions=True
+            )
+            for result in results:
+                if isinstance(result, BaseException):
+                    raise result
+            lookup["items"] = list(results)
+        finally:
+            known = [c for c in costs if c is not None]
+            lookup["cost_known_usd"] = sum(known)
+            lookup["cost_usd"] = sum(known) if len(known) == len(costs) else None
+        # Like backlinks lookups, a failed request fails the lookup, which keeps the other
+        # answers but is never reused, so asking again buys afresh. A free refusal would only
+        # be refused again, so it does not count.
+        bought = [row for row in lookup["items"] if row["error"] not in _PROMPT_REFUSALS]
+        failures = [row for row in bought if row["status"] != "completed"]
+        if any(row["status"] == "unknown" for row in failures):
+            lookup["status"] = "unknown"
+        elif failures or not bought:
+            lookup["status"] = "failed"
+        else:
+            lookup["status"] = "completed"
+        if lookup["status"] != "completed":
+            lookup["error"] = (failures or lookup["items"])[0]["error"]
 
     @staticmethod
     async def _buy_backlinks(client: DataForSeoClient, lookup: dict[str, Any]) -> None:
@@ -981,20 +1120,47 @@ class SeoService:
     async def list_lookups(
         self, user_id: int, project_id: str, *, kind: str | None = None
     ) -> list[dict[str, Any]]:
-        """Lookup summaries newest first, without result rows."""
+        """Competitor-research lookup summaries newest first, without result rows."""
+        return await self._list_lookups(user_id, project_id, kind, COMPETITOR_LOOKUP_KINDS)
+
+    async def list_ai_lookups(
+        self, user_id: int, project_id: str, *, kind: str | None = None
+    ) -> list[dict[str, Any]]:
+        """AI search lookup summaries newest first, without result rows."""
+        return await self._list_lookups(user_id, project_id, kind, AI_LOOKUP_KINDS)
+
+    async def _list_lookups(
+        self, user_id: int, project_id: str, kind: str | None, kinds: tuple[str, ...]
+    ) -> list[dict[str, Any]]:
         await self._project(user_id, project_id)
-        lookups = await _db(self.repo.lookups, project_id, kind)
-        stale = [lookup["lookup_id"] for lookup in lookups if _stale(lookup, 5)]
+        if kind is not None:
+            if kind not in kinds:
+                raise _error()
+            kinds = (kind,)
+        lookups = await _db(self.repo.lookups, project_id, kinds)
+        stale = [
+            lookup["lookup_id"]
+            for lookup in lookups
+            if _stale(lookup, _LOOKUP_STALE_MINUTES.get(lookup["kind"], 5))
+        ]
         for lookup_id in stale:
             full = await _db(self.repo.lookup, project_id, lookup_id)
             if full is not None:
                 await self._settle_lookup(full)
-        return await _db(self.repo.lookups, project_id, kind) if stale else lookups
+        return await _db(self.repo.lookups, project_id, kinds) if stale else lookups
 
     async def get_lookup(self, user_id: int, project_id: str, lookup_id: str) -> dict[str, Any]:
+        return await self._get_lookup(user_id, project_id, lookup_id, COMPETITOR_LOOKUP_KINDS)
+
+    async def get_ai_lookup(self, user_id: int, project_id: str, lookup_id: str) -> dict[str, Any]:
+        return await self._get_lookup(user_id, project_id, lookup_id, AI_LOOKUP_KINDS)
+
+    async def _get_lookup(
+        self, user_id: int, project_id: str, lookup_id: str, kinds: tuple[str, ...]
+    ) -> dict[str, Any]:
         await self._project(user_id, project_id)
         lookup = await _db(self.repo.lookup, project_id, lookup_id)
-        if lookup is None:
+        if lookup is None or lookup["kind"] not in kinds:
             raise _error(ErrorCode.NOT_FOUND)
         return await self._settle_lookup(lookup)
 

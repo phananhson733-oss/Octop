@@ -550,6 +550,12 @@ async def test_competitor_lookups_over_http(env_with_agent, monkeypatch):
         elif "relevant_pages" in request.url.path:
             page = {"page_address": "https://rival.com/a", "metrics": {"organic": {"etv": 9.5}}}
             result = {"total_count": 7, "items": [page]}
+        elif request.url.path.endswith("/llm_responses/models"):
+            result = {"model_name": "gpt-5.6-luna"}
+        elif request.url.path.endswith("/llm_responses/live"):
+            note = {"title": "Rival", "url": "https://rival.com/"}
+            message = {"type": "message", "sections": [{"text": "Rival.", "annotations": [note]}]}
+            result = {"model_name": "gpt-5.6-luna", "items": [message], "web_search": True}
         else:
             result = {"items": [{"domain": "rival.com", "visibility": 0.5}]}
         task = {"status_code": 20000, "cost": 0.01, "result": [result]}
@@ -661,6 +667,41 @@ async def test_competitor_lookups_over_http(env_with_agent, monkeypatch):
         {"kind": "competitors", "keywords": [], "idempotency_key": "z", "confirm_paid": True},
     ):
         assert (await client.post(base + "/lookups", headers=auth, json=bad)).status_code == 422
+    asked = await client.post(
+        base + "/ai-lookups/prompt",
+        headers=auth,
+        json={
+            "prompt": "Best rival?",
+            "models": ["chat_gpt", "gemini"],
+            "country": "US",
+            "idempotency_key": "q",
+            "confirm_paid": True,
+        },
+    )
+    assert asked.status_code == 200, asked.text
+    answers = asked.json()
+    assert (answers["kind"], answers["status"], answers["request"]["models"]) == (
+        "prompt",
+        "completed",
+        ["chat_gpt", "gemini"],
+    )
+    assert answers["items"][0]["text"] == "Rival." and "receipts" not in answers
+    assert answers["items"][0]["citations"] == [
+        {"url": "https://rival.com/", "domain": "rival.com", "title": "Rival"}
+    ]
+    assert answers["items"][1]["error"] == "unsupported_country"
+    listed = (await client.get(base + "/ai-lookups", headers=auth)).json()
+    assert [row["lookup_id"] for row in listed] == [answers["lookup_id"]]
+    assert "items" not in listed[0] and listed[0]["item_count"] == 2
+    read_answers = await client.get(base + "/ai-lookups/" + answers["lookup_id"], headers=auth)
+    assert read_answers.json()["items"] == answers["items"]
+    assert (
+        await client.get(base + "/lookups/" + answers["lookup_id"], headers=auth)
+    ).status_code == 404
+    assert (
+        await client.get(base + "/ai-lookups", headers=auth, params={"kind": "domain"})
+    ).status_code == 422
+    # Competitor research lists only its own kinds.
     summaries = (await client.get(base + "/lookups", headers=auth)).json()
     assert [row["kind"] for row in summaries] == ["backlinks", "pages", "competitors", "domain"]
     assert "items" not in summaries[0]
@@ -672,13 +713,15 @@ async def test_competitor_lookups_over_http(env_with_agent, monkeypatch):
     read = (await client.get(base + "/lookups/" + domain["lookup_id"], headers=auth)).json()
     assert read["items"] == domain["items"]
     assert (await client.get(base + "/lookups/nope", headers=auth)).status_code == 404
-    assert len(calls) == 9
+    assert len(calls) == 11
 
     other = await create_user(client, auth, username="seo-r3-other")
     for method, path, body in [
         ("post", base + "/lookups", request),
         ("get", base + "/lookups", None),
         ("get", base + "/lookups/" + domain["lookup_id"], None),
+        ("get", base + "/ai-lookups", None),
+        ("get", base + "/ai-lookups/" + answers["lookup_id"], None),
     ]:
         kwargs = {"headers": other} | ({"json": body} if body is not None else {})
         assert (await getattr(client, method)(path, **kwargs)).status_code == 403, path
@@ -690,6 +733,9 @@ async def test_competitor_lookups_over_http(env_with_agent, monkeypatch):
         ("/api/seo/projects/{project_id}/lookups", "post"),
         ("/api/seo/projects/{project_id}/lookups", "get"),
         ("/api/seo/projects/{project_id}/lookups/{lookup_id}", "get"),
+        ("/api/seo/projects/{project_id}/ai-lookups/prompt", "post"),
+        ("/api/seo/projects/{project_id}/ai-lookups", "get"),
+        ("/api/seo/projects/{project_id}/ai-lookups/{lookup_id}", "get"),
     ]:
         assert paths[path][method]["summary"], path
 

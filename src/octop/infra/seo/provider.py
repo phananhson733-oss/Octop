@@ -5,7 +5,9 @@ follows lib/dataforseo/serp.ts and mcp/tools/get-serp-results.ts, competitor res
 follows lib/dataforseo/labs.ts, features/domain/services and mcp/tools/
 dataforseo-research-tools.ts (top pages follow OpenSEO 2d8236a domainPagesPage.ts,
 backlinks its lib/dataforseo/backlinks.ts and features/backlinks/services), AI answers follow lib/dataforseo/ai-tracking.ts and
-features/ai-visibility/providers/dataforseoEvidence.ts (MIT).
+features/ai-visibility/providers/dataforseoEvidence.ts, and prompt answers follow 2d8236a
+lib/dataforseo/llm-models.ts, lib/dataforseo/ai.ts and features/ai-search/services/
+promptExplorer.ts (MIT).
 """
 
 from __future__ import annotations
@@ -513,6 +515,104 @@ def map_ai_answer(result: dict[str, Any], engine: str) -> dict[str, Any]:
     }
 
 
+# The four models OpenSEO's Prompt Explorer asks, in its order.
+LLM_MODELS = ("chat_gpt", "claude", "gemini", "perplexity")
+# llm-models.ts: the snapshot used when the free catalog is unreachable or names no
+# flagship, the pins that win while the catalog lists them, and the flagship rule.
+LLM_FALLBACK_NAMES = {
+    "chat_gpt": ("gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.2", "gpt-5.1", "gpt-5"),
+    "claude": ("claude-sonnet-5", "claude-sonnet-4-6", "claude-sonnet-4-5"),
+    "gemini": ("gemini-2.5-pro",),
+    "perplexity": ("sonar-reasoning-pro", "sonar-pro", "sonar"),
+}
+LLM_PINNED_NAMES = {"chat_gpt": "gpt-5.6-luna", "claude": "claude-sonnet-5"}
+_LLM_LATEST_RULES = {
+    "chat_gpt": re.compile(r"gpt-(\d+(?:\.\d+)*)"),
+    "claude": re.compile(r"claude-sonnet-(\d+(?:-\d+)*)"),
+    "gemini": re.compile(r"gemini-(\d+(?:\.\d+)*)-pro"),
+    "perplexity": re.compile(r"sonar-reasoning-pro()"),
+}
+# prompt-search-countries.ts: Claude documents this list, Gemini rejects the field,
+# ChatGPT and Perplexity take any ISO 3166-1 alpha-2 code.
+_CLAUDE_COUNTRIES = (
+    "AR AT AU BE BR CA CH CL CN DE DK ES FI FR GB HK ID IN IT JP KR MX MY NL NO NZ PH PL PT "
+    "RU SA SE TR TW US ZA"
+)
+CLAUDE_SEARCH_COUNTRIES = frozenset(_CLAUDE_COUNTRIES.split())
+# promptExplorer.ts: reasoning models spend hidden tokens from this budget.
+LLM_MAX_OUTPUT_TOKENS = 4096
+
+
+def supports_search_country(model: str, country: str) -> bool:
+    if model == "gemini":
+        return False
+    return model != "claude" or country in CLAUDE_SEARCH_COUNTRIES
+
+
+def pick_llm_model_name(model: str, names: list[str]) -> str:
+    """The pinned name while listed, else the highest flagship alias, else a listed fallback."""
+    pinned = LLM_PINNED_NAMES.get(model)
+    if pinned is not None and pinned in names:
+        return pinned
+    best: tuple[list[int], str] | None = None
+    for name in names:
+        match = _LLM_LATEST_RULES[model].fullmatch(name)
+        if match is None:
+            continue
+        version = [int(part) for part in re.split(r"[.-]", match.group(1) or "0")]
+        # Shorter versions pad with zeros, as compareVersions does.
+        if best is None or _pad(version, best[0]) > _pad(best[0], version):
+            best = (version, name)
+    if best is not None:
+        return best[1]
+    fallback = LLM_FALLBACK_NAMES[model]
+    return next((name for name in fallback if name in names), fallback[0])
+
+
+def _pad(version: list[int], other: list[int]) -> list[int]:
+    return version + [0] * (len(other) - len(version))
+
+
+def map_llm_response(result: dict[str, Any]) -> dict[str, Any]:
+    """The answer's text, the pages it cites, and the searches the model ran."""
+    texts: list[str] = []
+    citations: dict[str, dict[str, Any]] = {}
+    for item in _item_list(result):
+        if item.get("type") != "message":
+            continue
+        sections = item.get("sections") or []
+        if not isinstance(sections, list) or any(not isinstance(sec, dict) for sec in sections):
+            raise _MalformedResult
+        for section in sections:
+            text = section.get("text")
+            if isinstance(text, str) and text:
+                texts.append(text)
+            for note in _sources(section.get("annotations")):
+                # Annotations are untyped {title, url}; LLM output, so http(s) only.
+                url = safe_http_url(note.get("url")) if isinstance(note, dict) else None
+                if url is None or url in citations or len(url) > 2048:
+                    continue
+                title = note.get("title")
+                citations[url] = {
+                    "url": url,
+                    "domain": urlsplit(url).hostname,
+                    "title": title[:300] if isinstance(title, str) else None,
+                }
+    queries = result.get("fan_out_queries") or []
+    if not isinstance(queries, list):
+        raise _MalformedResult
+    tokens = _cost(result.get("output_tokens"))
+    name = result.get("model_name")
+    return {
+        "model_name": name if isinstance(name, str) else None,
+        "text": "\n\n".join(texts).strip(),
+        "citations": list(citations.values())[:25],
+        "fan_out_queries": [q[:500] for q in queries if isinstance(q, str)][:20],
+        "output_tokens": round(tokens) if tokens is not None else None,
+        "web_search": result.get("web_search") is True,
+    }
+
+
 class DataForSeoClient:
     def __init__(
         self, login: str, password: str, *, transport: httpx.AsyncBaseTransport | None = None
@@ -632,6 +732,51 @@ class DataForSeoClient:
             payload,
             lambda result: map_ai_answer(result, engine),
             no_results_ok=True,
+            timeout=AI_TIMEOUT_SECONDS,
+        )
+
+    async def llm_model_names(self, model: str) -> list[str]:
+        """DataForSEO's free model catalog for ``model``; the snapshot when it cannot be read."""
+        try:
+            async with httpx.AsyncClient(
+                transport=self._transport, timeout=30, follow_redirects=False
+            ) as client:
+                response = await client.get(
+                    f"https://api.dataforseo.com/v3/ai_optimization/{model}/llm_responses/models",
+                    auth=self._auth,
+                )
+            data = response.json()
+            task = data["tasks"][0]
+            if data.get("status_code") != 20000 or task.get("status_code") != 20000:
+                raise ValueError("catalog refused")
+            names = [
+                row["model_name"]
+                for row in task.get("result") or []
+                if isinstance(row, dict) and isinstance(row.get("model_name"), str)
+            ]
+        except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError, AttributeError):
+            names = []
+        return names or list(LLM_FALLBACK_NAMES[model])
+
+    async def llm_response(
+        self, *, model: str, model_name: str, prompt: str, web_search: bool, country: str | None
+    ) -> tuple[dict[str, Any], float | None, dict[str, Any]]:
+        """One live answer from ``model_name``; ``country`` only geolocates its web search."""
+        payload: dict[str, Any] = {
+            "user_prompt": prompt,
+            "model_name": model_name,
+            "web_search": web_search,
+            "max_output_tokens": LLM_MAX_OUTPUT_TOKENS,
+        }
+        if web_search and model == "claude":
+            # Only Claude takes force_web_search; ChatGPT rejects it.
+            payload["force_web_search"] = True
+        if web_search and country:
+            payload["web_search_country_iso_code"] = country
+        return await self._result(
+            f"ai_optimization/{model}/llm_responses/live",
+            payload,
+            map_llm_response,
             timeout=AI_TIMEOUT_SECONDS,
         )
 

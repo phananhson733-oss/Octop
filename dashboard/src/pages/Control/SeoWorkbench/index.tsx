@@ -44,6 +44,7 @@ import { AuditPanel } from "./AuditPanel";
 import { CompetitorsPanel } from "./CompetitorsPanel";
 import { RankTrackingPanel } from "./RankTrackingPanel";
 import { AiVisibilityPanel } from "./AiVisibilityPanel";
+import { PromptExplorerCard } from "./AiSearchCards";
 import { ProjectContextPanel } from "./ProjectContextPanel";
 import { SearchPerformancePanel } from "./SearchPerformancePanel";
 import { SerpPanel } from "./SerpPanel";
@@ -1059,12 +1060,18 @@ function ProjectWorkspace({
             key: "ai",
             label: t("seo.ai"),
             children: (
-              <AiVisibilityPanel
-                key={id}
-                projectId={id}
-                configured={configured}
-                isVisible={isVisible && view === "ai"}
-              />
+              <div key={id} className={styles.stack}>
+                <AiVisibilityPanel
+                  projectId={id}
+                  configured={configured}
+                  isVisible={isVisible && view === "ai"}
+                />
+                <PromptExplorerCard
+                  projectId={id}
+                  domain={project.domain}
+                  configured={configured}
+                />
+              </div>
             ),
           },
           {

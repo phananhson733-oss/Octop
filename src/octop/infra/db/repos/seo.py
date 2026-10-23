@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Sequence
 from typing import Any
 
 from octop.infra.db.pool import DatabasePool
@@ -408,15 +409,15 @@ class SeoRepo:
             ),
         )
 
-    def lookups(self, project_id: str, kind: str | None = None) -> list[dict[str, Any]]:
-        """Lookup summaries newest first, without their result rows."""
-        sql = "SELECT payload,item_count FROM seo_lookups WHERE project_id=?"
-        args: list[Any] = [project_id]
-        if kind is not None:
-            sql += " AND kind=?"
-            args.append(kind)
+    def lookups(self, project_id: str, kinds: Sequence[str]) -> list[dict[str, Any]]:
+        """Summaries of the ``kinds`` lookups newest first, without their result rows."""
+        marks = ",".join("?" * len(kinds))
         with self._db.connect() as conn:
-            rows = conn.execute(sql + " ORDER BY id DESC", args).fetchall()
+            rows = conn.execute(
+                f"SELECT payload,item_count FROM seo_lookups WHERE project_id=? AND kind IN ({marks})"
+                " ORDER BY id DESC",
+                (project_id, *kinds),
+            ).fetchall()
         return [json.loads(row["payload"]) | {"item_count": row["item_count"]} for row in rows]
 
     def context(self, project_id: str, log_limit: int) -> dict[str, list[dict[str, Any]]]:

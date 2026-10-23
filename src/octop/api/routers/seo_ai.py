@@ -1,4 +1,5 @@
-"""HTTP adapters for SEO AI visibility: engines, prompts, paid checks and their answers."""
+"""HTTP adapters for SEO AI visibility (engines, prompts, paid checks and their answers) and
+AI search lookups bought one at a time."""
 
 from __future__ import annotations
 
@@ -10,7 +11,12 @@ from pydantic import BaseModel, Field
 from octop.api.deps import require_permission
 from octop.api.routers.seo import seo_owner, seo_service
 from octop.infra.seo.ai_visibility import SeoAiService
-from octop.infra.seo.models import AiCheckCreate, AiEnginesPut, AiPromptsAdd
+from octop.infra.seo.models import (
+    AiCheckCreate,
+    AiEnginesPut,
+    AiPromptsAdd,
+    PromptLookupCreate,
+)
 from octop.infra.seo.service import SeoService
 from octop.infra.utils.locale import resolve_request_locale
 
@@ -159,7 +165,67 @@ class AiPromptsAdded(BaseModel):
     added: int = Field(description="Prompts that were not saved yet.")
 
 
+LlmModel = Literal["chat_gpt", "claude", "gemini", "perplexity"]
+
+
+class PromptRequest(BaseModel):
+    prompt: str
+    models: list[LlmModel]
+    web_search: bool = Field(description="Whether the models were allowed to search the web.")
+    country: str | None = Field(
+        description="ISO 3166-1 alpha-2 country the web search was placed in; null for none."
+    )
+
+
+class PromptCitation(BaseModel):
+    url: str
+    domain: str | None
+    title: str | None
+
+
+class PromptAnswer(BaseModel):
+    model: LlmModel
+    model_name: str | None = Field(description="The DataForSEO model name that answered.")
+    status: Literal["completed", "failed", "unknown"]
+    error: str | None = Field(
+        description="unsupported_country (Gemini takes no country, Claude a fixed list) and "
+        "unknown_model are refused before any request, at no charge."
+    )
+    text: str = Field(description="The answer as plain text. Model output: never render as HTML.")
+    citations: list[PromptCitation] = Field(description="Cited pages, first cited first, max 25.")
+    fan_out_queries: list[str] = Field(description="Searches the model ran, max 20.")
+    output_tokens: int | None
+    web_search: bool | None = Field(description="Whether the model actually searched the web.")
+    cost_usd: float | None
+
+
+class AiLookupSummary(BaseModel):
+    lookup_id: str
+    project_id: str
+    kind: Literal["prompt"]
+    request: PromptRequest = Field(description="What was asked (kind prompt).")
+    location_code: int = Field(description="The project's market; scopes reuse only.")
+    language_code: str
+    status: Literal["running", "completed", "failed", "unknown"] = Field(
+        description="completed when every model asked answered (one refused at no charge does "
+        "not count); a failed or unknown lookup keeps the other answers and is never reused. "
+        "Each answer has its own status."
+    )
+    observed_at: str
+    item_count: int
+    cost_usd: float | None
+    cost_known_usd: float = 0
+    cached: bool = Field(description="Reused within 12 hours at no charge.")
+    source_lookup_id: str | None = None
+    error: str | None = None
+
+
+class AiLookup(AiLookupSummary):
+    items: list[PromptAnswer] = Field(description="One answer per model asked, in model order.")
+
+
 _BASE = "/projects/{project_id}/ai-visibility"
+_LOOKUPS = "/projects/{project_id}/ai-lookups"
 
 
 @router.get(
@@ -266,3 +332,51 @@ async def start_ai_check(
     return await service.start_check(
         owner, project_id, locale=resolve_request_locale(request), **body.model_dump()
     )
+
+
+@router.post(
+    _LOOKUPS + "/prompt",
+    response_model=AiLookup,
+    summary="Ask a prompt of AI models",
+    description="Requires explicit paid confirmation. Asks one prompt of 1-4 models (ChatGPT, "
+    "Claude, Gemini, Perplexity) at once through DataForSEO LLM Responses, each on the newest "
+    "model DataForSEO lists, and waits for the answers (up to about 150 s). A model that "
+    "fails keeps the others' answers but fails the lookup, so asking again buys every model "
+    "afresh. No retries. The same prompt, models, web search and country within 12 hours is "
+    "served from a completed lookup at no charge. Reuse the idempotency key to read an "
+    "existing attempt.",
+)
+async def buy_prompt_lookup(
+    project_id: str,
+    body: PromptLookupCreate,
+    owner: int = Depends(seo_owner),
+    service: SeoService = Depends(seo_service),
+) -> Any:
+    found = await service.prompt_lookup(owner, project_id, **body.model_dump())
+    return found | {"item_count": len(found["items"])}
+
+
+@router.get(
+    _LOOKUPS,
+    response_model=list[AiLookupSummary],
+    summary="List AI search lookups",
+    description="Newest first, without result rows. No supplier request is made.",
+)
+async def ai_lookups(
+    project_id: str,
+    kind: Literal["prompt"] | None = Query(default=None),
+    owner: int = Depends(seo_owner),
+    service: SeoService = Depends(seo_service),
+) -> Any:
+    return await service.list_ai_lookups(owner, project_id, kind=kind)
+
+
+@router.get(_LOOKUPS + "/{lookup_id}", response_model=AiLookup, summary="Read an AI search lookup")
+async def ai_lookup(
+    project_id: str,
+    lookup_id: str,
+    owner: int = Depends(seo_owner),
+    service: SeoService = Depends(seo_service),
+) -> Any:
+    found = await service.get_ai_lookup(owner, project_id, lookup_id)
+    return found | {"item_count": len(found["items"])}
