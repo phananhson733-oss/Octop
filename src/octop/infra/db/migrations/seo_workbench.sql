@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS seo_reports (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  report_id TEXT NOT NULL UNIQUE,
  project_id TEXT NOT NULL REFERENCES seo_projects(project_id) ON DELETE CASCADE,
- run_id TEXT NOT NULL REFERENCES seo_runs(run_id) ON DELETE CASCADE,
+ run_id TEXT REFERENCES seo_runs(run_id) ON DELETE CASCADE,
  metadata TEXT NOT NULL, html TEXT NOT NULL, context_json TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS seo_serps (
@@ -291,4 +291,19 @@ CREATE TABLE IF NOT EXISTS seo_ai_answers (
  citations TEXT NOT NULL DEFAULT '[]', brands TEXT NOT NULL DEFAULT '[]',
  error TEXT, cost_usd DOUBLE PRECISION, checked_at TEXT NOT NULL,
  UNIQUE(run_id, prompt_id, engine)
+);
+
+-- Immutable, server-collected evidence; reports can outlive the source audit.
+CREATE TABLE IF NOT EXISTS seo_report_contexts (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ context_id TEXT NOT NULL UNIQUE,
+ project_id TEXT NOT NULL REFERENCES seo_projects(project_id) ON DELETE CASCADE,
+ payload TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS seo_actions (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ action_id TEXT NOT NULL UNIQUE,
+ project_id TEXT NOT NULL REFERENCES seo_projects(project_id) ON DELETE CASCADE,
+ source_key TEXT NOT NULL, version INTEGER NOT NULL DEFAULT 1, payload TEXT NOT NULL,
+ UNIQUE(project_id, source_key)
 );

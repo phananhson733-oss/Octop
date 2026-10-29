@@ -11,8 +11,12 @@ from octop.api.deps import current_user, get_server, require_admin, require_perm
 from octop.infra.seo import proposals
 from octop.infra.seo.audit.service import SeoAuditService
 from octop.infra.seo.models import (
+    ActionCreate,
+    ActionUpdate,
+    ActionVerify,
     AuditCreate,
     ContextUpdate,
+    EvidencePrepare,
     KeywordsSave,
     LookupCreate,
     ProjectCreate,
@@ -23,6 +27,7 @@ from octop.infra.seo.models import (
     SerpCreate,
 )
 from octop.infra.seo.service import SeoService
+from octop.infra.seo.workflow import SeoWorkflow
 from octop.infra.server import OctopServer
 from octop.infra.users.identity import User
 from octop.infra.utils.locale import resolve_request_locale
@@ -53,6 +58,7 @@ class ProviderStatus(BaseModel):
 
 
 class KeywordRow(BaseModel):
+    volume_source: str | None = None
     keyword: str
     search_volume: float | None = None
     cpc: float | None = None
@@ -380,7 +386,9 @@ class SaveCounts(BaseModel):
 class ReportMetadata(BaseModel):
     report_id: str
     project_id: str
-    run_id: str
+    run_id: str | None
+    context_id: str | None = None
+    report_type: str = "keyword-research"
     title: str
     summary: str
     skill: str
@@ -1020,3 +1028,122 @@ async def delete_audit(
 ) -> Response:
     await service.delete(owner, project_id, audit_id)
     return Response(status_code=204)
+
+
+class ReportBundle(BaseModel):
+    saved_keywords: list[SavedKeyword] | None = None
+    context_id: str
+    project_id: str
+    report_type: str
+    created_at: str
+    context_hash: str
+    project: dict[str, Any]
+    project_context: dict[str, Any]
+    sources: list[dict[str, Any]]
+
+
+class SeoAction(BaseModel):
+    action_id: str
+    project_id: str
+    version: int
+    status: str
+    source: dict[str, Any]
+    created_at: str
+    updated_at: str
+    implementation: dict[str, Any] | None
+    verification: dict[str, Any] | None
+    history: list[dict[str, Any]]
+
+
+@router.post(
+    "/projects/{project_id}/report-contexts",
+    response_model=ReportBundle,
+    summary="Freeze evidence for an audit or cross-source report",
+    description="Collects explicit stored source IDs or read-only Google queries; never buys data. The immutable snapshot is capped at 2 MB.",
+)
+async def prepare_report(
+    project_id: str,
+    body: EvidencePrepare,
+    owner: int = Depends(seo_owner),
+    service: SeoService = Depends(seo_service),
+) -> Any:
+    return await SeoWorkflow(service).prepare(owner, project_id, **body.model_dump())
+
+
+@router.get(
+    "/projects/{project_id}/report-contexts/{context_id}",
+    response_model=ReportBundle,
+    summary="Read a frozen report evidence bundle",
+)
+async def report_bundle(
+    project_id: str,
+    context_id: str,
+    owner: int = Depends(seo_owner),
+    service: SeoService = Depends(seo_service),
+) -> Any:
+    return await SeoWorkflow(service).bundle(owner, project_id, context_id)
+
+
+@router.get(
+    "/projects/{project_id}/actions",
+    response_model=list[SeoAction],
+    summary="List SEO implementation and verification records",
+)
+async def actions(
+    project_id: str, owner: int = Depends(seo_owner), service: SeoService = Depends(seo_service)
+) -> Any:
+    return await SeoWorkflow(service).actions(owner, project_id)
+
+
+@router.post(
+    "/projects/{project_id}/actions",
+    response_model=SeoAction,
+    summary="Track an existing audit finding",
+)
+async def create_action(
+    project_id: str,
+    body: ActionCreate,
+    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
+    service: SeoService = Depends(seo_service),
+) -> Any:
+    return await SeoWorkflow(service).create_action(
+        owner, project_id, actor_id=user.id, **body.model_dump()
+    )
+
+
+@router.patch(
+    "/projects/{project_id}/actions/{action_id}",
+    response_model=SeoAction,
+    summary="Record progress or implementation evidence",
+)
+async def update_action(
+    project_id: str,
+    action_id: str,
+    body: ActionUpdate,
+    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
+    service: SeoService = Depends(seo_service),
+) -> Any:
+    return await SeoWorkflow(service).update_action(
+        owner, project_id, action_id, actor_id=user.id, **body.model_dump()
+    )
+
+
+@router.post(
+    "/projects/{project_id}/actions/{action_id}/verify",
+    response_model=SeoAction,
+    summary="Recheck an implemented finding against a later audit",
+    description="Requires a fresh completed crawl and page coverage. Missing or partial evidence remains needs_review; this endpoint does not start a crawl.",
+)
+async def verify_action(
+    project_id: str,
+    action_id: str,
+    body: ActionVerify,
+    user: User = Depends(current_user),
+    owner: int = Depends(seo_owner),
+    service: SeoService = Depends(seo_service),
+) -> Any:
+    return await SeoWorkflow(service).verify_action(
+        owner, project_id, action_id, actor_id=user.id, audit_id=body.audit_id
+    )

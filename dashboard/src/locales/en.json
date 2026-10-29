@@ -1865,7 +1865,16 @@
     "seo_get_project_context": "Read SEO project background",
     "seo_update_project_context": "Update SEO project background",
     "seo_list_serps": "List SEO SERP snapshots",
-    "seo_get_serp": "Read SEO SERP snapshot"
+    "seo_get_serp": "Read SEO SERP snapshot",
+    "seo_get_workflow": "Read SEO operating procedure",
+    "seo_prepare_report": "Freeze SEO report evidence",
+    "seo_read_report_evidence": "Read frozen SEO evidence",
+    "seo_save_evidence_report": "Save evidence-backed SEO report",
+    "seo_list_actions": "List SEO actions",
+    "seo_create_action": "Track SEO finding",
+    "seo_update_action": "Record SEO implementation",
+    "seo_verify_action": "Verify SEO implementation",
+    "seo_get_action_history": "Read SEO action history"
   },
   "toolSettings": {
     "title": "Tool settings",
@@ -7145,7 +7154,7 @@
     "savedCount": "Saved {{count}}: {{created}} new, {{updated}} updated.",
     "reportPrompt": "For SEO project {{projectId}} and research run {{runId}}, call seo_get_report_context first. Analyze the actual research, saved keywords and project background, preserve source dates, missing values and cost uncertainty, and write a complete HTML keyword research report. Do not run or propose paid lookups, and do not invent metrics. Save it with seo_save_report using this project and run, append a short research log entry with seo_update_project_context, then return the report ID and summary. Write the title, summary and body in English (set the html lang to en), keeping keywords, URLs and search-result titles exactly as found.",
     "askExpert": "Ask the expert",
-    "askExpertPrompt": "Analyze {{what}} for SEO project {{projectId}} ({{domain}}). Use the project background from seo_get_project_context and tell me what you found, what to do first and why. Use only the data you read and do not invent metrics; do not propose buying more data unless I ask. Answer in English, keeping keywords, URLs and page titles exactly as found.",
+    "askExpertPrompt": "Analyze {{what}} for SEO project {{projectId}} ({{domain}}). Use the project background from seo_get_project_context and tell me what you found, what to do first and why. Use only the data you read and do not invent metrics; do not propose buying more data unless I ask. Answer in English, keeping keywords, URLs and page titles exactly as found. First read seo_get_workflow and follow its evidence and completion criteria.",
     "askExpertWhat": {
       "research": "research run {{id}} (read its keywords with seo_list_research_rows)",
       "serp": "the search results snapshot {{id}} for \"{{keyword}}\" (read it with seo_get_serp)",
@@ -7625,6 +7634,51 @@
       "declined": "Not bought.",
       "doneMessage": "I bought {{what}} on the confirm card: record {{id}}, status {{status}}. Read the result and carry on.",
       "declinedMessage": "I'm not buying the {{what}} you proposed ({{key}}) for now; carry on without it."
-    }
+    },
+    "auditReport": "Generate audit report",
+    "auditReportPrompt": "a formal technical audit report for audit {{auditId}}. Use seo_prepare_report with report_type=technical-audit and sources=[{kind:audit,id:{{auditId}}}], read all frozen evidence, write and save with seo_save_evidence_report. State coverage and unmeasured CWV; no keyword purchase is needed",
+    "reportEvidence": "Source evidence",
+    "reportEvidenceHelp": "These are the captured sources used for this report, not current live results.",
+    "reportQuery": "Google query",
+    "actions": {
+      "title": "Actions & rechecks",
+      "help": "Track findings from the audit tab. Record the implemented change, then choose a later audit to verify it. Incomplete or inapplicable checks stay under review.",
+      "empty": "Track a finding from the audit tab to start.",
+      "track": "Track finding",
+      "tracked": "Tracked",
+      "note": "Implementation evidence (change, commit or document)",
+      "noteRequired": "Describe the actual change before marking it implemented.",
+      "chooseAudit": "Choose a later completed audit",
+      "state": "Status",
+      "progress": "Progress and evidence",
+      "start": "Start",
+      "implemented": "Record implementation",
+      "verify": "Recheck",
+      "reopen": "Reopen",
+      "status": {
+        "open": "Open",
+        "in_progress": "In progress",
+        "implemented": "Implemented",
+        "needs_review": "Needs review",
+        "verified": "Verified"
+      },
+      "reason": {
+        "issue_present": "Issue still present",
+        "clear_in_complete_recheck": "Clear in a complete later check",
+        "insufficient_coverage": "Insufficient fresh coverage",
+        "manual_review_required": "This rule needs manual review",
+        "target_not_satisfied": "The target field still fails its acceptance criteria"
+      },
+      "refresh": "Refresh actions"
+    },
+    "comprehensiveReport": "Generate combined report",
+    "comprehensiveReportPrompt": "a saved comprehensive report using available project evidence. Read seo_get_workflow, inventory stored sources, freeze explicit sources with seo_prepare_report, read them fully, and save with seo_save_evidence_report. State missing sources; buy nothing",
+    "volumeSource": {
+      "clickstream": "Clickstream volume",
+      "keyword_info": "Keyword metrics (fallback if clickstream is missing)",
+      "unknown": "Metric source unavailable"
+    },
+    "frozenShortlist": "Saved keyword shortlist (snapshot)",
+    "shortlistNotCaptured": "This older bundle did not capture the saved keyword shortlist."
   }
 }

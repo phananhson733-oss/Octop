@@ -29,52 +29,57 @@ function Location() {
   );
 }
 
-describe("seo_save_report in chat", () => {
-  ensureBuiltinToolRenderers();
+describe.each(["seo_save_report", "seo_save_evidence_report"])(
+  "%s in chat",
+  (toolName) => {
+    ensureBuiltinToolRenderers();
 
-  it("pins the saved report outside the folded tool list", () => {
-    const message = {
-      id: "tool-1",
-      role: "assistant",
-      content: "",
-      timestamp: 0,
-      toolData: { name: "seo_save_report", callId: "c1", output },
-    } as ChatMessage;
-    expect(isPinnedToolUiMessage(message)).toBe(true);
-  });
+    it("pins the saved report outside the folded tool list", () => {
+      const message = {
+        id: "tool-1",
+        role: "assistant",
+        content: "",
+        timestamp: 0,
+        toolData: { name: toolName, callId: "c1", output },
+      } as ChatMessage;
+      expect(isPinnedToolUiMessage(message)).toBe(true);
+    });
 
-  it("opens the saved report in the SEO workbench", () => {
-    render(
-      <MemoryRouter initialEntries={["/chat/a1/thr1"]}>
-        <ToolDetailsInline
-          toolData={{ name: "seo_save_report", callId: "c1", output }}
-          isStreaming={false}
-        />
-        <Location />
-      </MemoryRouter>,
-    );
-    expect(screen.getByText("Short-drama keyword report")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: /seo\.openReport/ }));
-    expect(screen.getByTestId("location")).toHaveTextContent(
-      "/workbench/seo-workbench.main?project=01PROJECT&view=reports&report=01REPORT",
-    );
-  });
+    it("opens the saved report in the SEO workbench", () => {
+      render(
+        <MemoryRouter initialEntries={["/chat/a1/thr1"]}>
+          <ToolDetailsInline
+            toolData={{ name: toolName, callId: "c1", output }}
+            isStreaming={false}
+          />
+          <Location />
+        </MemoryRouter>,
+      );
+      expect(
+        screen.getByText("Short-drama keyword report"),
+      ).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: /seo\.openReport/ }));
+      expect(screen.getByTestId("location")).toHaveTextContent(
+        "/workbench/seo-workbench.main?project=01PROJECT&view=reports&report=01REPORT",
+      );
+    });
 
-  it("shows no link while the report is still being written", () => {
-    render(
-      <MemoryRouter>
-        <ToolDetailsInline
-          toolData={{
-            name: "seo_save_report",
-            callId: "c1",
-            arguments: '{"html": "<html>',
-          }}
-          isStreaming
-        />
-      </MemoryRouter>,
-    );
-    expect(
-      screen.queryByRole("button", { name: /seo\.openReport/ }),
-    ).not.toBeInTheDocument();
-  });
-});
+    it("shows no link while the report is still being written", () => {
+      render(
+        <MemoryRouter>
+          <ToolDetailsInline
+            toolData={{
+              name: toolName,
+              callId: "c1",
+              arguments: '{"html": "<html>',
+            }}
+            isStreaming
+          />
+        </MemoryRouter>,
+      );
+      expect(
+        screen.queryByRole("button", { name: /seo\.openReport/ }),
+      ).not.toBeInTheDocument();
+    });
+  },
+);

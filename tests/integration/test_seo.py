@@ -1045,3 +1045,121 @@ async def test_seo_permission_shares_the_admin_workspace(env_with_agent, monkeyp
     ]:
         kwargs = {"headers": member} | ({"json": body} if body is not None else {})
         assert (await getattr(client, method)(path, **kwargs)).status_code == 403, path
+
+
+async def test_audit_report_and_real_rule_recheck(env_with_agent, monkeypatch):
+    from octop.infra.seo.audit import runner as runner_module
+    from octop.infra.seo.audit.throttle import CrawlThrottle
+    from tests.unit.seo.audit.fakesite import FakeSite, html, page
+
+    client, server, auth, agent_id = env_with_agent
+    clock = {"now": 0.0}
+
+    async def no_wait(seconds):
+        clock["now"] += seconds
+
+    monkeypatch.setattr(
+        runner_module, "CrawlThrottle", lambda: CrawlThrottle(lambda: clock["now"], no_wait)
+    )
+    site = FakeSite(
+        {
+            "https://example.com/": html(
+                "<html><body><h1>Example</h1>" + "word " * 200 + "</body></html>"
+            )
+        }
+    )
+    runner = server.app_runtime.seo_audits
+    monkeypatch.setattr(runner, "_client_factory", site.client)
+    created = await client.post(
+        "/api/seo/projects",
+        headers=auth,
+        json={"name": "Example", "domain": "example.com", "agent_id": agent_id},
+    )
+    base = f"/api/seo/projects/{created.json()['project_id']}"
+    other = await create_user(client, auth, username="workflow-other")
+    audit = (
+        await client.post(base + "/audits", headers=auth, json={"idempotency_key": "before"})
+    ).json()
+    await runner.wait(audit["audit_id"])
+    payload = {
+        "report_type": "technical-audit",
+        "sources": [{"kind": "audit", "id": audit["audit_id"]}],
+    }
+    assert (
+        await client.post(base + "/report-contexts", headers=other, json=payload)
+    ).status_code == 403
+    frozen = await client.post(base + "/report-contexts", headers=auth, json=payload)
+    assert frozen.status_code == 200, frozen.text
+    bundle = frozen.json()
+    assert any(i["issue_type"] == "missing-title" for i in bundle["sources"][0]["data"]["issues"])
+    report = await client.post(
+        base + "/reports",
+        headers=auth,
+        json={
+            "context_id": bundle["context_id"],
+            "context_hash": bundle["context_hash"],
+            "title": "Audit",
+            "html": "<html>Evidence fixture</html>",
+        },
+    )
+    assert report.status_code == 200, report.text
+    assert report.json()["run_id"] is None
+    assert report.json()["report_type"] == "technical-audit"
+    member = await create_user(client, auth, username="workflow-member", permissions=["seo"])
+    member_id = next(
+        row.id
+        for row in server.services.repos.user_repo.list()
+        if row.username == "workflow-member"
+    )
+    forged = await client.post(
+        base + "/actions",
+        headers=member,
+        json={
+            "audit_id": audit["audit_id"],
+            "issue_type": "missing-title",
+            "page_url": "https://example.com/",
+            "actor_id": 1,
+        },
+    )
+    assert forged.status_code == 422
+    action = await client.post(
+        base + "/actions",
+        headers=member,
+        json={
+            "audit_id": audit["audit_id"],
+            "issue_type": "missing-title",
+            "page_url": "https://example.com/",
+        },
+    )
+    assert action.status_code == 200, action.text
+    action_url = base + "/actions/" + action.json()["action_id"]
+    assert (
+        await client.patch(action_url, headers=member, json={"status": "implemented", "note": ""})
+    ).status_code == 400
+    assert (
+        await client.patch(
+            action_url,
+            headers=member,
+            json={"status": "implemented", "note": "Added title in page source"},
+        )
+    ).status_code == 200
+    site.routes["https://example.com/"] = page("Fixed")
+    later = (
+        await client.post(base + "/audits", headers=member, json={"idempotency_key": "after"})
+    ).json()
+    await runner.wait(later["audit_id"])
+    verified = await client.post(
+        action_url + "/verify", headers=member, json={"audit_id": later["audit_id"]}
+    )
+    assert verified.status_code == 200, verified.text
+    assert verified.json()["status"] == "verified", verified.text
+    assert [event["by"] for event in verified.json()["history"]] == [member_id] * 3
+    assert (
+        await client.delete(base + "/audits/" + audit["audit_id"], headers=auth)
+    ).status_code == 204
+    readback = await client.get(base + "/report-contexts/" + bundle["context_id"], headers=auth)
+    assert readback.json() == bundle
+    from octop.api.app import build_app
+
+    schema = build_app(server).openapi()
+    assert "/api/seo/projects/{project_id}/report-contexts" in schema["paths"]

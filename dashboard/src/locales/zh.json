@@ -1865,7 +1865,16 @@
     "seo_get_project_context": "读取 SEO 项目背景",
     "seo_update_project_context": "更新 SEO 项目背景",
     "seo_list_serps": "列出 SEO 搜索结果快照",
-    "seo_get_serp": "读取 SEO 搜索结果快照"
+    "seo_get_serp": "读取 SEO 搜索结果快照",
+    "seo_get_workflow": "读取 SEO 执行规程",
+    "seo_prepare_report": "冻结 SEO 报告证据",
+    "seo_read_report_evidence": "读取 SEO 证据快照",
+    "seo_save_evidence_report": "保存 SEO 分析报告",
+    "seo_list_actions": "读取 SEO 行动台账",
+    "seo_create_action": "跟进 SEO 审计问题",
+    "seo_update_action": "记录 SEO 实施进展",
+    "seo_verify_action": "复验 SEO 实施结果",
+    "seo_get_action_history": "读取 SEO 行动历史"
   },
   "toolSettings": {
     "title": "工具设置",
@@ -7145,7 +7154,7 @@
     "savedCount": "已保存 {{count}} 个：新增 {{created}}，更新 {{updated}}。",
     "reportPrompt": "为 SEO 项目 {{projectId}}、研究记录 {{runId}} 生成报告。先调用 seo_get_report_context，分析真实研究结果、已保存关键词和项目背景，保留来源日期、缺失值与费用不确定性，编写完整 HTML 关键词研究报告。不要发起或提议付费查询，不要编造指标。使用此项目与研究记录调用 seo_save_report 保存，再用 seo_update_project_context 追加一条简短研究日志，然后返回报告 ID 和摘要。报告标题、摘要和正文一律用简体中文撰写（html 的 lang 设为 zh-CN），关键词、URL 和搜索结果标题保留原文、不要翻译。",
     "askExpert": "交给专家分析",
-    "askExpertPrompt": "请分析 SEO 项目 {{projectId}}（{{domain}}）的{{what}}。结合 seo_get_project_context 里的项目背景，说清楚发现了什么、先做哪几件事、为什么。只用读到的数据，不要编造指标；除非我要求，不要提议购买新数据。用简体中文回答，关键词、URL 和网页标题保留原文、不要翻译。",
+    "askExpertPrompt": "请分析 SEO 项目 {{projectId}}（{{domain}}）的{{what}}。结合 seo_get_project_context 里的项目背景，说清楚发现了什么、先做哪几件事、为什么。只用读到的数据，不要编造指标；除非我要求，不要提议购买新数据。用简体中文回答，关键词、URL 和网页标题保留原文、不要翻译。 先读取 seo_get_workflow，按其中的证据要求和完成条件执行。",
     "askExpertWhat": {
       "research": "研究记录 {{id}}（用 seo_list_research_rows 读取它的关键词）",
       "serp": "「{{keyword}}」的搜索结果快照 {{id}}（用 seo_get_serp 读取）",
@@ -7625,6 +7634,51 @@
       "declined": "没有购买。",
       "doneMessage": "我在确认卡上买了{{what}}，记录 {{id}}，状态 {{status}}。请读结果接着分析。",
       "declinedMessage": "你提议的{{what}}（{{key}}）这次先不买，不用它接着做。"
-    }
+    },
+    "auditReport": "生成审计报告",
+    "auditReportPrompt": "审计 {{auditId}} 的正式技术审计报告。调用 seo_prepare_report，report_type=technical-audit、sources=[{kind:audit,id:{{auditId}}}]，读完冻结的证据后编写并调用 seo_save_evidence_report 保存。说明抓取覆盖范围与尚未测量的 CWV，无需购买关键词数据",
+    "reportEvidence": "来源证据",
+    "reportEvidenceHelp": "这里保留报告所用的来源快照，不代表当前实时结果。",
+    "reportQuery": "Google 查询",
+    "actions": {
+      "title": "行动与复验",
+      "help": "在审计页跟进问题，记录实际修改后，选择后续审计进行复验。覆盖不足或不适用的检查保持待复核。",
+      "empty": "先在审计页选择一个问题进行跟进。",
+      "track": "跟进此问题",
+      "tracked": "已加入台账",
+      "note": "实施依据（修改说明、提交或文档）",
+      "noteRequired": "请先填写实际修改及依据，再标记已实施。",
+      "chooseAudit": "选择后续已完成的审计",
+      "state": "状态",
+      "progress": "进展与依据",
+      "start": "开始处理",
+      "implemented": "记录已实施",
+      "verify": "复验",
+      "reopen": "重新打开",
+      "status": {
+        "open": "待处理",
+        "in_progress": "处理中",
+        "implemented": "已实施",
+        "needs_review": "待复核",
+        "verified": "已验证"
+      },
+      "reason": {
+        "issue_present": "问题仍然存在",
+        "clear_in_complete_recheck": "后续完整检查未发现该问题",
+        "insufficient_coverage": "缺少足够的新观测",
+        "manual_review_required": "此类规则需要人工复核",
+        "target_not_satisfied": "目标字段仍未满足验收条件"
+      },
+      "refresh": "刷新行动"
+    },
+    "comprehensiveReport": "生成综合报告",
+    "comprehensiveReportPrompt": "基于现有项目证据保存一份综合报告。先读 seo_get_workflow，盘点已有数据，使用 seo_prepare_report 冻结明确的来源，读完后通过 seo_save_evidence_report 保存。说明缺失来源，不购买数据",
+    "volumeSource": {
+      "clickstream": "Clickstream 搜索量",
+      "keyword_info": "基础关键词指标（clickstream 缺失时回退）",
+      "unknown": "指标来源未记录"
+    },
+    "frozenShortlist": "已选关键词（快照）",
+    "shortlistNotCaptured": "此旧快照未记录当时的已选关键词清单。"
   }
 }

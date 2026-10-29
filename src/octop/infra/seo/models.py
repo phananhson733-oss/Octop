@@ -51,7 +51,8 @@ class KeywordsSave(Command):
 
 
 class ReportCreate(Command):
-    run_id: str
+    run_id: str | None = None
+    context_id: str | None = Field(default=None, min_length=1, max_length=100)
     context_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     title: str = Field(min_length=1, max_length=120)
     summary: str = Field(default="", max_length=2500)
@@ -385,3 +386,29 @@ class AiPromptsAdd(Command):
 
 class AiCheckCreate(RankCheckCreate):
     """The same approval as a rank check."""
+
+
+class EvidenceSource(Command):
+    kind: Literal["research", "audit", "serp", "lookup", "ai_lookup", "rank", "ai", "gsc", "ga4"]
+    id: str | None = Field(default=None, min_length=1, max_length=100)
+    query: dict[str, object] = Field(default_factory=dict)
+
+
+class EvidencePrepare(Command):
+    report_type: Literal["technical-audit", "search-performance", "comprehensive"]
+    sources: list[EvidenceSource] = Field(min_length=1, max_length=12)
+
+
+class ActionCreate(Command):
+    audit_id: str = Field(min_length=1, max_length=100)
+    issue_type: str = Field(min_length=1, max_length=100)
+    page_url: str = Field(min_length=1, max_length=4096)
+
+
+class ActionUpdate(Command):
+    status: Literal["open", "in_progress", "implemented"]
+    note: str = Field(default="", max_length=4000)
+
+
+class ActionVerify(Command):
+    audit_id: str = Field(min_length=1, max_length=100)

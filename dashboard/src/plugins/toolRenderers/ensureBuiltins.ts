@@ -20,7 +20,7 @@ export function ensureBuiltinToolRenderers(): void {
   registerToolRenderer({
     id: "seo_report",
     pluginId: "builtin",
-    tools: ["seo_save_report"],
+    tools: ["seo_save_report", "seo_save_evidence_report"],
     component: SeoReportRenderer,
   });
   registerToolRenderer({

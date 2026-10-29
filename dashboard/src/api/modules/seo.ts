@@ -15,6 +15,7 @@ export interface SeoProject {
 export interface KeywordRow {
   keyword: string;
   search_volume: number | null;
+  volume_source?: "clickstream" | "keyword_info" | "unknown";
   cpc: number | null;
   competition: number | null;
   keyword_difficulty: number | null;
@@ -546,10 +547,43 @@ export interface ResearchInput {
   idempotency_key: string;
   confirm_paid: boolean;
 }
+export interface SeoAction {
+  action_id: string;
+  project_id: string;
+  version: number;
+  status: string;
+  source: {
+    audit_id: string;
+    issue_type: string;
+    page_url: string;
+    labels?: Record<string, string>;
+  };
+  created_at: string;
+  updated_at: string;
+  implementation: { note: string; at: string } | null;
+  verification: { audit_id: string; reason: string } | null;
+  history: { status: string; at: string; note: string }[];
+}
+export interface SeoReportBundle {
+  saved_keywords?: SavedKeyword[] | null;
+  context_id: string;
+  context_hash: string;
+  report_type: string;
+  created_at: string;
+  project_context: Record<string, unknown>;
+  sources: {
+    ref: { kind: string; id?: string; query: Record<string, unknown> };
+    captured_at: string;
+    content_hash: string;
+    data: Record<string, unknown>;
+  }[];
+}
 export interface SeoReport {
   report_id: string;
   project_id: string;
-  run_id: string;
+  run_id: string | null;
+  context_id?: string | null;
+  report_type?: string;
   title: string;
   summary: string;
   skill: string;
@@ -1029,6 +1063,33 @@ export const seoApi = {
     request<SeoAudit>(`${auditPath(id, auditId)}/cancel`, { method: "POST" }),
   deleteAudit: (id: string, auditId: string) =>
     request<void>(auditPath(id, auditId), { method: "DELETE" }),
+  reportBundle: (id: string, contextId: string) =>
+    request<SeoReportBundle>(
+      `${projectPath(id)}/report-contexts/${encodeURIComponent(contextId)}`,
+    ),
+  actions: (id: string) => request<SeoAction[]>(`${projectPath(id)}/actions`),
+  createAction: (
+    id: string,
+    data: { audit_id: string; issue_type: string; page_url: string },
+  ) =>
+    request<SeoAction>(`${projectPath(id)}/actions`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  updateAction: (
+    id: string,
+    actionId: string,
+    data: { status: "open" | "in_progress" | "implemented"; note: string },
+  ) =>
+    request<SeoAction>(
+      `${projectPath(id)}/actions/${encodeURIComponent(actionId)}`,
+      { method: "PATCH", body: JSON.stringify(data) },
+    ),
+  verifyAction: (id: string, actionId: string, auditId: string) =>
+    request<SeoAction>(
+      `${projectPath(id)}/actions/${encodeURIComponent(actionId)}/verify`,
+      { method: "POST", body: JSON.stringify({ audit_id: auditId }) },
+    ),
   reports: (id: string) => request<SeoReport[]>(`${projectPath(id)}/reports`),
   report: (id: string, reportId: string) =>
     request<SeoReport & { html: string }>(

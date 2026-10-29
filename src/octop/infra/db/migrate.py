@@ -1656,6 +1656,24 @@ def _ensure_seo_schema(db: DatabasePool) -> None:
     else:
         with db.connect() as conn:
             conn.executescript(sql)
+    # Existing keyword reports retain their IDs and bytes; audit reports have no run.
+    if db.dialect == "postgresql":
+        with db.transaction() as conn:
+            conn.execute("ALTER TABLE seo_reports ALTER COLUMN run_id DROP NOT NULL")
+    else:
+        with db.transaction() as conn:
+            columns = conn.execute("PRAGMA table_info(seo_reports)").fetchall()
+            if any(row["name"] == "run_id" and row["notnull"] for row in columns):
+                conn.execute(
+                    "CREATE TABLE seo_reports_nullable ("
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT, report_id TEXT NOT NULL UNIQUE,"
+                    "project_id TEXT NOT NULL REFERENCES seo_projects(project_id) ON DELETE CASCADE,"
+                    "run_id TEXT REFERENCES seo_runs(run_id) ON DELETE CASCADE,"
+                    "metadata TEXT NOT NULL,html TEXT NOT NULL,context_json TEXT NOT NULL)"
+                )
+                conn.execute("INSERT INTO seo_reports_nullable SELECT * FROM seo_reports")
+                conn.execute("DROP TABLE seo_reports")
+                conn.execute("ALTER TABLE seo_reports_nullable RENAME TO seo_reports")
     # Columns added after the tables first shipped (CREATE TABLE IF NOT EXISTS skips them).
     _ensure_column(db, "seo_audit_frontier", "cluster", "TEXT")
     _ensure_column(db, "seo_audit_pages", "h1s", "TEXT NOT NULL DEFAULT '[]'")

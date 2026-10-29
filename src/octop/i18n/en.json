@@ -663,7 +663,16 @@
     "seo_get_project_context": "Read SEO project background",
     "seo_update_project_context": "Update SEO project background",
     "seo_list_serps": "List SEO SERP snapshots",
-    "seo_get_serp": "Read SEO SERP snapshot"
+    "seo_get_serp": "Read SEO SERP snapshot",
+    "seo_get_workflow": "Read SEO operating procedure",
+    "seo_prepare_report": "Freeze SEO report evidence",
+    "seo_read_report_evidence": "Read frozen SEO evidence",
+    "seo_save_evidence_report": "Save evidence-backed SEO report",
+    "seo_list_actions": "List SEO actions",
+    "seo_create_action": "Track SEO finding",
+    "seo_update_action": "Record SEO implementation",
+    "seo_verify_action": "Verify SEO implementation",
+    "seo_get_action_history": "Read SEO action history"
   },
   "plugins": {
     "arxiv_search": {

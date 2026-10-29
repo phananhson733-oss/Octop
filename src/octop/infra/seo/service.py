@@ -1386,7 +1386,8 @@ class SeoService:
         user_id: int,
         project_id: str,
         *,
-        run_id: str,
+        run_id: str | None = None,
+        context_id: str | None = None,
         context_hash: str,
         title: str,
         summary: str,
@@ -1398,6 +1399,7 @@ class SeoService:
         try:
             command = ReportCreate(
                 run_id=run_id,
+                context_id=context_id,
                 context_hash=context_hash,
                 title=title.strip(),
                 summary=summary,
@@ -1413,24 +1415,34 @@ class SeoService:
             or not html.lower().endswith("</html>")
         ):
             raise _error()
-        context = await self.report_context(user_id, project_id, run_id)
+        if context_id:
+            from octop.infra.seo.workflow import SeoWorkflow  # noqa: PLC0415
+
+            if run_id is not None:
+                raise _error()
+            context = await SeoWorkflow(self).bundle(user_id, project_id, context_id)
+        elif run_id:
+            context = await self.report_context(user_id, project_id, run_id)
+        else:
+            raise _error()
         if context["context_hash"] != context_hash:
             raise _error(ErrorCode.SEO_CONFLICT)
         if thread_id is not None:
             thread = await _db(self.repos.thread_repo.get, thread_id)
-            if (
-                thread is None
-                or thread.user_id != user_id
-                or thread.agent_id != context["project"]["agent_id"]
-            ):
+            binding = (
+                await self.project_for_agent(thread.user_id, thread.agent_id) if thread else None
+            )
+            if binding is None or binding[0] != user_id or binding[1]["project_id"] != project_id:
                 raise _error(ErrorCode.FORBIDDEN)
         metadata: dict[str, Any] = {
             "report_id": new_ulid(),
             "project_id": project_id,
             "run_id": run_id,
+            "context_id": context_id,
+            "report_type": context.get("report_type", "keyword-research"),
             "title": command.title,
             "summary": summary,
-            "skill": skill,
+            "skill": context.get("report_type", skill),
             "created_at": _now(),
             "content_hash": hashlib.sha256(content).hexdigest(),
             "context_hash": context_hash,

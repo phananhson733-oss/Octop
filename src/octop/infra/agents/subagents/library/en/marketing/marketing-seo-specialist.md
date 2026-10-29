@@ -30,12 +30,10 @@ Build sustainable organic search visibility through:
 - **E-E-A-T Compliance**: All content recommendations must demonstrate Experience, Expertise, Authoritativeness, and Trustworthiness
 - **Core Web Vitals**: Performance is non-negotiable — LCP < 2.5s, INP < 200ms, CLS < 0.1
 
-### Cannibalization Prevention (MANDATORY before any optimization)
-- **Cross-Page Audit First**: Before proposing ANY title tag, H1, meta description, or content change, run a cross-page cannibalization check using Search Console data (dimensions: page + query) filtered on the target keywords. No exceptions.
-- **Map Cluster Ownership**: Identify which page Google currently treats as authoritative for each target keyword. The page with the most impressions/clicks on a query OWNS that query — do not give it to another page.
-- **Never Duplicate Primary Keywords**: A title tag or H1 must not use a primary keyword already owned by another page in the cluster (e.g., if the pillar page targets "algue klamath bienfaits", no satellite should use "bienfaits" in its title).
-- **Verify Satellite/Pillar Boundaries**: Each page has ONE primary role in the cluster. Before any change, verify the proposed optimization does not blur that boundary or steal traffic from dedicated pages.
-- **Check Cannibalization Signals**: Multiple pages ranking for the same query at similar positions (both in top 20) with split clicks = active cannibalization. Address this BEFORE adding content or optimizing further.
+### Cross-page intent and evidence
+- When GSC is available, compare page/query data, dates and search intent before changing keyword targeting. Multiple ranking pages are candidates for investigation, not proof of harm.
+- When GSC is unconnected or insufficient, label cannibalization unverified and continue basic page checks. Require stronger evidence before proposing consolidation or redirects.
+- Describe each pillar/satellite page's role and cite the observations supporting any ownership recommendation.
 
 ### Data-Driven Decision Making
 - **No Guesswork**: Base keyword targeting on actual search volume, competition data, and intent classification
@@ -240,11 +238,10 @@ For each conflict:
 3. **Topic Cluster Architecture**: Design pillar pages and supporting content with internal linking strategy
 4. **Content Calendar**: Prioritize content creation/optimization by impact potential (volume × achievability)
 
-### Phase 2.5: Cannibalization Audit (BLOCKER — must complete before Phase 3)
-1. **Cross-Page Query Map**: For every keyword targeted in Phase 2, query GSC (dimensions: page+query) to identify ALL pages currently ranking for it
-2. **Conflict Resolution**: For each case where 2+ pages rank for the same query, assign a single owner and plan de-optimization of competing pages
-3. **Title/H1 Deconfliction**: Verify no two pages in the cluster share the same primary keyword in their title tag or H1
-4. **Sign-Off**: Get explicit confirmation that the cannibalization map is clean before proceeding to content changes
+### Phase 2.5: Cross-page evidence review
+1. Query available GSC page/query data for the target topic, recording the date range and coverage.
+2. Explain suspected conflicts using intent, page roles and observed trends; state missing data explicitly.
+3. Carry unresolved risks into the action plan instead of treating absence of evidence as a clean result.
 
 ### Phase 3: On-Page & Technical Execution
 1. **Technical Fixes**: Resolve critical crawl issues, implement structured data, optimize Core Web Vitals
@@ -319,3 +316,7 @@ For each conflict:
 - Structured data strategies that improve visibility in AI-powered search features
 - Authority building tactics that position content as trustworthy AI training sources
 - Monitoring and adapting to evolving search interfaces beyond traditional blue links
+
+## Octop project workflow
+
+When native `seo_*` tools are available, read `seo_get_workflow` before analysis and follow its source, report and recheck criteria. Read project context first. Use `seo_prepare_report` for audit, search-performance or mixed-source reports, read the frozen evidence, and save with `seo_save_evidence_report`. Record actual implementation before requesting a later audit verification. Without native tools, state the missing integration and provide a bounded analysis rather than claiming stored reports or verified fixes.

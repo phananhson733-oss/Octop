@@ -47,6 +47,8 @@ import { BrandLookupCard, PromptExplorerCard } from "./AiSearchCards";
 import { ProjectContextPanel } from "./ProjectContextPanel";
 import { SearchPerformancePanel } from "./SearchPerformancePanel";
 import { SerpPanel } from "./SerpPanel";
+import { ActionsPanel } from "./ActionsPanel";
+import { ReportEvidenceButton } from "./ReportEvidenceButton";
 import { AskExpertButton, AskExpertContext, openExpertChat } from "./AskExpert";
 import { useSearchTabs } from "./searchTabs";
 import styles from "./index.module.less";
@@ -470,7 +472,15 @@ function ProjectWorkspace({
           keyword
         ),
     },
-    { title: t("seo.volume"), dataIndex: "search_volume", render: metric },
+    {
+      title: t("seo.volume"),
+      dataIndex: "search_volume",
+      render: (value: number | null, row: KeywordRow) => (
+        <span title={t(`seo.volumeSource.${row.volume_source ?? "unknown"}`)}>
+          {metric(value)}
+        </span>
+      ),
+    },
     { title: t("seo.cpc"), dataIndex: "cpc", render: metric },
     { title: t("seo.competition"), dataIndex: "competition", render: metric },
     {
@@ -690,6 +700,7 @@ function ProjectWorkspace({
             "research",
             "saved",
             "reports",
+            "actions",
             "audit",
             "search",
             "competitors",
@@ -1005,12 +1016,22 @@ function ProjectWorkspace({
                 >
                   {t("seo.refreshReports")}
                 </Button>
+                <AskExpertButton
+                  label={t("seo.comprehensiveReport")}
+                  what={t("seo.comprehensiveReportPrompt")}
+                />
                 <Table<SeoReport>
                   rowKey="report_id"
                   dataSource={reports}
                   columns={[
                     { title: t("seo.title"), dataIndex: "title" },
                     { title: t("seo.summary"), dataIndex: "summary" },
+                    {
+                      title: t("seo.reportEvidence"),
+                      render: (_, report) => (
+                        <ReportEvidenceButton projectId={id} report={report} />
+                      ),
+                    },
                     {
                       title: t("seo.created"),
                       dataIndex: "created_at",
@@ -1035,6 +1056,16 @@ function ProjectWorkspace({
                   ]}
                 />
               </div>
+            ),
+          },
+          {
+            key: "actions",
+            label: t("seo.actions.title"),
+            children: (
+              <ActionsPanel
+                projectId={id}
+                isVisible={isVisible && view === "actions"}
+              />
             ),
           },
           {

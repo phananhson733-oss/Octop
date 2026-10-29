@@ -71,3 +71,37 @@ def test_db_marked_by_the_earlier_numbered_seo_migration_returns_to_the_shared_m
     # An upstream migration numbered max+1 would now run instead of being skipped.
     assert version == max_version
     assert tables >= SEO_TABLES
+
+
+def test_existing_keyword_reports_survive_nullable_upgrade(tmp_path: Path) -> None:
+    pool = SqlitePool(tmp_path / "upgrade.db")
+    run_migrations(pool)
+    with pool.transaction() as conn:
+        conn.execute("DROP TABLE seo_reports")
+        conn.execute(
+            "CREATE TABLE seo_reports(id INTEGER PRIMARY KEY AUTOINCREMENT,report_id TEXT NOT NULL UNIQUE,"
+            "project_id TEXT NOT NULL,run_id TEXT NOT NULL,metadata TEXT NOT NULL,html TEXT NOT NULL,context_json TEXT NOT NULL)"
+        )
+        conn.execute("INSERT INTO users(username,role,created_at) VALUES('upgrade','admin',0)")
+        uid = conn.execute("SELECT id FROM users WHERE username='upgrade'").fetchone()[0]
+        conn.execute(
+            "INSERT INTO seo_projects(project_id,user_id,name,domain,location_code,language_code,created_at) "
+            "VALUES('p',?,'Site','example.com',2840,'en','2026-01-01')",
+            (uid,),
+        )
+        conn.execute(
+            "INSERT INTO seo_runs(run_id,project_id,idempotency_key,input_hash,created_at,status,payload) "
+            "VALUES('r','p','key','hash',0,'completed','{}')"
+        )
+        conn.execute(
+            "INSERT INTO seo_reports VALUES(7,'report','p','r','{}','<html>original</html>','{}')"
+        )
+    run_migrations(pool)
+    run_migrations(pool)
+    with pool.connect() as conn:
+        row = conn.execute("SELECT * FROM seo_reports").fetchone()
+        assert (row["id"], row["report_id"], row["html"]) == (7, "report", "<html>original</html>")
+        cols = conn.execute("PRAGMA table_info(seo_reports)").fetchall()
+        assert next(c for c in cols if c["name"] == "run_id")["notnull"] == 0
+        assert conn.execute("PRAGMA foreign_key_check").fetchall() == []
+    pool.close()

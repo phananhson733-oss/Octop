@@ -663,7 +663,16 @@
     "seo_get_project_context": "读取 SEO 项目背景",
     "seo_update_project_context": "更新 SEO 项目背景",
     "seo_list_serps": "列出 SEO 搜索结果快照",
-    "seo_get_serp": "读取 SEO 搜索结果快照"
+    "seo_get_serp": "读取 SEO 搜索结果快照",
+    "seo_get_workflow": "读取 SEO 执行规程",
+    "seo_prepare_report": "冻结 SEO 报告证据",
+    "seo_read_report_evidence": "读取 SEO 证据快照",
+    "seo_save_evidence_report": "保存 SEO 分析报告",
+    "seo_list_actions": "读取 SEO 行动台账",
+    "seo_create_action": "跟进 SEO 审计问题",
+    "seo_update_action": "记录 SEO 实施进展",
+    "seo_verify_action": "复验 SEO 实施结果",
+    "seo_get_action_history": "读取 SEO 行动历史"
   },
   "plugins": {
     "arxiv_search": {

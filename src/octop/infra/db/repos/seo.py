@@ -552,9 +552,11 @@ class SeoRepo:
                 "SELECT payload FROM seo_keywords WHERE project_id=? ORDER BY id",
                 (metadata["project_id"],),
             ).fetchall()
-            if [json.loads(row["payload"]) for row in current_keywords] != context[
-                "saved_keywords"
-            ]:
+            if (
+                "context_id" not in context
+                and [json.loads(row["payload"]) for row in current_keywords]
+                != context["saved_keywords"]
+            ):
                 return False
             conn.execute(
                 "INSERT INTO seo_reports(report_id,project_id,run_id,metadata,html,context_json) "
@@ -585,3 +587,54 @@ class SeoRepo:
                 (project_id, report_id),
             ).fetchone()
         return {**json.loads(row["metadata"]), "html": row["html"]} if row else None
+
+    def save_context(self, value: dict[str, Any]) -> None:
+        with self._db.transaction() as conn:
+            conn.execute(
+                "INSERT INTO seo_report_contexts(context_id,project_id,payload) VALUES(?,?,?)",
+                (value["context_id"], value["project_id"], json.dumps(value)),
+            )
+
+    def report_bundle(self, project_id: str, context_id: str) -> dict[str, Any] | None:
+        with self._db.connect() as conn:
+            row = conn.execute(
+                "SELECT payload FROM seo_report_contexts WHERE project_id=? AND context_id=?",
+                (project_id, context_id),
+            ).fetchone()
+        return json.loads(row["payload"]) if row else None
+
+    def actions(self, project_id: str) -> list[dict[str, Any]]:
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                "SELECT payload FROM seo_actions WHERE project_id=? ORDER BY id DESC", (project_id,)
+            ).fetchall()
+        return [json.loads(row["payload"]) for row in rows]
+
+    def create_action(self, value: dict[str, Any], source_key: str) -> dict[str, Any]:
+        with self._db.transaction() as conn:
+            conn.execute(
+                "INSERT INTO seo_actions(action_id,project_id,source_key,payload) VALUES(?,?,?,?) "
+                "ON CONFLICT(project_id,source_key) DO NOTHING",
+                (value["action_id"], value["project_id"], source_key, json.dumps(value)),
+            )
+            row = conn.execute(
+                "SELECT payload FROM seo_actions WHERE project_id=? AND source_key=?",
+                (value["project_id"], source_key),
+            ).fetchone()
+        assert row is not None
+        return dict(json.loads(row["payload"]))
+
+    def update_action(self, value: dict[str, Any], version: int) -> bool:
+        with self._db.transaction() as conn:
+            cur = conn.execute(
+                "UPDATE seo_actions SET payload=?,version=? WHERE project_id=? "
+                "AND action_id=? AND version=?",
+                (
+                    json.dumps(value),
+                    value["version"],
+                    value["project_id"],
+                    value["action_id"],
+                    version,
+                ),
+            )
+        return bool(cur.rowcount == 1)

@@ -231,6 +231,28 @@ export function AuditPanel({
     }
   }
 
+  async function track(issue: AuditIssue) {
+    if (!auditId) return;
+    setBusy("track");
+    setError("");
+    try {
+      await seoApi.createAction(projectId, {
+        audit_id: auditId,
+        issue_type: issue.issue_type,
+        page_url: issue.page_url,
+      });
+      setTracked(
+        (ids) =>
+          new Set([...ids, `${auditId}|${issue.issue_type}|${issue.page_url}`]),
+      );
+    } catch (err) {
+      fail(err);
+    } finally {
+      setBusy("");
+    }
+  }
+  const [tracked, setTracked] = useState<Set<string>>(new Set());
+
   const byType = useMemo(() => {
     const grouped = new Map<string, AuditIssue[]>();
     for (const issue of issues)
@@ -253,6 +275,12 @@ export function AuditPanel({
       <Card size="small">
         <div className={styles.stack}>
           <Paragraph type="secondary">{t("seo.auditHelp")}</Paragraph>
+          {detail && !isActive(detail) && (
+            <AskExpertButton
+              label={t("seo.auditReport")}
+              what={t("seo.auditReportPrompt", { auditId: detail.audit_id })}
+            />
+          )}
           <div className={styles.toolbar}>
             <Input
               aria-label={t("seo.auditStartUrl")}
@@ -467,6 +495,29 @@ export function AuditPanel({
                                 title: t("seo.auditDetails"),
                                 dataIndex: "details",
                                 render: detailText,
+                              },
+                              {
+                                title: t("seo.actions.title"),
+                                render: (_, issue) => (
+                                  <Button
+                                    disabled={
+                                      !!busy ||
+                                      running ||
+                                      tracked.has(
+                                        `${auditId}|${issue.issue_type}|${issue.page_url}`,
+                                      )
+                                    }
+                                    onClick={() => void track(issue)}
+                                  >
+                                    {t(
+                                      tracked.has(
+                                        `${auditId}|${issue.issue_type}|${issue.page_url}`,
+                                      )
+                                        ? "seo.actions.tracked"
+                                        : "seo.actions.track",
+                                    )}
+                                  </Button>
+                                ),
                               },
                             ]}
                           />

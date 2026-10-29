@@ -36,7 +36,18 @@ def test_reference_labs_mapping_preserves_zero_and_unknown():
     rows = map_labs(REFERENCE["labs"]["items"])
     for row, expected in zip(rows, REFERENCE["labs"]["expected"], strict=True):
         assert row["keyword"] == expected["keyword"]
-        assert row["search_volume"] == expected["searchVolume"]
+        # Intentional native divergence: upstream treats clickstream zero as absent.
+        source = next(
+            item
+            for item in REFERENCE["labs"]["items"]
+            if normalize_keyword(item.get("keyword", "")) == row["keyword"]
+        )
+        clickstream = (source.get("keyword_info_normalized_with_clickstream") or {}).get(
+            "search_volume"
+        )
+        assert row["search_volume"] == (
+            clickstream if clickstream is not None else expected["searchVolume"]
+        )
         assert row["keyword_difficulty"] == expected["keywordDifficulty"]
         assert row["cpc"] == expected["cpc"]
         assert row["competition"] == expected["competition"]
@@ -129,3 +140,35 @@ async def test_empty_success_and_receipt():
         "task_id": "upstream-id",
         "task_status": 20000,
     }
+
+
+def test_clickstream_zero_and_unknown_months_are_not_replaced():
+    row = map_labs(
+        [
+            {
+                "keyword": "zero",
+                "keyword_info": {"search_volume": 100},
+                "keyword_info_normalized_with_clickstream": {
+                    "search_volume": 0,
+                    "monthly_searches": [
+                        {"year": 2026, "month": 9, "search_volume": None},
+                        {"year": 2026, "month": 8, "search_volume": 0},
+                    ],
+                },
+            }
+        ]
+    )[0]
+    assert row["search_volume"] == 0
+    assert row["volume_source"] == "clickstream"
+    assert [point["search_volume"] for point in row["trend"]] == [None, 0]
+    fallback = map_labs(
+        [
+            {
+                "keyword": "fallback",
+                "keyword_info": {"search_volume": 25},
+                "keyword_info_normalized_with_clickstream": {"search_volume": None},
+            }
+        ]
+    )[0]
+    assert (fallback["search_volume"], fallback["volume_source"]) == (25, "keyword_info")
+    assert map_labs([{"keyword": "missing"}])[0]["volume_source"] == "unknown"

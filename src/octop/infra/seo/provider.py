@@ -76,11 +76,19 @@ def map_labs(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
         seen.add(keyword)
         original = item.get("keyword_info") or {}
         clickstream = item.get("keyword_info_normalized_with_clickstream") or {}
-        info = clickstream if clickstream.get("search_volume") else original
+        info = clickstream if clickstream.get("search_volume") is not None else original
+        volume_source = (
+            "clickstream"
+            if info is clickstream
+            else "keyword_info"
+            if original.get("search_volume") is not None
+            else "unknown"
+        )
         rows.append(
             {
                 "keyword": keyword,
                 "search_volume": info.get("search_volume"),
+                "volume_source": volume_source,
                 "cpc": original.get("cpc"),
                 "competition": original.get("competition"),
                 "keyword_difficulty": (item.get("keyword_properties") or {}).get(
@@ -93,7 +101,7 @@ def map_labs(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     {
                         "year": v.get("year") or 0,
                         "month": v.get("month") or 0,
-                        "search_volume": v.get("search_volume") or 0,
+                        "search_volume": v.get("search_volume"),
                     }
                     for v in info.get("monthly_searches") or []
                 ],

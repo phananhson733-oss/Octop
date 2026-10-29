@@ -34,9 +34,11 @@ export const AskExpertContext = createContext<
 export function AskExpertButton({
   what,
   disabled,
+  label,
 }: {
   what: string;
   disabled?: boolean;
+  label?: string;
 }) {
   const { t } = useTranslation();
   const ask = useContext(AskExpertContext);
@@ -51,7 +53,7 @@ export function AskExpertButton({
         void ask(what).finally(() => setBusy(false));
       }}
     >
-      {t("seo.askExpert")}
+      {label ?? t("seo.askExpert")}
     </Button>
   );
 }

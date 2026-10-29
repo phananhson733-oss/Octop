@@ -54,7 +54,9 @@ goal, positioning, writing preferences, competitors, key pages); say which secti
 rather than guessing them. This context shows previews only: when saved_keywords,
 research_rows_preview or project_context has more entries than shown, read the rest with
 seo_list_saved_keywords, seo_list_research_rows and seo_get_project_context, passing
-next_offset until it is null. SERP snapshots already bought are read with seo_list_serps and
+next_offset until it is null. If this report uses evidence beyond this keyword context, prepare a comprehensive frozen
+bundle with seo_prepare_report including this research run and every extra source, then save
+with seo_save_evidence_report instead. SERP snapshots already bought are read with seo_list_serps and
 seo_get_serp, competitor lookups with seo_list_competitor_lookups and
 seo_get_competitor_lookup, tracked rankings with seo_list_rank_trackers,
 seo_get_rank_results and seo_get_rank_history, AI visibility with seo_list_ai_prompts,
@@ -97,6 +99,7 @@ def _metrics(row: dict[str, Any]) -> dict[str, Any]:
             "cpc",
             "competition",
             "keyword_difficulty",
+            "volume_source",
             "intent",
         )
     }
@@ -948,7 +951,195 @@ def build_seo_tools(
         data = {"target": target, "competitors": competitors or []}
         return await propose("brand", BrandLookupCreate, data)
 
+    from octop.infra.seo.workflow import WORKFLOW_GUIDE, SeoWorkflow  # noqa: PLC0415
+
+    workflow = SeoWorkflow(service)
+
+    async def workflow_guide() -> str:
+        await context()
+        return WORKFLOW_GUIDE
+
+    async def prepare_report(report_type: str, sources: list[dict[str, Any]]) -> str:
+        user_id, project_id, _ = await context()
+        data = await workflow.prepare(user_id, project_id, report_type=report_type, sources=sources)
+        return json.dumps(
+            {
+                k: v
+                for k, v in data.items()
+                if k not in {"sources", "project_context", "saved_keywords"}
+            }
+            | {
+                "sources": [
+                    {"index": i, **{k: v for k, v in item.items() if k != "data"}}
+                    for i, item in enumerate(data["sources"])
+                ],
+                "saved_keyword_count": len(data["saved_keywords"]),
+                "instructions": WORKFLOW_GUIDE,
+            },
+            ensure_ascii=False,
+        )
+
+    async def read_report_evidence(context_id: str, source_index: int = -1, offset: int = 0) -> str:
+        user_id, project_id, _ = await context()
+        data = await workflow.bundle(user_id, project_id, context_id)
+        if source_index < -2 or source_index >= len(data["sources"]) or offset < 0:
+            raise OctopError.localized(ErrorCode.SEO_INVALID_INPUT)
+        if source_index == -2:
+            value = data.get("saved_keywords")
+        else:
+            value = data["project_context"] if source_index == -1 else data["sources"][source_index]
+        text = json.dumps(value, ensure_ascii=False)
+        end = min(offset + 12000, len(text))
+        return json.dumps(
+            {
+                "context_id": context_id,
+                "source_index": source_index,
+                "text": text[offset:end],
+                "next_offset": end if end < len(text) else None,
+            },
+            ensure_ascii=False,
+        )
+
+    async def save_evidence_report(
+        context_id: str, context_hash: str, title: str, summary: str, html: str
+    ) -> str:
+        user_id, project_id, thread_id = await context()
+        data = await service.save_report(
+            user_id,
+            project_id,
+            context_id=context_id,
+            context_hash=context_hash,
+            title=title,
+            summary=summary,
+            html=html,
+            thread_id=thread_id,
+        )
+        return json.dumps(
+            data
+            | {"workbench_path": f"/workbench/seo-workbench.main?project={project_id}&view=reports"}
+        )
+
+    def action_summary(value: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: value[key]
+            for key in (
+                "action_id",
+                "project_id",
+                "version",
+                "status",
+                "source",
+                "implementation",
+                "updated_at",
+            )
+        } | {
+            "verification": (
+                {key: value["verification"][key] for key in ("audit_id", "reason", "at")}
+                if value["verification"]
+                else None
+            ),
+            "history_count": len(value["history"]),
+        }
+
+    async def action_history(action_id: str, offset: int = 0) -> str:
+        user_id, project_id, _ = await context()
+        value = await workflow._action(user_id, project_id, action_id)
+        return _page(value["history"], offset, "history", action_summary(value))
+
+    async def list_actions(offset: int = 0) -> str:
+        user_id, project_id, _ = await context()
+        return _page(
+            [action_summary(row) for row in await workflow.actions(user_id, project_id)],
+            offset,
+            "actions",
+        )
+
+    async def create_action(audit_id: str, issue_type: str, page_url: str) -> str:
+        user_id, project_id, _ = await context()
+        actor_id = int(get_config()["configurable"]["user"])
+        return json.dumps(
+            action_summary(
+                await workflow.create_action(
+                    user_id,
+                    project_id,
+                    actor_id=actor_id,
+                    audit_id=audit_id,
+                    issue_type=issue_type,
+                    page_url=page_url,
+                )
+            ),
+            ensure_ascii=False,
+        )
+
+    async def update_action(action_id: str, status: str, note: str = "") -> str:
+        user_id, project_id, _ = await context()
+        actor_id = int(get_config()["configurable"]["user"])
+        return json.dumps(
+            action_summary(
+                await workflow.update_action(
+                    user_id, project_id, action_id, actor_id=actor_id, status=status, note=note
+                )
+            ),
+            ensure_ascii=False,
+        )
+
+    async def verify_action(action_id: str, audit_id: str) -> str:
+        user_id, project_id, _ = await context()
+        actor_id = int(get_config()["configurable"]["user"])
+        return json.dumps(
+            action_summary(
+                await workflow.verify_action(
+                    user_id, project_id, action_id, actor_id=actor_id, audit_id=audit_id
+                )
+            ),
+            ensure_ascii=False,
+        )
+
     definitions: list[tuple[str, Any, str]] = [
+        (
+            "seo_get_action_history",
+            action_history,
+            "Read an action's retained implementation and recheck history; pass next_offset until null.",
+        ),
+        (
+            "seo_get_workflow",
+            workflow_guide,
+            "Read the project SEO operating procedure before planning or acting; evidence, report and recheck completion criteria.",
+        ),
+        (
+            "seo_prepare_report",
+            prepare_report,
+            "Freeze a technical-audit, search-performance or comprehensive report. sources: [{kind,id,query}]. Stored kinds: audit, research, serp, lookup, ai_lookup, rank (tracker ID), ai (run ID). Google kinds gsc/ga4 take query parameters from seo_gsc_performance/seo_ga4_report, no id. No purchases. Read every frozen source before writing.",
+        ),
+        (
+            "seo_read_report_evidence",
+            read_report_evidence,
+            "Read frozen evidence as JSON text chunks. source_index=-1 reads project background; -2 reads the frozen saved-keyword shortlist (null means not captured in an older bundle); 0..N-1 reads a source. Continue next_offset until null; reassemble chunks before interpreting.",
+        ),
+        (
+            "seo_save_evidence_report",
+            save_evidence_report,
+            "Save static HTML using a frozen context_id/context_hash from seo_prepare_report. No keyword run required. Returns authoritative saved report receipt.",
+        ),
+        (
+            "seo_list_actions",
+            list_actions,
+            "Read project action history and implementation/recheck evidence. Continue next_offset.",
+        ),
+        (
+            "seo_create_action",
+            create_action,
+            "Track a real audit finding by audit_id, issue_type and exact page_url; duplicate source reuses the action.",
+        ),
+        (
+            "seo_update_action",
+            update_action,
+            "Set open, in_progress or implemented. implemented requires a concrete change/evidence note. Reopening clears current implementation and verification but preserves history.",
+        ),
+        (
+            "seo_verify_action",
+            verify_action,
+            "Verify an implemented action with a later audit; partial coverage remains needs_review. Does not crawl or modify the site.",
+        ),
         (
             "seo_get_report_context",
             report_context,
