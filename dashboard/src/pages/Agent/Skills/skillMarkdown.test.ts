@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { buildSkillMarkdown } from "./components/SkillDrawer";
 import {
   isSkillManifestPath,
@@ -47,3 +47,9 @@ describe("skillDirectoryPath", () => {
     );
   });
 });
+
+// These helper tests do not render PDFs; jsdom has no DOMMatrix canvas API.
+vi.mock("../../../components/PdfDocumentPreview", () => ({
+  default: () => null,
+  PdfViewerSkeleton: () => null,
+}));

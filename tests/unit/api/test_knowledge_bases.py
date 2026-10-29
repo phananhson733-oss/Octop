@@ -13,6 +13,16 @@ from starlette.requests import Request
 from octop.infra.errors import ErrorCode, OctopError
 
 
+@pytest.fixture(autouse=True)
+def mock_embedding_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def ready(**_kwargs: object) -> str:
+        return "ready"
+
+    monkeypatch.setattr(
+        "octop.api.routers.knowledge_bases.ensure_local_embedding_deps_async", ready
+    )
+
+
 def _request() -> Request:
     return Request(
         {"type": "http", "method": "POST", "path": "/api/knowledge-bases", "headers": []}
@@ -732,3 +742,30 @@ def test_map_knowledge_error_prerequisites_distinguished() -> None:
     )
     assert err_model.code == ErrorCode.KNOWLEDGE_PREREQUISITES_FAILED
     assert err_model.status == 409
+
+
+class TestRestartRequiredMapping:
+    """#1340: an install that only takes effect after a restart must say so."""
+
+    RESTART_HINT = (
+        "Local embedding components were installed but could not be loaded. "
+        "Restart the server and try again."
+    )
+
+    def test_install_that_needs_a_restart_says_so(self) -> None:
+        from octop.api.routers.knowledge_bases import _map_knowledge_error
+        from octop.infra.errors import ErrorCode
+
+        err = _map_knowledge_error(RuntimeError(self.RESTART_HINT), locale="zh")
+
+        assert err.code is ErrorCode.KNOWLEDGE_PREREQUISITES_RESTART_REQUIRED
+        assert "重启" in err.localized_message("zh")
+        assert "restart" in err.localized_message("en").lower()
+
+    def test_other_prerequisite_failures_keep_the_generic_error(self) -> None:
+        from octop.api.routers.knowledge_bases import _map_knowledge_error
+        from octop.infra.errors import ErrorCode
+
+        err = _map_knowledge_error(RuntimeError("embedding provider is not ready"), locale="zh")
+
+        assert err.code is ErrorCode.KNOWLEDGE_PREREQUISITES_FAILED

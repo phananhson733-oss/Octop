@@ -10,7 +10,6 @@ model. Requests here take the shape the backend accepts from the image tool
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 
 from langchain_openai import ChatOpenAI
@@ -78,10 +77,13 @@ def build_codex_chat_model(
     base_url: str,
     api_key: str,
     headers: dict[str, str] | None = None,
+    max_retries: int | None = None,
 ) -> CodexChatOpenAI:
     kwargs: dict[str, Any] = {"model": model_id, "base_url": base_url, "api_key": api_key}
     if headers:
         kwargs["default_headers"] = dict(headers)
+    if max_retries is not None:
+        kwargs["max_retries"] = max_retries
     return CodexChatOpenAI(**kwargs)
 
 
@@ -89,18 +91,19 @@ def install_codex_chat_builder() -> None:
     """Have octop-harness build ChatGPT-login providers with :class:`CodexChatOpenAI`."""
     from octop_harness.llm import factory
 
-    original: Callable[[Any, Any], Any] = factory._build_openai
+    original = factory._build_openai
     if getattr(original, "_octop_codex", False):
         return
 
-    def build(provider: Any, model: Any) -> Any:
+    def build(provider: Any, model: Any, *, max_retries: int | None = None) -> Any:
         if not is_codex_base_url(provider.base_url):
-            return original(provider, model)
+            return original(provider, model, max_retries=max_retries)
         instance = build_codex_chat_model(
             model_id=model.id,
             base_url=provider.base_url,
             api_key=provider.api_key,
             headers=provider.headers,
+            max_retries=max_retries,
         )
         # The bookkeeping octop-harness puts on the models it builds
         object.__setattr__(instance, "_harness_supported_input", set(model.input))

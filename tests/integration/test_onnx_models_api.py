@@ -5,7 +5,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 MODEL = "BAAI/bge-small-zh-v1.5"
+
+
+@pytest.fixture(autouse=True)
+def mock_router_embedding_install(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The router imports this function directly, so patch its bound reference too.
+    monkeypatch.setattr("octop.api.routers.onnx_models.ensure_local_embedding_deps_async", _ready)
 
 
 def _seed_cache(home: Path, model: str) -> None:

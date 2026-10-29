@@ -267,3 +267,15 @@ def test_installed_builder_builds_codex_providers_only(monkeypatch: pytest.Monke
         ModelConfig(id="deepseek-v4-flash"),
     )
     assert not isinstance(other, CodexChatOpenAI)
+
+
+@pytest.mark.parametrize("base_url", [CODEX_URL, "https://api.deepseek.com/v1"])
+def test_installed_builder_preserves_harness_retry_override(monkeypatch, base_url):
+    monkeypatch.setattr(factory, "_build_openai", factory._build_openai)
+    install_codex_chat_builder()
+    model = factory._build_openai(
+        ProviderConfig(id="test", base_url=base_url, api_key="test"),
+        ModelConfig(id="test-model"),
+        max_retries=0,
+    )
+    assert model.max_retries == 0

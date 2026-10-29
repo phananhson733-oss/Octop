@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { clampAbsurdDocxCssLengths } from "./DocumentPreviewCore";
 
 describe("clampAbsurdDocxCssLengths", () => {
@@ -20,3 +20,9 @@ describe("clampAbsurdDocxCssLengths", () => {
     expect(clampAbsurdDocxCssLengths(style)).toBe(style);
   });
 });
+
+// These helper tests do not render PDFs; jsdom has no DOMMatrix canvas API.
+vi.mock("./PdfDocumentPreview", () => ({
+  default: () => null,
+  PdfViewerSkeleton: () => null,
+}));
