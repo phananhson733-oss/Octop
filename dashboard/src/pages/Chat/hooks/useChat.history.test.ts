@@ -157,4 +157,62 @@ describe("history failures", () => {
       chatStore.getSnapshot(thread).messages.map((message) => message.content),
     ).toEqual(["之前的回复", "继续做"]);
   });
+
+  it("reaches back to the user row of a long finished turn instead of drawing it twice", async () => {
+    chatStore.setHistoryPage(
+      thread,
+      [
+        {
+          id: "local-user",
+          role: "user",
+          content: "两部都上线了",
+          timestamp: 1,
+        },
+        {
+          id: "local-a",
+          role: "assistant",
+          content: "能换",
+          status: "done",
+          timestamp: 2,
+        },
+      ],
+      { hasMore: false, nextOffset: 0, nextCursor: null },
+    );
+    const toolRows = Array.from({ length: 25 }, (_, i) => ({
+      id: `srv-a${i}`,
+      role: "assistant",
+      content: `第 ${i} 步`,
+    }));
+    const history = vi
+      .spyOn(octopThreadsApi, "history")
+      .mockResolvedValueOnce({
+        thread_id: thread,
+        messages: toolRows,
+        has_more: true,
+      })
+      .mockResolvedValueOnce({
+        thread_id: thread,
+        messages: [
+          { id: "srv-old", role: "assistant", content: "上一轮" },
+          { id: "srv-user", role: "user", content: "两部都上线了" },
+        ],
+        has_more: true,
+      });
+    const { result } = renderHook(() => useChat(thread, "agent"));
+    await act(async () => {
+      await result.current.refreshHistory();
+    });
+    expect(history).toHaveBeenLastCalledWith(
+      "agent",
+      thread,
+      expect.objectContaining({ limit: 200, offset: 25 }),
+    );
+    const snap = chatStore.getSnapshot(thread);
+    expect(
+      snap.messages.filter((message) => message.role === "user"),
+    ).toHaveLength(1);
+    expect(snap.messages.map((message) => message.id)).not.toContain("local-a");
+    expect(snap.historyNextOffset).toBe(225);
+    expect(snap.historyHasMore).toBe(true);
+  });
 });
