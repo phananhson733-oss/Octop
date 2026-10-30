@@ -57,8 +57,8 @@ export function useInstalledPluginUis(enabled: boolean): void {
       id: "main",
       title: { en: "SEO", zh: "SEO" },
       description: {
-        en: "Keyword research, saved keywords and private reports",
-        zh: "关键词研究、保存关键词与私有报告",
+        en: "Keywords, competitors, site audit, rankings and AI visibility",
+        zh: "关键词、竞争对手、技术审计、排名与 AI 可见度",
       },
       component: lazy(() => import("../../pages/Control/SeoWorkbench")),
       permission: "seo",

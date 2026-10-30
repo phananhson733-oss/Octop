@@ -272,15 +272,8 @@ export function AuditPanel({
 
   return (
     <div className={styles.stack}>
-      <Card size="small">
+      <Card size="small" title={t("seo.auditNew")}>
         <div className={styles.stack}>
-          <Paragraph type="secondary">{t("seo.auditHelp")}</Paragraph>
-          {detail && !isActive(detail) && (
-            <AskExpertButton
-              label={t("seo.auditReport")}
-              what={t("seo.auditReportPrompt", { auditId: detail.audit_id })}
-            />
-          )}
           <div className={styles.toolbar}>
             <Input
               aria-label={t("seo.auditStartUrl")}
@@ -336,261 +329,287 @@ export function AuditPanel({
         />
       )}
       {audits.length ? (
-        <div className={styles.toolbar}>
-          <Select
-            aria-label={t("seo.auditHistory")}
-            className={styles.projectSelect}
-            value={auditId || undefined}
-            onChange={select}
-            options={audits.map((audit) => ({
-              value: audit.audit_id,
-              label: `${date(audit.created_at)} · ${t(
-                `seo.auditStatus_${audit.status}`,
-              )} · ${audit.requested_url}`,
-            }))}
-          />
-          {isActive(detail) && (
-            <Button
-              loading={busy === "cancel"}
-              disabled={!!busy || detail?.cancel_requested}
-              onClick={cancel}
-            >
-              {t("seo.auditCancel")}
-            </Button>
-          )}
-          <Popconfirm
-            title={t("seo.auditDeleteConfirm")}
-            onConfirm={remove}
-            disabled={!auditId}
-          >
-            <Button danger disabled={!!busy || !auditId}>
-              {t("seo.auditDelete")}
-            </Button>
-          </Popconfirm>
-          {detail && !isActive(detail) && detail.pages_crawled > 0 && (
-            <AskExpertButton
-              disabled={!!busy}
-              what={t("seo.askExpertWhat.audit", { id: detail.audit_id })}
-            />
-          )}
-        </div>
-      ) : (
-        <Empty description={t("seo.auditEmpty")} />
-      )}
-      {detail && (
-        <Card size="small">
+        <Card size="small" title={t("seo.auditResult")}>
           <div className={styles.stack}>
-            <Space wrap>
-              <Tag>{t(`seo.auditStatus_${detail.status}`)}</Tag>
-              {isActive(detail) && (
-                <Text>{t(`seo.auditPhase_${detail.phase}`)}</Text>
-              )}
-              <Text>{detail.start_url ?? detail.requested_url}</Text>
-              {(["critical", "warning", "info"] as const).map((level) => (
-                <Tag key={level} color={SEVERITY_COLOR[level]}>
-                  {t(`seo.auditSeverity_${level}`)} {detail.issue_counts[level]}
-                </Tag>
-              ))}
-            </Space>
-            <Progress
-              percent={Math.round(
-                (100 * detail.pages_crawled) /
-                  Math.max(detail.pages_total || detail.max_pages, 1),
-              )}
-              status={
-                detail.status === "failed"
-                  ? "exception"
-                  : isActive(detail)
-                  ? "active"
-                  : "normal"
-              }
-            />
-            <Text type="secondary">
-              {t("seo.auditProgress", {
-                crawled: detail.pages_crawled,
-                total: detail.pages_total || detail.max_pages,
-                discovered: detail.discovered_count,
-                sitemap: detail.sitemap_count,
-              })}
-            </Text>
-            {notices.map((notice) => (
-              <Alert
-                key={notice.key}
-                type={notice.type}
-                showIcon
-                message={notice.message}
+            <div className={styles.toolbar}>
+              <Select
+                aria-label={t("seo.auditHistory")}
+                className={styles.projectSelect}
+                value={auditId || undefined}
+                onChange={select}
+                options={audits.map((audit) => ({
+                  value: audit.audit_id,
+                  label: `${date(audit.created_at)} · ${t(
+                    `seo.auditStatus_${audit.status}`,
+                  )} · ${audit.requested_url}`,
+                }))}
               />
-            ))}
+              {isActive(detail) && (
+                <Button
+                  loading={busy === "cancel"}
+                  disabled={!!busy || detail?.cancel_requested}
+                  onClick={cancel}
+                >
+                  {t("seo.auditCancel")}
+                </Button>
+              )}
+              <Popconfirm
+                title={t("seo.auditDeleteConfirm")}
+                onConfirm={remove}
+                disabled={!auditId}
+              >
+                <Button danger disabled={!!busy || !auditId}>
+                  {t("seo.auditDelete")}
+                </Button>
+              </Popconfirm>
+              {detail && !isActive(detail) && (
+                <AskExpertButton
+                  disabled={!!busy}
+                  label={t("seo.auditReport")}
+                  what={t("seo.auditReportPrompt", {
+                    auditId: detail.audit_id,
+                  })}
+                />
+              )}
+              {detail && !isActive(detail) && detail.pages_crawled > 0 && (
+                <AskExpertButton
+                  disabled={!!busy}
+                  what={t("seo.askExpertWhat.audit", { id: detail.audit_id })}
+                />
+              )}
+            </div>
+            {detail && (
+              <>
+                <Space wrap>
+                  <Tag>{t(`seo.auditStatus_${detail.status}`)}</Tag>
+                  {isActive(detail) && (
+                    <Text>{t(`seo.auditPhase_${detail.phase}`)}</Text>
+                  )}
+                  <Text>{detail.start_url ?? detail.requested_url}</Text>
+                </Space>
+                <div className={styles.metrics}>
+                  {(["critical", "warning", "info"] as const).map((level) => (
+                    <Card key={level} size="small">
+                      <Tag color={SEVERITY_COLOR[level]}>
+                        {t(`seo.auditSeverity_${level}`)}
+                      </Tag>
+                      <div className={styles.metricValue}>
+                        {detail.issue_counts[level]}
+                      </div>
+                    </Card>
+                  ))}
+                </div>
+                <Progress
+                  percent={Math.round(
+                    (100 * detail.pages_crawled) /
+                      Math.max(detail.pages_total || detail.max_pages, 1),
+                  )}
+                  status={
+                    detail.status === "failed"
+                      ? "exception"
+                      : isActive(detail)
+                      ? "active"
+                      : "normal"
+                  }
+                />
+                <Text type="secondary">
+                  {t("seo.auditProgress", {
+                    crawled: detail.pages_crawled,
+                    total: detail.pages_total || detail.max_pages,
+                    discovered: detail.discovered_count,
+                    sitemap: detail.sitemap_count,
+                  })}
+                </Text>
+                {notices.map((notice) => (
+                  <Alert
+                    key={notice.key}
+                    type={notice.type}
+                    showIcon
+                    message={notice.message}
+                  />
+                ))}
+              </>
+            )}
+            {detail && (
+              <Tabs
+                size="small"
+                items={[
+                  {
+                    key: "issues",
+                    label: t("seo.auditIssues"),
+                    children: (
+                      <div className={styles.stack}>
+                        <Select
+                          aria-label={t("seo.auditSeverity")}
+                          value={severity}
+                          onChange={setSeverity}
+                          style={{ width: 160 }}
+                          options={(
+                            ["all", "critical", "warning", "info"] as const
+                          ).map((value) => ({
+                            value,
+                            label: t(`seo.auditSeverity_${value}`),
+                          }))}
+                        />
+                        <Table<AuditIssueType>
+                          size="small"
+                          rowKey="issue_type"
+                          dataSource={shownSummary}
+                          pagination={false}
+                          locale={{ emptyText: t("seo.auditNoIssues") }}
+                          columns={[
+                            {
+                              title: t("seo.auditSeverity"),
+                              dataIndex: "severity",
+                              width: 110,
+                              render: (value: AuditSeverity) => (
+                                <Tag color={SEVERITY_COLOR[value]}>
+                                  {t(`seo.auditSeverity_${value}`)}
+                                </Tag>
+                              ),
+                            },
+                            { title: t("seo.auditIssue"), dataIndex: "title" },
+                            {
+                              title: t("seo.auditCount"),
+                              dataIndex: "count",
+                              width: 90,
+                            },
+                          ]}
+                          expandable={{
+                            expandedRowRender: (row) => (
+                              <div className={styles.stack}>
+                                <Paragraph>{row.explanation}</Paragraph>
+                                <Paragraph>
+                                  <Text strong>{t("seo.auditHowToFix")}</Text>{" "}
+                                  {row.how_to_fix}
+                                </Paragraph>
+                                <Table<AuditIssue>
+                                  size="small"
+                                  rowKey={(issue) =>
+                                    `${issue.page_url}|${detailText(
+                                      issue.details,
+                                    )}`
+                                  }
+                                  dataSource={byType.get(row.issue_type) ?? []}
+                                  pagination={{
+                                    pageSize: 20,
+                                    hideOnSinglePage: true,
+                                  }}
+                                  columns={[
+                                    {
+                                      title: t("seo.auditUrl"),
+                                      dataIndex: "page_url",
+                                    },
+                                    {
+                                      title: t("seo.auditDetails"),
+                                      dataIndex: "details",
+                                      render: detailText,
+                                    },
+                                    {
+                                      title: t("seo.actions.title"),
+                                      render: (_, issue) => (
+                                        <Button
+                                          disabled={
+                                            !!busy ||
+                                            running ||
+                                            tracked.has(
+                                              `${auditId}|${issue.issue_type}|${issue.page_url}`,
+                                            )
+                                          }
+                                          onClick={() => void track(issue)}
+                                        >
+                                          {t(
+                                            tracked.has(
+                                              `${auditId}|${issue.issue_type}|${issue.page_url}`,
+                                            )
+                                              ? "seo.actions.tracked"
+                                              : "seo.actions.track",
+                                          )}
+                                        </Button>
+                                      ),
+                                    },
+                                  ]}
+                                />
+                              </div>
+                            ),
+                          }}
+                        />
+                      </div>
+                    ),
+                  },
+                  {
+                    key: "pages",
+                    label: t("seo.auditPages", { count: pages.length }),
+                    children: (
+                      <div className={styles.stack}>
+                        <Input.Search
+                          aria-label={t("seo.auditFilterUrl")}
+                          placeholder={t("seo.auditFilterUrl")}
+                          allowClear
+                          onSearch={setUrlFilter}
+                        />
+                        <Table<AuditPage>
+                          rowKey="url"
+                          size="small"
+                          dataSource={shownPages}
+                          scroll={{ x: 960 }}
+                          pagination={{ pageSize: 50, hideOnSinglePage: true }}
+                          columns={[
+                            { title: t("seo.auditUrl"), dataIndex: "url" },
+                            {
+                              title: t("seo.auditStatusCode"),
+                              dataIndex: "status_code",
+                              width: 90,
+                              render: (code: number, page) =>
+                                page.fetch_class === "ok"
+                                  ? code
+                                  : `${code || "—"} · ${t(
+                                      `seo.auditFetch_${page.fetch_class}`,
+                                    )}`,
+                            },
+                            { title: t("seo.title"), dataIndex: "title" },
+                            {
+                              title: t("seo.auditWords"),
+                              dataIndex: "word_count",
+                              width: 90,
+                            },
+                            {
+                              title: t("seo.auditIndexable"),
+                              dataIndex: "is_indexable",
+                              width: 100,
+                              render: (value: boolean, page) =>
+                                page.is_html
+                                  ? t(value ? "seo.auditYes" : "seo.auditNo")
+                                  : "—",
+                            },
+                            {
+                              title: t("seo.auditResponse"),
+                              dataIndex: "response_time_ms",
+                              width: 110,
+                            },
+                            {
+                              title: t("seo.auditDepth"),
+                              dataIndex: "crawl_depth",
+                              width: 80,
+                              render: (value: number | null) => value ?? "—",
+                            },
+                          ]}
+                        />
+                      </div>
+                    ),
+                  },
+                ]}
+              />
+            )}
           </div>
         </Card>
-      )}
-      {detail && (
-        <Tabs
-          size="small"
-          items={[
-            {
-              key: "issues",
-              label: t("seo.auditIssues"),
-              children: (
-                <div className={styles.stack}>
-                  <Select
-                    aria-label={t("seo.auditSeverity")}
-                    value={severity}
-                    onChange={setSeverity}
-                    style={{ width: 160 }}
-                    options={(
-                      ["all", "critical", "warning", "info"] as const
-                    ).map((value) => ({
-                      value,
-                      label: t(`seo.auditSeverity_${value}`),
-                    }))}
-                  />
-                  <Table<AuditIssueType>
-                    rowKey="issue_type"
-                    dataSource={shownSummary}
-                    pagination={false}
-                    locale={{ emptyText: t("seo.auditNoIssues") }}
-                    columns={[
-                      {
-                        title: t("seo.auditSeverity"),
-                        dataIndex: "severity",
-                        width: 110,
-                        render: (value: AuditSeverity) => (
-                          <Tag color={SEVERITY_COLOR[value]}>
-                            {t(`seo.auditSeverity_${value}`)}
-                          </Tag>
-                        ),
-                      },
-                      { title: t("seo.auditIssue"), dataIndex: "title" },
-                      {
-                        title: t("seo.auditCount"),
-                        dataIndex: "count",
-                        width: 90,
-                      },
-                    ]}
-                    expandable={{
-                      expandedRowRender: (row) => (
-                        <div className={styles.stack}>
-                          <Paragraph>{row.explanation}</Paragraph>
-                          <Paragraph>
-                            <Text strong>{t("seo.auditHowToFix")}</Text>{" "}
-                            {row.how_to_fix}
-                          </Paragraph>
-                          <Table<AuditIssue>
-                            size="small"
-                            rowKey={(issue) =>
-                              `${issue.page_url}|${detailText(issue.details)}`
-                            }
-                            dataSource={byType.get(row.issue_type) ?? []}
-                            pagination={{
-                              pageSize: 20,
-                              hideOnSinglePage: true,
-                            }}
-                            columns={[
-                              {
-                                title: t("seo.auditUrl"),
-                                dataIndex: "page_url",
-                              },
-                              {
-                                title: t("seo.auditDetails"),
-                                dataIndex: "details",
-                                render: detailText,
-                              },
-                              {
-                                title: t("seo.actions.title"),
-                                render: (_, issue) => (
-                                  <Button
-                                    disabled={
-                                      !!busy ||
-                                      running ||
-                                      tracked.has(
-                                        `${auditId}|${issue.issue_type}|${issue.page_url}`,
-                                      )
-                                    }
-                                    onClick={() => void track(issue)}
-                                  >
-                                    {t(
-                                      tracked.has(
-                                        `${auditId}|${issue.issue_type}|${issue.page_url}`,
-                                      )
-                                        ? "seo.actions.tracked"
-                                        : "seo.actions.track",
-                                    )}
-                                  </Button>
-                                ),
-                              },
-                            ]}
-                          />
-                        </div>
-                      ),
-                    }}
-                  />
-                </div>
-              ),
-            },
-            {
-              key: "pages",
-              label: t("seo.auditPages", { count: pages.length }),
-              children: (
-                <div className={styles.stack}>
-                  <Input.Search
-                    aria-label={t("seo.auditFilterUrl")}
-                    placeholder={t("seo.auditFilterUrl")}
-                    allowClear
-                    onSearch={setUrlFilter}
-                  />
-                  <Table<AuditPage>
-                    rowKey="url"
-                    size="small"
-                    dataSource={shownPages}
-                    scroll={{ x: 960 }}
-                    pagination={{ pageSize: 50, hideOnSinglePage: true }}
-                    columns={[
-                      { title: t("seo.auditUrl"), dataIndex: "url" },
-                      {
-                        title: t("seo.auditStatusCode"),
-                        dataIndex: "status_code",
-                        width: 90,
-                        render: (code: number, page) =>
-                          page.fetch_class === "ok"
-                            ? code
-                            : `${code || "—"} · ${t(
-                                `seo.auditFetch_${page.fetch_class}`,
-                              )}`,
-                      },
-                      { title: t("seo.title"), dataIndex: "title" },
-                      {
-                        title: t("seo.auditWords"),
-                        dataIndex: "word_count",
-                        width: 90,
-                      },
-                      {
-                        title: t("seo.auditIndexable"),
-                        dataIndex: "is_indexable",
-                        width: 100,
-                        render: (value: boolean, page) =>
-                          page.is_html
-                            ? t(value ? "seo.auditYes" : "seo.auditNo")
-                            : "—",
-                      },
-                      {
-                        title: t("seo.auditResponse"),
-                        dataIndex: "response_time_ms",
-                        width: 110,
-                      },
-                      {
-                        title: t("seo.auditDepth"),
-                        dataIndex: "crawl_depth",
-                        width: 80,
-                        render: (value: number | null) => value ?? "—",
-                      },
-                    ]}
-                  />
-                </div>
-              ),
-            },
-          ]}
-        />
+      ) : (
+        <Card size="small" title={t("seo.auditResult")}>
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={t("seo.auditEmpty")}
+          />
+        </Card>
       )}
     </div>
   );

@@ -51,9 +51,17 @@ import { ActionsPanel } from "./ActionsPanel";
 import { ReportEvidenceButton } from "./ReportEvidenceButton";
 import { AskExpertButton, AskExpertContext, openExpertChat } from "./AskExpert";
 import { useSearchTabs } from "./searchTabs";
+import { SEO_VIEWS, SeoNav, ViewHeader, type SeoView } from "./SeoNav";
 import styles from "./index.module.less";
 
 const { Text, Paragraph } = Typography;
+/** DataForSEO location codes a project can target, in menu order, with their locale keys. */
+const MARKETS = [
+  ["2840", "us"],
+  ["2826", "uk"],
+  ["2124", "ca"],
+  ["2036", "au"],
+] as const;
 
 export default function SeoWorkbench({
   isVisible = true,
@@ -111,6 +119,9 @@ export default function SeoWorkbench({
     setQuery({ project: value, view: "research" }, { replace: true });
   };
   const project = projects.find((p) => p.project_id === projectId);
+  const market =
+    project &&
+    MARKETS.find(([code]) => code === String(project.location_code))?.[1];
   const chatAgentId = project?.chat_agent_id;
   const askExpert =
     project && chatAgentId
@@ -171,31 +182,43 @@ export default function SeoWorkbench({
             onClose={() => setError("")}
           />
         )}
-        <div className={styles.toolbar}>
-          <Select
-            aria-label={t("seo.project")}
-            className={styles.projectSelect}
-            value={projectId}
-            placeholder={t("seo.project")}
-            onChange={selectProject}
-            options={projects.map((p) => ({
-              value: p.project_id,
-              label: `${p.name} · ${p.domain}`,
-            }))}
-          />
-          {isAdmin && (
-            <>
-              <Button onClick={() => setDialog("project")}>
-                {t("seo.createProject")}
-              </Button>
-              <Button onClick={() => setDialog("provider")}>
-                {t("seo.provider")}
-              </Button>
-            </>
-          )}
-          <Tag color={configured ? "green" : "default"}>
-            {t(configured ? "seo.configured" : "seo.notConfigured")}
-          </Tag>
+        <div className={styles.projectBar}>
+          <div className={styles.toolbar}>
+            <Select
+              aria-label={t("seo.project")}
+              className={styles.projectSelect}
+              value={projectId}
+              placeholder={t("seo.project")}
+              onChange={selectProject}
+              options={projects.map((p) => ({
+                value: p.project_id,
+                label: `${p.name} · ${p.domain}`,
+              }))}
+            />
+            {project && (
+              <Text type="secondary">
+                {market ? t(`seo.${market}`) : project.location_code} ·{" "}
+                {project.language_code === "en"
+                  ? t("seo.english")
+                  : project.language_code}
+              </Text>
+            )}
+          </div>
+          <div className={styles.toolbar}>
+            {isAdmin && (
+              <>
+                <Button onClick={() => setDialog("project")}>
+                  {t("seo.createProject")}
+                </Button>
+                <Button onClick={() => setDialog("provider")}>
+                  {t("seo.provider")}
+                </Button>
+              </>
+            )}
+            <Tag color={configured ? "green" : "default"}>
+              {t(configured ? "seo.configured" : "seo.notConfigured")}
+            </Tag>
+          </div>
         </div>
         {project ? (
           <AskExpertContext.Provider value={askExpert}>
@@ -287,12 +310,10 @@ export default function SeoWorkbench({
               <Paragraph type="secondary">{t("seo.agentHelp")}</Paragraph>
               <Form.Item name="location_code" label={t("seo.market")}>
                 <Select
-                  options={[
-                    ["2840", "us"],
-                    ["2826", "uk"],
-                    ["2124", "ca"],
-                    ["2036", "au"],
-                  ].map(([value, key]) => ({ value, label: t(`seo.${key}`) }))}
+                  options={MARKETS.map(([value, key]) => ({
+                    value,
+                    label: t(`seo.${key}`),
+                  }))}
                 />
               </Form.Item>
               <Form.Item name="language_code" label={t("seo.language")}>
@@ -336,17 +357,22 @@ function ProjectWorkspace({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [query, setQuery] = useSearchParams();
-  const view = query.get("view") || "research";
+  const requestedView = query.get("view");
+  const view =
+    SEO_VIEWS.find((item) => item.key === requestedView) ?? SEO_VIEWS[0];
+  // A view stays mounted once opened, so what was typed or picked survives switching.
+  const [opened, setOpened] = useState<SeoView[]>([view.key]);
+  if (!opened.includes(view.key)) setOpened([...opened, view.key]);
   const timeZone = useServerTimezone();
   const id = project.project_id;
   const tabs = useSearchTabs(id);
   const [runs, setRuns] = useState<RunSummary[]>([]);
   const [loaded, setLoaded] = useState<Record<string, ResearchRun>>({});
   const [saved, setSaved] = useState<SavedKeyword[]>([]);
-  const [total, setTotal] = useState(0);
+  const [total, setTotal] = useState<number>();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
-  const [reports, setReports] = useState<SeoReport[]>([]);
+  const [reports, setReports] = useState<SeoReport[]>();
   const [preview, setPreview] = useState<SeoReport & { html: string }>();
   const [seeds, setSeeds] = useState("");
   const [mode, setMode] = useState<ResearchInput["mode"]>("auto");
@@ -647,20 +673,431 @@ function ProjectWorkspace({
   const closePreview = () => {
     setPreview(undefined);
     // Drop the link's report so following it again reopens the preview.
-    if (requestedReport) setQuery({ project: id, view }, { replace: true });
+    if (requestedReport)
+      setQuery({ project: id, view: view.key }, { replace: true });
   };
   const previewHtml = useMemo(
     () => (preview ? staticReportHtml(preview.html) : ""),
     [preview],
   );
+  // Built only for the views that have been opened.
+  const panels: Record<SeoView, () => React.ReactNode> = {
+    research: () => (
+      <div className={styles.stack}>
+        <Card size="small" title={t("seo.researchNew")}>
+          <div className={styles.stack}>
+            <label>
+              {t("seo.seeds")}
+              <Input.TextArea
+                aria-label={t("seo.seeds")}
+                value={seeds}
+                onChange={(event) => setSeeds(event.target.value)}
+                rows={2}
+                placeholder={t("seo.seedsPlaceholder")}
+              />
+            </label>
+            <div className={styles.toolbar}>
+              <Select
+                aria-label={t("seo.mode")}
+                value={mode}
+                onChange={setMode}
+                options={["auto", "related", "suggestions", "ideas"].map(
+                  (value) => ({
+                    value,
+                    label: t(`seo.mode_${value}`),
+                  }),
+                )}
+              />
+              <Select
+                aria-label={t("seo.limit")}
+                value={limit}
+                onChange={setLimit}
+                options={[150, 300, 500].map((value) => ({
+                  value,
+                  label: String(value),
+                }))}
+              />
+              <Checkbox
+                checked={clickstream}
+                onChange={(e) => setClickstream(e.target.checked)}
+              >
+                {t("seo.clickstream")}
+              </Checkbox>
+              <Checkbox
+                checked={group}
+                onChange={(e) => setGroup(e.target.checked)}
+              >
+                {t("seo.group")}
+              </Checkbox>
+            </div>
+            <Checkbox
+              checked={paid}
+              onChange={(e) => setPaid(e.target.checked)}
+            >
+              {t("seo.confirmPaid")}
+            </Checkbox>
+            <Space>
+              <Button
+                type="primary"
+                loading={busy === "research"}
+                disabled={!configured || !paid || !!busy}
+                onClick={research}
+              >
+                {t("seo.runResearch")}
+              </Button>
+              <Text type="secondary">{t("seo.explicitOnly")}</Text>
+            </Space>
+          </div>
+        </Card>
+        <Card size="small" title={t("seo.researchResults")}>
+          <div className={styles.stack}>
+            <div className={styles.toolbar}>
+              <Select
+                className={styles.projectSelect}
+                aria-label={t("seo.history")}
+                value={active?.runId}
+                onChange={openRun}
+                options={runs.map((r) => ({
+                  value: r.run_id,
+                  label: `${date(r.observed_at)} · ${t(
+                    `seo.status_${r.status}`,
+                  )} · ${r.results.map((item) => item.seed).join(", ")}`,
+                }))}
+                placeholder={t("seo.history")}
+              />
+              <Button
+                disabled={!!busy}
+                onClick={() => {
+                  void seoApi.runs(id).then(showRuns).catch(fail);
+                }}
+              >
+                {t("seo.refreshRuns")}
+              </Button>
+            </div>
+            {tabs.tabs.length ? (
+              <Tabs
+                type="editable-card"
+                hideAdd
+                size="small"
+                activeKey={tabs.activeId ?? undefined}
+                onChange={tabs.select}
+                onEdit={(key, action) => {
+                  if (action === "remove" && typeof key === "string")
+                    tabs.close(key);
+                }}
+                items={tabs.tabs.map((tab) => {
+                  const summary = runs.find((r) => r.run_id === tab.runId);
+                  return {
+                    key: tab.id,
+                    label: (
+                      <span>
+                        {tab.seed}{" "}
+                        {summary && (
+                          <Text type="secondary">
+                            {date(summary.observed_at)}
+                          </Text>
+                        )}
+                      </span>
+                    ),
+                  };
+                })}
+              />
+            ) : (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={t("seo.noSearchTabs")}
+              />
+            )}
+            {active && (
+              <>
+                {activeRun && (
+                  <>
+                    <Space wrap>
+                      <Tag>{t(`seo.status_${activeRun.status}`)}</Tag>
+                      <Text>
+                        {t("seo.observed", {
+                          date: date(activeRun.observed_at),
+                        })}
+                      </Text>
+                      <Text>
+                        {t("seo.cost", {
+                          cost:
+                            activeRun.cost_usd == null
+                              ? t("seo.missing")
+                              : `$${activeRun.cost_usd}`,
+                        })}
+                      </Text>
+                      {activeRun.cost_usd == null &&
+                        activeRun.cost_known_usd != null && (
+                          <Text>
+                            {t("seo.knownCost", {
+                              cost: `$${activeRun.cost_known_usd}`,
+                            })}
+                          </Text>
+                        )}
+                      {activeRun.cached && <Tag>{t("seo.cached")}</Tag>}
+                    </Space>
+                    {activeRun.error && (
+                      <Alert
+                        showIcon
+                        type="warning"
+                        message={activeRun.error}
+                      />
+                    )}
+                    {activeRun.results
+                      .filter((r) => !r.ok)
+                      .map((r) => (
+                        <Alert
+                          showIcon
+                          key={r.seed}
+                          type="warning"
+                          message={`${r.seed}: ${
+                            r.error || t("seo.status_failed")
+                          }`}
+                        />
+                      ))}
+                  </>
+                )}
+                <Text type="secondary">
+                  {t("seo.missingHelp")} {group && t("seo.groupHelp")}
+                </Text>
+                <Table<KeywordResearchDisplayRow>
+                  size="small"
+                  rowKey="keyword"
+                  loading={!activeRun}
+                  dataSource={displayRows}
+                  columns={columns}
+                  scroll={{ x: 860 }}
+                  rowSelection={{
+                    selectedRowKeys: selected,
+                    onChange: setSelected,
+                  }}
+                  pagination={{ pageSize: 20 }}
+                  locale={{ emptyText: t("seo.emptyResults") }}
+                />
+                <div className={styles.toolbar}>
+                  <Select
+                    mode="tags"
+                    aria-label={t("seo.tags")}
+                    placeholder={t("seo.tags")}
+                    style={{ minWidth: 200 }}
+                    value={tags}
+                    onChange={setTags}
+                    maxCount={20}
+                  />
+                  <Select
+                    aria-label={t("seo.tagMode")}
+                    value={tagMode}
+                    onChange={setTagMode}
+                    options={[
+                      { value: "append", label: t("seo.append") },
+                      { value: "replace", label: t("seo.replace") },
+                    ]}
+                  />
+                  <Button
+                    loading={busy === "save"}
+                    disabled={
+                      !!busy ||
+                      !selected.length ||
+                      selected.length > 500 ||
+                      (tagMode === "replace" && !tags.some((tag) => tag.trim()))
+                    }
+                    onClick={save}
+                  >
+                    {t("seo.saveKeywords", { count: selected.length })}
+                  </Button>
+                  {chatAgentId && (
+                    <Button
+                      disabled={!!busy || !runHasRows}
+                      loading={busy === "report"}
+                      onClick={generateReport}
+                    >
+                      {t("seo.generateReport")}
+                    </Button>
+                  )}
+                  {activeRun && (
+                    <AskExpertButton
+                      disabled={!!busy || !runHasRows}
+                      what={t("seo.askExpertWhat.research", {
+                        id: activeRun.run_id,
+                      })}
+                    />
+                  )}
+                </div>
+                {chatAgentId && (
+                  <Text type="secondary">{t("seo.reportHelp")}</Text>
+                )}
+              </>
+            )}
+          </div>
+        </Card>
+      </div>
+    ),
+    saved: () => (
+      <Card
+        size="small"
+        title={
+          total === undefined
+            ? t("seo.savedTitle")
+            : t("seo.savedList", { count: total })
+        }
+      >
+        <div className={styles.stack}>
+          <Input.Search
+            aria-label={t("seo.searchSaved")}
+            placeholder={t("seo.searchSaved")}
+            onSearch={(value) => {
+              setSearch(value);
+              setPage(1);
+            }}
+            allowClear
+          />
+          <Table<SavedKeyword>
+            size="small"
+            rowKey="keyword_id"
+            dataSource={saved}
+            columns={[
+              ...columns,
+              {
+                title: t("seo.tags"),
+                dataIndex: "tags",
+                render: (values: string[]) =>
+                  values.map((tag) => <Tag key={tag}>{tag}</Tag>),
+              },
+              {
+                title: t("seo.sourceDate"),
+                dataIndex: "observed_at",
+                render: date,
+              },
+            ]}
+            scroll={{ x: 1100 }}
+            pagination={{
+              current: page,
+              pageSize: 50,
+              total,
+              onChange: setPage,
+              showSizeChanger: false,
+            }}
+          />
+        </div>
+      </Card>
+    ),
+    reports: () => (
+      <Card
+        size="small"
+        title={
+          reports
+            ? t("seo.reportList", { count: reports.length })
+            : t("seo.reportTitle")
+        }
+      >
+        <div className={styles.stack}>
+          <div className={styles.toolbar}>
+            <AskExpertButton
+              label={t("seo.comprehensiveReport")}
+              what={t("seo.comprehensiveReportPrompt")}
+            />
+            <Button
+              onClick={() => {
+                void seoApi.reports(id).then(setReports).catch(fail);
+              }}
+            >
+              {t("seo.refreshReports")}
+            </Button>
+          </div>
+          <Table<SeoReport>
+            size="small"
+            rowKey="report_id"
+            dataSource={reports}
+            columns={[
+              { title: t("seo.title"), dataIndex: "title" },
+              { title: t("seo.summary"), dataIndex: "summary" },
+              {
+                title: t("seo.reportEvidence"),
+                render: (_, report) => (
+                  <ReportEvidenceButton projectId={id} report={report} />
+                ),
+              },
+              {
+                title: t("seo.created"),
+                dataIndex: "created_at",
+                render: date,
+              },
+              {
+                title: t("seo.preview"),
+                key: "preview",
+                render: (_, report) => (
+                  <Button
+                    onClick={() => {
+                      void seoApi
+                        .report(id, report.report_id)
+                        .then(setPreview)
+                        .catch(fail);
+                    }}
+                  >
+                    {t("seo.preview")}
+                  </Button>
+                ),
+              },
+            ]}
+          />
+        </div>
+      </Card>
+    ),
+    actions: () => (
+      <ActionsPanel
+        projectId={id}
+        isVisible={isVisible && view.key === "actions"}
+      />
+    ),
+    audit: () => (
+      <AuditPanel
+        projectId={id}
+        domain={project.domain}
+        isVisible={isVisible && view.key === "audit"}
+      />
+    ),
+    search: () => <SearchPerformancePanel key={id} projectId={id} />,
+    competitors: () => (
+      <CompetitorsPanel
+        key={id}
+        projectId={id}
+        domain={project.domain}
+        configured={configured}
+      />
+    ),
+    rank: () => (
+      <RankTrackingPanel
+        key={id}
+        projectId={id}
+        domain={project.domain}
+        configured={configured}
+        isVisible={isVisible && view.key === "rank"}
+      />
+    ),
+    ai: () => (
+      <div key={id} className={styles.stack}>
+        <AiVisibilityPanel
+          projectId={id}
+          configured={configured}
+          isVisible={isVisible && view.key === "ai"}
+        />
+        <PromptExplorerCard
+          projectId={id}
+          domain={project.domain}
+          configured={configured}
+        />
+        <BrandLookupCard
+          projectId={id}
+          domain={project.domain}
+          configured={configured}
+        />
+      </div>
+    ),
+    context: () => <ProjectContextPanel projectId={id} />,
+  };
   return (
     <div className={styles.stack}>
-      <Text type="secondary">
-        {t("seo.scope", {
-          market: project.location_code,
-          language: project.language_code,
-        })}
-      </Text>
       {!project.agent_id && (
         <Alert
           type="warning"
@@ -692,453 +1129,24 @@ function ProjectWorkspace({
           }
         />
       )}
-      {error && <Alert type="error" showIcon message={error} />}
-      {notice && <Alert type="info" showIcon message={notice} />}
-      <Tabs
-        activeKey={
-          [
-            "research",
-            "saved",
-            "reports",
-            "actions",
-            "audit",
-            "search",
-            "competitors",
-            "rank",
-            "ai",
-            "context",
-          ].includes(view)
-            ? view
-            : "research"
-        }
-        onChange={(next) =>
-          setQuery({ project: id, view: next }, { replace: true })
-        }
-        items={[
-          {
-            key: "research",
-            label: t("seo.research"),
-            children: (
-              <div className={styles.stack}>
-                <Card size="small">
-                  <div className={styles.stack}>
-                    <label>
-                      {t("seo.seeds")}
-                      <Input.TextArea
-                        aria-label={t("seo.seeds")}
-                        value={seeds}
-                        onChange={(event) => setSeeds(event.target.value)}
-                        rows={2}
-                        placeholder={t("seo.seedsPlaceholder")}
-                      />
-                    </label>
-                    <div className={styles.toolbar}>
-                      <Select
-                        aria-label={t("seo.mode")}
-                        value={mode}
-                        onChange={setMode}
-                        options={[
-                          "auto",
-                          "related",
-                          "suggestions",
-                          "ideas",
-                        ].map((value) => ({
-                          value,
-                          label: t(`seo.mode_${value}`),
-                        }))}
-                      />
-                      <Select
-                        aria-label={t("seo.limit")}
-                        value={limit}
-                        onChange={setLimit}
-                        options={[150, 300, 500].map((value) => ({
-                          value,
-                          label: String(value),
-                        }))}
-                      />
-                      <Checkbox
-                        checked={clickstream}
-                        onChange={(e) => setClickstream(e.target.checked)}
-                      >
-                        {t("seo.clickstream")}
-                      </Checkbox>
-                      <Checkbox
-                        checked={group}
-                        onChange={(e) => setGroup(e.target.checked)}
-                      >
-                        {t("seo.group")}
-                      </Checkbox>
-                    </div>
-                    <Checkbox
-                      checked={paid}
-                      onChange={(e) => setPaid(e.target.checked)}
-                    >
-                      {t("seo.confirmPaid")}
-                    </Checkbox>
-                    <Space>
-                      <Button
-                        type="primary"
-                        loading={busy === "research"}
-                        disabled={!configured || !paid || !!busy}
-                        onClick={research}
-                      >
-                        {t("seo.runResearch")}
-                      </Button>
-                      <Text type="secondary">{t("seo.explicitOnly")}</Text>
-                    </Space>
-                  </div>
-                </Card>
-                <div className={styles.toolbar}>
-                  <Select
-                    className={styles.projectSelect}
-                    aria-label={t("seo.history")}
-                    value={active?.runId}
-                    onChange={openRun}
-                    options={runs.map((r) => ({
-                      value: r.run_id,
-                      label: `${date(r.observed_at)} · ${t(
-                        `seo.status_${r.status}`,
-                      )} · ${r.results.map((item) => item.seed).join(", ")}`,
-                    }))}
-                    placeholder={t("seo.history")}
-                  />
-                  <Button
-                    disabled={!!busy}
-                    onClick={() => {
-                      void seoApi.runs(id).then(showRuns).catch(fail);
-                    }}
-                  >
-                    {t("seo.refreshRuns")}
-                  </Button>
-                </div>
-                {tabs.tabs.length ? (
-                  <Tabs
-                    type="editable-card"
-                    hideAdd
-                    size="small"
-                    activeKey={tabs.activeId ?? undefined}
-                    onChange={tabs.select}
-                    onEdit={(key, action) => {
-                      if (action === "remove" && typeof key === "string")
-                        tabs.close(key);
-                    }}
-                    items={tabs.tabs.map((tab) => {
-                      const summary = runs.find((r) => r.run_id === tab.runId);
-                      return {
-                        key: tab.id,
-                        label: (
-                          <span>
-                            {tab.seed}{" "}
-                            {summary && (
-                              <Text type="secondary">
-                                {date(summary.observed_at)}
-                              </Text>
-                            )}
-                          </span>
-                        ),
-                      };
-                    })}
-                  />
-                ) : (
-                  <Empty description={t("seo.noSearchTabs")} />
-                )}
-                {active && (
-                  <>
-                    {activeRun && (
-                      <>
-                        <Space wrap>
-                          <Tag>{t(`seo.status_${activeRun.status}`)}</Tag>
-                          <Text>
-                            {t("seo.observed", {
-                              date: date(activeRun.observed_at),
-                            })}
-                          </Text>
-                          <Text>
-                            {t("seo.cost", {
-                              cost:
-                                activeRun.cost_usd == null
-                                  ? t("seo.missing")
-                                  : `$${activeRun.cost_usd}`,
-                            })}
-                          </Text>
-                          {activeRun.cost_usd == null &&
-                            activeRun.cost_known_usd != null && (
-                              <Text>
-                                {t("seo.knownCost", {
-                                  cost: `$${activeRun.cost_known_usd}`,
-                                })}
-                              </Text>
-                            )}
-                          {activeRun.cached && <Tag>{t("seo.cached")}</Tag>}
-                        </Space>
-                        {activeRun.error && (
-                          <Alert type="warning" message={activeRun.error} />
-                        )}
-                        {activeRun.results
-                          .filter((r) => !r.ok)
-                          .map((r) => (
-                            <Alert
-                              key={r.seed}
-                              type="warning"
-                              message={`${r.seed}: ${
-                                r.error || t("seo.status_failed")
-                              }`}
-                            />
-                          ))}
-                      </>
-                    )}
-                    <Text type="secondary">
-                      {t("seo.missingHelp")} {group && t("seo.groupHelp")}
-                    </Text>
-                    <Table<KeywordResearchDisplayRow>
-                      rowKey="keyword"
-                      loading={!activeRun}
-                      dataSource={displayRows}
-                      columns={columns}
-                      scroll={{ x: 860 }}
-                      rowSelection={{
-                        selectedRowKeys: selected,
-                        onChange: setSelected,
-                      }}
-                      pagination={{ pageSize: 20 }}
-                      locale={{ emptyText: t("seo.emptyResults") }}
-                    />
-                    <div className={styles.toolbar}>
-                      <Select
-                        mode="tags"
-                        aria-label={t("seo.tags")}
-                        placeholder={t("seo.tags")}
-                        style={{ minWidth: 200 }}
-                        value={tags}
-                        onChange={setTags}
-                        maxCount={20}
-                      />
-                      <Select
-                        aria-label={t("seo.tagMode")}
-                        value={tagMode}
-                        onChange={setTagMode}
-                        options={[
-                          { value: "append", label: t("seo.append") },
-                          { value: "replace", label: t("seo.replace") },
-                        ]}
-                      />
-                      <Button
-                        loading={busy === "save"}
-                        disabled={
-                          !!busy ||
-                          !selected.length ||
-                          selected.length > 500 ||
-                          (tagMode === "replace" &&
-                            !tags.some((tag) => tag.trim()))
-                        }
-                        onClick={save}
-                      >
-                        {t("seo.saveKeywords", { count: selected.length })}
-                      </Button>
-                      {chatAgentId && (
-                        <Button
-                          disabled={!!busy || !runHasRows}
-                          loading={busy === "report"}
-                          onClick={generateReport}
-                        >
-                          {t("seo.generateReport")}
-                        </Button>
-                      )}
-                      {activeRun && (
-                        <AskExpertButton
-                          disabled={!!busy || !runHasRows}
-                          what={t("seo.askExpertWhat.research", {
-                            id: activeRun.run_id,
-                          })}
-                        />
-                      )}
-                    </div>
-                    {chatAgentId && (
-                      <Text type="secondary">{t("seo.reportHelp")}</Text>
-                    )}
-                  </>
-                )}
-              </div>
-            ),
-          },
-          {
-            key: "saved",
-            label: t("seo.saved"),
-            children: (
-              <div className={styles.stack}>
-                <Input.Search
-                  aria-label={t("seo.searchSaved")}
-                  placeholder={t("seo.searchSaved")}
-                  onSearch={(value) => {
-                    setSearch(value);
-                    setPage(1);
-                  }}
-                  allowClear
-                />
-                <Table<SavedKeyword>
-                  rowKey="keyword_id"
-                  dataSource={saved}
-                  columns={[
-                    ...columns,
-                    {
-                      title: t("seo.tags"),
-                      dataIndex: "tags",
-                      render: (values: string[]) =>
-                        values.map((tag) => <Tag key={tag}>{tag}</Tag>),
-                    },
-                    {
-                      title: t("seo.sourceDate"),
-                      dataIndex: "observed_at",
-                      render: date,
-                    },
-                  ]}
-                  scroll={{ x: 1100 }}
-                  pagination={{
-                    current: page,
-                    pageSize: 50,
-                    total,
-                    onChange: setPage,
-                    showSizeChanger: false,
-                  }}
-                />
-              </div>
-            ),
-          },
-          {
-            key: "reports",
-            label: t("seo.reports"),
-            children: (
-              <div className={styles.stack}>
-                <Button
-                  onClick={() => {
-                    void seoApi.reports(id).then(setReports).catch(fail);
-                  }}
-                >
-                  {t("seo.refreshReports")}
-                </Button>
-                <AskExpertButton
-                  label={t("seo.comprehensiveReport")}
-                  what={t("seo.comprehensiveReportPrompt")}
-                />
-                <Table<SeoReport>
-                  rowKey="report_id"
-                  dataSource={reports}
-                  columns={[
-                    { title: t("seo.title"), dataIndex: "title" },
-                    { title: t("seo.summary"), dataIndex: "summary" },
-                    {
-                      title: t("seo.reportEvidence"),
-                      render: (_, report) => (
-                        <ReportEvidenceButton projectId={id} report={report} />
-                      ),
-                    },
-                    {
-                      title: t("seo.created"),
-                      dataIndex: "created_at",
-                      render: date,
-                    },
-                    {
-                      title: t("seo.preview"),
-                      key: "preview",
-                      render: (_, report) => (
-                        <Button
-                          onClick={() => {
-                            void seoApi
-                              .report(id, report.report_id)
-                              .then(setPreview)
-                              .catch(fail);
-                          }}
-                        >
-                          {t("seo.preview")}
-                        </Button>
-                      ),
-                    },
-                  ]}
-                />
-              </div>
-            ),
-          },
-          {
-            key: "actions",
-            label: t("seo.actions.title"),
-            children: (
-              <ActionsPanel
-                projectId={id}
-                isVisible={isVisible && view === "actions"}
-              />
-            ),
-          },
-          {
-            key: "audit",
-            label: t("seo.audit"),
-            children: (
-              <AuditPanel
-                projectId={id}
-                domain={project.domain}
-                isVisible={isVisible && view === "audit"}
-              />
-            ),
-          },
-          {
-            key: "search",
-            label: t("seo.gsc"),
-            children: <SearchPerformancePanel key={id} projectId={id} />,
-          },
-          {
-            key: "competitors",
-            label: t("seo.competitors"),
-            children: (
-              <CompetitorsPanel
-                key={id}
-                projectId={id}
-                domain={project.domain}
-                configured={configured}
-              />
-            ),
-          },
-          {
-            key: "rank",
-            label: t("seo.rank"),
-            children: (
-              <RankTrackingPanel
-                key={id}
-                projectId={id}
-                domain={project.domain}
-                configured={configured}
-                isVisible={isVisible && view === "rank"}
-              />
-            ),
-          },
-          {
-            key: "ai",
-            label: t("seo.ai"),
-            children: (
-              <div key={id} className={styles.stack}>
-                <AiVisibilityPanel
-                  projectId={id}
-                  configured={configured}
-                  isVisible={isVisible && view === "ai"}
-                />
-                <PromptExplorerCard
-                  projectId={id}
-                  domain={project.domain}
-                  configured={configured}
-                />
-                <BrandLookupCard
-                  projectId={id}
-                  domain={project.domain}
-                  configured={configured}
-                />
-              </div>
-            ),
-          },
-          {
-            key: "context",
-            label: t("seo.context"),
-            children: <ProjectContextPanel projectId={id} />,
-          },
-        ]}
-      />
+      <div className={styles.workspace}>
+        <SeoNav
+          view={view.key}
+          onChange={(next) =>
+            setQuery({ project: id, view: next }, { replace: true })
+          }
+        />
+        <div className={styles.content}>
+          <ViewHeader title={t(view.label)} help={t(view.help)} />
+          {error && <Alert type="error" showIcon message={error} />}
+          {notice && <Alert type="info" showIcon message={notice} />}
+          {SEO_VIEWS.filter((item) => opened.includes(item.key)).map((item) => (
+            <div key={item.key} hidden={item.key !== view.key}>
+              {panels[item.key]()}
+            </div>
+          ))}
+        </div>
+      </div>
       <Drawer
         open={!!serpKeyword}
         title={t("seo.serpTitle", { keyword: serpKeyword })}

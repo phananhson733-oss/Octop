@@ -508,7 +508,7 @@ export function SearchPerformancePanel({ projectId }: { projectId: string }) {
 
   const performance = connection && (
     <div className={styles.stack}>
-      <Card size="small">
+      <Card size="small" title={t("seo.gscData")}>
         <div className={styles.stack}>
           <div className={styles.toolbar}>
             <Text>
@@ -630,110 +630,112 @@ export function SearchPerformancePanel({ projectId }: { projectId: string }) {
           </div>
         </Card>
       )}
-      <Tabs
-        activeKey={view}
-        onChange={(next) => {
-          setView(next as TableView);
-          setPage(1);
-          setTable(undefined);
-        }}
-        items={[
-          { key: "query", label: t("seo.gscTopQueries") },
-          { key: "page", label: t("seo.gscTopPages") },
-          {
-            key: "striking",
-            label: t("seo.gscStriking", {
-              count: report?.striking_distance.length ?? 0,
-            }),
-          },
-          { key: "countries", label: t("seo.gscCountries") },
-        ].map((item) => ({
-          ...item,
-          children:
-            item.key === "striking" ? (
-              <div className={styles.stack}>
-                <Text type="secondary">{t("seo.gscStrikingHelp")}</Text>
-                <Table
-                  size="small"
-                  rowKey="query"
-                  dataSource={report?.striking_distance ?? []}
-                  pagination={{ pageSize: PAGE_SIZE, hideOnSinglePage: true }}
-                  columns={[
-                    {
-                      title: t("seo.keyword"),
-                      dataIndex: "query",
-                    },
-                    {
-                      title: t("seo.gscBestPage"),
-                      dataIndex: "page",
-                      render: (value: string) => (
-                        <Text copyable ellipsis={{ tooltip: value }}>
-                          {value}
-                        </Text>
-                      ),
-                    },
-                    {
-                      title: t("seo.gscImpressions"),
-                      dataIndex: "impressions",
-                      width: 110,
-                      render: count,
-                    },
-                    {
-                      title: t("seo.gscClicks"),
-                      dataIndex: "clicks",
-                      width: 100,
-                      render: count,
-                    },
-                    {
-                      title: t("seo.gscPosition"),
-                      dataIndex: "position",
-                      width: 100,
-                      render: rank,
-                    },
-                  ]}
-                />
-              </div>
-            ) : item.key === "countries" ? (
-              <Table<GscDimensionRow>
-                size="small"
-                rowKey="key"
-                dataSource={report?.countries ?? []}
-                pagination={false}
-                columns={rowColumns(t("seo.gscCountry"))}
-              />
-            ) : (
-              <div className={styles.stack}>
+      <Card size="small" title={t("seo.gscBreakdown")}>
+        <Tabs
+          activeKey={view}
+          onChange={(next) => {
+            setView(next as TableView);
+            setPage(1);
+            setTable(undefined);
+          }}
+          items={[
+            { key: "query", label: t("seo.gscTopQueries") },
+            { key: "page", label: t("seo.gscTopPages") },
+            {
+              key: "striking",
+              label: t("seo.gscStriking", {
+                count: report?.striking_distance.length ?? 0,
+              }),
+            },
+            { key: "countries", label: t("seo.gscCountries") },
+          ].map((item) => ({
+            ...item,
+            children:
+              item.key === "striking" ? (
+                <div className={styles.stack}>
+                  <Text type="secondary">{t("seo.gscStrikingHelp")}</Text>
+                  <Table
+                    size="small"
+                    rowKey="query"
+                    dataSource={report?.striking_distance ?? []}
+                    pagination={{ pageSize: PAGE_SIZE, hideOnSinglePage: true }}
+                    columns={[
+                      {
+                        title: t("seo.keyword"),
+                        dataIndex: "query",
+                      },
+                      {
+                        title: t("seo.gscBestPage"),
+                        dataIndex: "page",
+                        render: (value: string) => (
+                          <Text copyable ellipsis={{ tooltip: value }}>
+                            {value}
+                          </Text>
+                        ),
+                      },
+                      {
+                        title: t("seo.gscImpressions"),
+                        dataIndex: "impressions",
+                        width: 110,
+                        render: count,
+                      },
+                      {
+                        title: t("seo.gscClicks"),
+                        dataIndex: "clicks",
+                        width: 100,
+                        render: count,
+                      },
+                      {
+                        title: t("seo.gscPosition"),
+                        dataIndex: "position",
+                        width: 100,
+                        render: rank,
+                      },
+                    ]}
+                  />
+                </div>
+              ) : item.key === "countries" ? (
                 <Table<GscDimensionRow>
                   size="small"
                   rowKey="key"
-                  loading={!table}
-                  dataSource={table?.rows ?? []}
+                  dataSource={report?.countries ?? []}
                   pagination={false}
-                  columns={rowColumns(
-                    t(item.key === "page" ? "seo.gscPage" : "seo.keyword"),
-                  )}
+                  columns={rowColumns(t("seo.gscCountry"))}
                 />
-                <Space>
-                  <Button
+              ) : (
+                <div className={styles.stack}>
+                  <Table<GscDimensionRow>
                     size="small"
-                    disabled={page <= 1}
-                    onClick={() => setPage((p) => p - 1)}
-                  >
-                    {t("seo.gscPrev")}
-                  </Button>
-                  <Text>{t("seo.gscPageNumber", { page })}</Text>
-                  <Button
-                    size="small"
-                    disabled={!table?.has_next_page}
-                    onClick={() => setPage((p) => p + 1)}
-                  >
-                    {t("seo.gscNext")}
-                  </Button>
-                </Space>
-              </div>
-            ),
-        }))}
-      />
+                    rowKey="key"
+                    loading={!table}
+                    dataSource={table?.rows ?? []}
+                    pagination={false}
+                    columns={rowColumns(
+                      t(item.key === "page" ? "seo.gscPage" : "seo.keyword"),
+                    )}
+                  />
+                  <Space>
+                    <Button
+                      size="small"
+                      disabled={page <= 1}
+                      onClick={() => setPage((p) => p - 1)}
+                    >
+                      {t("seo.gscPrev")}
+                    </Button>
+                    <Text>{t("seo.gscPageNumber", { page })}</Text>
+                    <Button
+                      size="small"
+                      disabled={!table?.has_next_page}
+                      onClick={() => setPage((p) => p + 1)}
+                    >
+                      {t("seo.gscNext")}
+                    </Button>
+                  </Space>
+                </div>
+              ),
+          }))}
+        />
+      </Card>
       <Card size="small" title={t("seo.gscInspect")}>
         <div className={styles.stack}>
           <Text type="secondary">{t("seo.gscInspectHelp")}</Text>

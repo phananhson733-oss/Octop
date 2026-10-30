@@ -68,7 +68,8 @@ export function ProjectContextPanel({ projectId }: { projectId: string }) {
       setBusy(false);
     }
   }
-  if (!data) return error ? <Alert type="error" message={error} /> : null;
+  if (!data)
+    return error ? <Alert showIcon type="error" message={error} /> : null;
   const stamp = (at: string, by: string) =>
     t("seo.contextUpdated", {
       date: formatServerIsoDateTime(at, timeZone),
@@ -131,7 +132,6 @@ export function ProjectContextPanel({ projectId }: { projectId: string }) {
   };
   return (
     <div className={styles.stack}>
-      <Text type="secondary">{t("seo.contextHelp")}</Text>
       {error && (
         <Alert
           type="error"
@@ -171,7 +171,10 @@ export function ProjectContextPanel({ projectId }: { projectId: string }) {
             )}
           </div>
         ) : (
-          <Empty description={t("seo.customSectionsEmpty")} />
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description={t("seo.customSectionsEmpty")}
+          />
         )}
       </Card>
       <Card size="small" title={t("seo.competitors")}>

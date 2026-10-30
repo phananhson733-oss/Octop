@@ -184,8 +184,9 @@ export function SerpPanel({
           )}
         </Space>
       )}
-      {serp?.error && <Alert type="warning" message={serp.error} />}
+      {serp?.error && <Alert showIcon type="warning" message={serp.error} />}
       <Table<SerpItem>
+        size="small"
         rowKey={(item) => `${item.rank}:${item.type}:${item.url}`}
         loading={loading}
         dataSource={items}

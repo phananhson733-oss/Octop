@@ -41,7 +41,7 @@ export function ReportEvidenceButton({
       >
         {t("seo.reportEvidence")}
       </Button>
-      {error && <Alert message={error} type="error" />}
+      {error && <Alert showIcon message={error} type="error" />}
       <Modal
         open={!!bundle}
         title={t("seo.reportEvidence")}

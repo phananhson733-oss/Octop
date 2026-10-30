@@ -214,7 +214,7 @@ export function LookupMeta({
           />
         )}
       </Space>
-      {lookup.error && <Alert type="warning" message={lookup.error} />}
+      {lookup.error && <Alert showIcon type="warning" message={lookup.error} />}
     </>
   );
 }
@@ -370,6 +370,7 @@ function DomainCard({
           </>
         )}
         <Table<RankedKeyword>
+          size="small"
           rowKey={(row) => `${row.keyword}:${row.url}`}
           loading={lookups.loading}
           dataSource={rows}
@@ -497,6 +498,7 @@ function PagesCard({
           </>
         )}
         <Table<RankedPage>
+          size="small"
           rowKey="url"
           loading={lookups.loading}
           dataSource={rows}
@@ -727,6 +729,7 @@ function BacklinksCard({
                   label: t("seo.backlinksLinksTab", { count: links.length }),
                   children: (
                     <Table<Backlink>
+                      size="small"
                       {...table}
                       rowKey={(row) => `${row.url_from}>${row.url_to}`}
                       dataSource={links}
@@ -808,6 +811,7 @@ function BacklinksCard({
                   }),
                   children: (
                     <Table<ReferringDomain>
+                      size="small"
                       {...table}
                       rowKey={(row) => row.domain ?? ""}
                       dataSource={domains}
@@ -859,6 +863,7 @@ function BacklinksCard({
                   label: t("seo.backlinksPagesTab", { count: pages.length }),
                   children: (
                     <Table<LinkedPage>
+                      size="small"
                       {...table}
                       rowKey={(row) => row.url ?? ""}
                       dataSource={pages}
@@ -1015,6 +1020,7 @@ function SerpCompetitorsCard({
           </>
         )}
         <Table<SerpCompetitor>
+          size="small"
           rowKey="domain"
           loading={lookups.loading}
           dataSource={rows}

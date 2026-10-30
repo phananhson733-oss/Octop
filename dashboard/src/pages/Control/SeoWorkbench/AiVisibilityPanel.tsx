@@ -275,7 +275,6 @@ export function AiVisibilityPanel({
   const own = data?.brands.find((brand) => brand.own);
   return (
     <div className={styles.stack}>
-      <Text type="secondary">{t("seo.aiHelp")}</Text>
       {!configured && (
         <Alert type="info" showIcon message={t("seo.aiNeedsProvider")} />
       )}

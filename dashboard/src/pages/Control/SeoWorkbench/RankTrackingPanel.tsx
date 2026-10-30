@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Drawer,
+  Empty,
   Input,
   Popconfirm,
   Progress,
@@ -120,6 +121,7 @@ function History({
     >
       {error && <Alert type="error" showIcon message={error} />}
       <Table<RankSnapshot>
+        size="small"
         rowKey={(item) => `${item.run_id}:${item.device}`}
         loading={!items && !error}
         dataSource={[...(items ?? [])].reverse()}
@@ -388,296 +390,306 @@ export function RankTrackingPanel({
   const keywords = lines(text);
   return (
     <div className={styles.stack}>
-      <Text type="secondary">{t("seo.rankHelp")}</Text>
       {!configured && (
         <Alert type="info" showIcon message={t("seo.rankNeedsProvider")} />
       )}
       {(error || loadError) && (
         <Alert type="error" showIcon message={error || loadError} />
       )}
-      <div className={styles.toolbar}>
-        {!!trackers?.length && (
-          <Select
-            aria-label={t("seo.rankTracker")}
-            className={styles.projectSelect}
-            value={trackerId}
-            onChange={setTrackerId}
-            options={trackers.map((item) => ({
-              value: item.tracker_id,
-              label: item.domain,
-            }))}
-          />
-        )}
-        <Button onClick={() => setCreating((value) => !value)}>
-          {t("seo.rankNew")}
-        </Button>
-      </div>
-      {trackers?.length === 0 && !creating && (
-        <Alert type="info" message={t("seo.rankNone")} />
-      )}
-      {creating && (
-        <NewTracker
-          projectId={projectId}
-          domain={domain}
-          onCreated={(next) => {
-            setCreating(false);
-            show(next);
-          }}
-        />
-      )}
-      {tracker && (
-        <Card size="small" title={tracker.domain}>
-          <div className={styles.stack}>
-            <div className={styles.toolbar}>
+      <Card size="small" title={t("seo.rankTrackers")}>
+        <div className={styles.stack}>
+          <div className={styles.toolbar}>
+            {!!trackers?.length && (
               <Select
-                aria-label={t("seo.rankDevices")}
-                value={tracker.devices}
-                disabled={!!busy}
-                onChange={(devices) =>
-                  act("settings", async () =>
-                    show(
-                      await seoApi.updateRankTracker(
-                        projectId,
-                        tracker.tracker_id,
-                        { devices },
-                      ),
-                    ),
-                  )
-                }
-                options={DEVICES.map((value) => ({
-                  value,
-                  label: t(`seo.rankDevices_${value}`),
+                aria-label={t("seo.rankTracker")}
+                className={styles.projectSelect}
+                value={trackerId}
+                onChange={setTrackerId}
+                options={trackers.map((item) => ({
+                  value: item.tracker_id,
+                  label: item.domain,
                 }))}
               />
-              <Select
-                aria-label={t("seo.rankDepth")}
-                value={tracker.depth}
-                disabled={!!busy}
-                onChange={(depth) =>
-                  act("settings", async () =>
-                    show(
-                      await seoApi.updateRankTracker(
-                        projectId,
-                        tracker.tracker_id,
-                        { depth },
-                      ),
-                    ),
-                  )
-                }
-                options={DEPTHS.map((value) => ({
-                  value,
-                  label: t("seo.rankDepthOption", { depth: value }),
-                }))}
-              />
-              <Select
-                aria-label={t("seo.rankCompare")}
-                value={compare}
-                onChange={setCompare}
-                options={COMPARES.map((value) => ({
-                  value,
-                  label: t(`seo.rankCompare_${value}`),
-                }))}
-              />
-              <Popconfirm
-                title={t("seo.rankCheck")}
-                description={t("seo.rankPaidConfirm", {
-                  checks: tracker.keyword_count * shown(tracker.devices).length,
-                  cost: usd(tracker.estimate_usd),
-                })}
-                okText={t("seo.serpConfirmBuy")}
-                cancelText={t("seo.cancel")}
-                onConfirm={() => act("check", check)}
-                disabled={
-                  !configured || running || !tracker.keyword_count || !!busy
-                }
-              >
-                <Button
-                  type="primary"
-                  loading={busy === "check"}
-                  disabled={!configured || running || !tracker.keyword_count}
-                >
-                  {t("seo.rankCheck")}
-                </Button>
-              </Popconfirm>
-              <Text type="secondary">
-                {t("seo.rankEstimate", { cost: usd(tracker.estimate_usd) })}
-              </Text>
-              <Popconfirm
-                title={t("seo.rankDeleteConfirm")}
-                okText={t("seo.rankDelete")}
-                cancelText={t("seo.cancel")}
-                onConfirm={() =>
-                  act("delete", async () => {
-                    await seoApi.deleteRankTracker(
-                      projectId,
-                      tracker.tracker_id,
-                    );
-                    const rest = (trackers ?? []).filter(
-                      (item) => item.tracker_id !== tracker.tracker_id,
-                    );
-                    setTrackers(rest);
-                    setTrackerId(rest[0]?.tracker_id);
-                    setResults(undefined);
-                  })
-                }
-                disabled={running || !!busy}
-              >
-                <Button danger disabled={running}>
-                  {t("seo.rankDelete")}
-                </Button>
-              </Popconfirm>
-            </div>
-            {run?.status === "running" ? (
-              <Space wrap>
-                <Text>
-                  {t("seo.rankRunning", {
-                    done: run.checks_done,
-                    total: run.checks_total,
-                  })}
-                </Text>
-                <Progress
-                  className={styles.projectSelect}
-                  percent={Math.round(
-                    (100 * run.checks_done) / Math.max(run.checks_total, 1),
-                  )}
-                  size="small"
-                />
-              </Space>
-            ) : run ? (
-              <Space wrap>
-                <Tag>{t(`seo.status_${run.status}`)}</Tag>
-                <Text>
-                  {tracker.last_checked_at
-                    ? t("seo.rankLastChecked", {
-                        date: formatServerIsoDateTime(
-                          tracker.last_checked_at,
-                          timeZone,
-                        ),
-                      })
-                    : t("seo.rankNever")}
-                </Text>
-                <Text>
-                  {t("seo.cost", {
-                    cost:
-                      run.cost_usd == null
-                        ? t("seo.missing")
-                        : usd(run.cost_usd),
-                  })}
-                </Text>
-                {run.checks_failed > 0 && (
-                  <Text type="warning">
-                    {t("seo.rankFailedChecks", { count: run.checks_failed })}
-                  </Text>
-                )}
-                <AskExpertButton
-                  disabled={!!busy}
-                  what={t("seo.askExpertWhat.rank", { id: tracker.tracker_id })}
-                />
-              </Space>
-            ) : (
-              <Text type="secondary">{t("seo.rankNever")}</Text>
             )}
-            <Input.TextArea
-              aria-label={t("seo.rankAddKeywords")}
-              value={text}
-              onChange={(event) => setText(event.target.value)}
-              placeholder={t("seo.rankKeywords")}
-              autoSize={{ minRows: 2, maxRows: 6 }}
-            />
-            <div className={styles.toolbar}>
-              <Button
-                loading={busy === "add"}
-                disabled={!keywords.length || !!busy}
-                onClick={() =>
-                  act("add", async () => {
-                    await seoApi.addRankKeywords(
-                      projectId,
-                      tracker.tracker_id,
-                      keywords,
-                    );
-                    setText("");
-                    await reload(tracker.tracker_id);
-                  })
-                }
-              >
-                {t("seo.rankAddKeywords")}
-              </Button>
-              <Button onClick={() => act("saved", fillSaved)}>
-                {t("seo.lookupUseSaved")}
-              </Button>
-              <Text type="secondary">
-                {t("seo.rankKeywordCount", {
-                  count: tracker.keyword_count,
-                  max: MAX_KEYWORDS,
-                })}
-              </Text>
-            </div>
-            <Table<RankRow>
-              rowKey="keyword_id"
-              dataSource={current.rows}
-              pagination={{ pageSize: 50, showSizeChanger: false }}
-              locale={{ emptyText: t("seo.rankEmpty") }}
-              columns={[
-                { title: t("seo.keyword"), dataIndex: "keyword" },
-                ...shown(tracker.devices).map((device) => ({
-                  title: t(`seo.device_${device}`),
-                  key: device,
-                  width: 130,
-                  sorter: (a: RankRow, b: RankRow) =>
-                    (a[device].position ?? 999) - (b[device].position ?? 999),
-                  render: (_: unknown, row: RankRow) => (
-                    <Position cell={row[device]} />
-                  ),
-                })),
-                {
-                  title: t("seo.serpPage"),
-                  key: "url",
-                  render: (_, row) => {
-                    const url = safeHttpUrl(row[shown(tracker.devices)[0]].url);
-                    return url ? (
-                      <a href={url} target="_blank" rel="noopener noreferrer">
-                        {new URL(url).pathname}
-                      </a>
-                    ) : (
-                      "—"
-                    );
-                  },
-                },
-                {
-                  key: "actions",
-                  width: 170,
-                  render: (_, row) => (
-                    <Space size={4}>
-                      <Button size="small" onClick={() => setHistoryRow(row)}>
-                        {t("seo.rankHistory")}
-                      </Button>
-                      <Popconfirm
-                        title={t("seo.rankRemoveConfirm")}
-                        okText={t("seo.rankRemove")}
-                        cancelText={t("seo.cancel")}
-                        onConfirm={() =>
-                          act("remove", async () => {
-                            await seoApi.removeRankKeyword(
-                              projectId,
-                              tracker.tracker_id,
-                              row.keyword_id,
-                            );
-                            await reload(tracker.tracker_id);
-                          })
-                        }
-                      >
-                        <Button size="small" disabled={!!busy}>
-                          {t("seo.rankRemove")}
-                        </Button>
-                      </Popconfirm>
-                    </Space>
-                  ),
-                },
-              ]}
-            />
+            <Button onClick={() => setCreating((value) => !value)}>
+              {t("seo.rankNew")}
+            </Button>
           </div>
-        </Card>
-      )}
+          {creating && (
+            <NewTracker
+              projectId={projectId}
+              domain={domain}
+              onCreated={(next) => {
+                setCreating(false);
+                show(next);
+              }}
+            />
+          )}
+          {trackers?.length === 0 && !creating && (
+            <Empty
+              image={Empty.PRESENTED_IMAGE_SIMPLE}
+              description={t("seo.rankNone")}
+            />
+          )}
+          {tracker && (
+            <>
+              <div className={styles.toolbar}>
+                <Select
+                  aria-label={t("seo.rankDevices")}
+                  value={tracker.devices}
+                  disabled={!!busy}
+                  onChange={(devices) =>
+                    act("settings", async () =>
+                      show(
+                        await seoApi.updateRankTracker(
+                          projectId,
+                          tracker.tracker_id,
+                          { devices },
+                        ),
+                      ),
+                    )
+                  }
+                  options={DEVICES.map((value) => ({
+                    value,
+                    label: t(`seo.rankDevices_${value}`),
+                  }))}
+                />
+                <Select
+                  aria-label={t("seo.rankDepth")}
+                  value={tracker.depth}
+                  disabled={!!busy}
+                  onChange={(depth) =>
+                    act("settings", async () =>
+                      show(
+                        await seoApi.updateRankTracker(
+                          projectId,
+                          tracker.tracker_id,
+                          { depth },
+                        ),
+                      ),
+                    )
+                  }
+                  options={DEPTHS.map((value) => ({
+                    value,
+                    label: t("seo.rankDepthOption", { depth: value }),
+                  }))}
+                />
+                <Select
+                  aria-label={t("seo.rankCompare")}
+                  value={compare}
+                  onChange={setCompare}
+                  options={COMPARES.map((value) => ({
+                    value,
+                    label: t(`seo.rankCompare_${value}`),
+                  }))}
+                />
+                <Popconfirm
+                  title={t("seo.rankCheck")}
+                  description={t("seo.rankPaidConfirm", {
+                    checks:
+                      tracker.keyword_count * shown(tracker.devices).length,
+                    cost: usd(tracker.estimate_usd),
+                  })}
+                  okText={t("seo.serpConfirmBuy")}
+                  cancelText={t("seo.cancel")}
+                  onConfirm={() => act("check", check)}
+                  disabled={
+                    !configured || running || !tracker.keyword_count || !!busy
+                  }
+                >
+                  <Button
+                    type="primary"
+                    loading={busy === "check"}
+                    disabled={!configured || running || !tracker.keyword_count}
+                  >
+                    {t("seo.rankCheck")}
+                  </Button>
+                </Popconfirm>
+                <Text type="secondary">
+                  {t("seo.rankEstimate", { cost: usd(tracker.estimate_usd) })}
+                </Text>
+                <Popconfirm
+                  title={t("seo.rankDeleteConfirm")}
+                  okText={t("seo.rankDelete")}
+                  cancelText={t("seo.cancel")}
+                  onConfirm={() =>
+                    act("delete", async () => {
+                      await seoApi.deleteRankTracker(
+                        projectId,
+                        tracker.tracker_id,
+                      );
+                      const rest = (trackers ?? []).filter(
+                        (item) => item.tracker_id !== tracker.tracker_id,
+                      );
+                      setTrackers(rest);
+                      setTrackerId(rest[0]?.tracker_id);
+                      setResults(undefined);
+                    })
+                  }
+                  disabled={running || !!busy}
+                >
+                  <Button danger disabled={running}>
+                    {t("seo.rankDelete")}
+                  </Button>
+                </Popconfirm>
+              </div>
+              {run?.status === "running" ? (
+                <Space wrap>
+                  <Text>
+                    {t("seo.rankRunning", {
+                      done: run.checks_done,
+                      total: run.checks_total,
+                    })}
+                  </Text>
+                  <Progress
+                    className={styles.projectSelect}
+                    percent={Math.round(
+                      (100 * run.checks_done) / Math.max(run.checks_total, 1),
+                    )}
+                    size="small"
+                  />
+                </Space>
+              ) : run ? (
+                <Space wrap>
+                  <Tag>{t(`seo.status_${run.status}`)}</Tag>
+                  <Text>
+                    {tracker.last_checked_at
+                      ? t("seo.rankLastChecked", {
+                          date: formatServerIsoDateTime(
+                            tracker.last_checked_at,
+                            timeZone,
+                          ),
+                        })
+                      : t("seo.rankNever")}
+                  </Text>
+                  <Text>
+                    {t("seo.cost", {
+                      cost:
+                        run.cost_usd == null
+                          ? t("seo.missing")
+                          : usd(run.cost_usd),
+                    })}
+                  </Text>
+                  {run.checks_failed > 0 && (
+                    <Text type="warning">
+                      {t("seo.rankFailedChecks", { count: run.checks_failed })}
+                    </Text>
+                  )}
+                  <AskExpertButton
+                    disabled={!!busy}
+                    what={t("seo.askExpertWhat.rank", {
+                      id: tracker.tracker_id,
+                    })}
+                  />
+                </Space>
+              ) : (
+                <Text type="secondary">{t("seo.rankNever")}</Text>
+              )}
+              <Input.TextArea
+                aria-label={t("seo.rankAddKeywords")}
+                value={text}
+                onChange={(event) => setText(event.target.value)}
+                placeholder={t("seo.rankKeywords")}
+                autoSize={{ minRows: 2, maxRows: 6 }}
+              />
+              <div className={styles.toolbar}>
+                <Button
+                  loading={busy === "add"}
+                  disabled={!keywords.length || !!busy}
+                  onClick={() =>
+                    act("add", async () => {
+                      await seoApi.addRankKeywords(
+                        projectId,
+                        tracker.tracker_id,
+                        keywords,
+                      );
+                      setText("");
+                      await reload(tracker.tracker_id);
+                    })
+                  }
+                >
+                  {t("seo.rankAddKeywords")}
+                </Button>
+                <Button onClick={() => act("saved", fillSaved)}>
+                  {t("seo.lookupUseSaved")}
+                </Button>
+                <Text type="secondary">
+                  {t("seo.rankKeywordCount", {
+                    count: tracker.keyword_count,
+                    max: MAX_KEYWORDS,
+                  })}
+                </Text>
+              </div>
+              <Table<RankRow>
+                size="small"
+                rowKey="keyword_id"
+                dataSource={current.rows}
+                pagination={{ pageSize: 50, showSizeChanger: false }}
+                locale={{ emptyText: t("seo.rankEmpty") }}
+                columns={[
+                  { title: t("seo.keyword"), dataIndex: "keyword" },
+                  ...shown(tracker.devices).map((device) => ({
+                    title: t(`seo.device_${device}`),
+                    key: device,
+                    width: 130,
+                    sorter: (a: RankRow, b: RankRow) =>
+                      (a[device].position ?? 999) - (b[device].position ?? 999),
+                    render: (_: unknown, row: RankRow) => (
+                      <Position cell={row[device]} />
+                    ),
+                  })),
+                  {
+                    title: t("seo.serpPage"),
+                    key: "url",
+                    render: (_, row) => {
+                      const url = safeHttpUrl(
+                        row[shown(tracker.devices)[0]].url,
+                      );
+                      return url ? (
+                        <a href={url} target="_blank" rel="noopener noreferrer">
+                          {new URL(url).pathname}
+                        </a>
+                      ) : (
+                        "—"
+                      );
+                    },
+                  },
+                  {
+                    key: "actions",
+                    width: 170,
+                    render: (_, row) => (
+                      <Space size={4}>
+                        <Button size="small" onClick={() => setHistoryRow(row)}>
+                          {t("seo.rankHistory")}
+                        </Button>
+                        <Popconfirm
+                          title={t("seo.rankRemoveConfirm")}
+                          okText={t("seo.rankRemove")}
+                          cancelText={t("seo.cancel")}
+                          onConfirm={() =>
+                            act("remove", async () => {
+                              await seoApi.removeRankKeyword(
+                                projectId,
+                                tracker.tracker_id,
+                                row.keyword_id,
+                              );
+                              await reload(tracker.tracker_id);
+                            })
+                          }
+                        >
+                          <Button size="small" disabled={!!busy}>
+                            {t("seo.rankRemove")}
+                          </Button>
+                        </Popconfirm>
+                      </Space>
+                    ),
+                  },
+                ]}
+              />
+            </>
+          )}
+        </div>
+      </Card>
       {tracker && (
         <History
           projectId={projectId}

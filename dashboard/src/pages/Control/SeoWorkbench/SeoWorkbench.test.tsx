@@ -254,9 +254,9 @@ describe("SEO native workflow", () => {
     expect(
       screen.getByRole("button", { name: "seo.runResearch" }),
     ).toBeDisabled();
-    fireEvent.click(screen.getByRole("tab", { name: "seo.saved" }));
-    fireEvent.click(screen.getByRole("tab", { name: "seo.reports" }));
-    fireEvent.click(screen.getByRole("tab", { name: "seo.research" }));
+    fireEvent.click(screen.getByRole("button", { name: "seo.saved" }));
+    fireEvent.click(screen.getByRole("button", { name: "seo.reports" }));
+    fireEvent.click(screen.getByRole("button", { name: "seo.research" }));
     fireEvent.click(screen.getByRole("checkbox", { name: "seo.clickstream" }));
     expect(seoApi.research).not.toHaveBeenCalled();
     await startResearch();
@@ -352,11 +352,65 @@ describe("SEO native workflow", () => {
     ]);
     setup("/workbench/seo-workbench.main?project=p2&view=reports");
     await waitFor(() => expect(seoApi.reports).toHaveBeenCalledWith("p2"));
-    expect(screen.getByRole("tab", { name: "seo.reports" })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    expect(screen.getByRole("button", { name: "seo.reports" })).toHaveAttribute(
+      "aria-current",
+      "page",
     );
+    expect(
+      screen.getByRole("heading", { name: "seo.reports" }),
+    ).toBeInTheDocument();
     expect(seoApi.research).not.toHaveBeenCalled();
+  });
+  it("keeps what was typed in a section after switching to another and back", async () => {
+    setup();
+    fireEvent.change(await screen.findByLabelText("seo.seeds"), {
+      target: { value: "kept seed" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "seo.saved" }));
+    expect(screen.getByLabelText("seo.seeds")).not.toBeVisible();
+    expect(screen.getByRole("heading", { name: "seo.saved" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "seo.research" }));
+    expect(screen.getByLabelText("seo.seeds")).toHaveValue("kept seed");
+    expect(screen.getByLabelText("seo.seeds")).toBeVisible();
+  });
+  it("opens the research section for a view it does not know", async () => {
+    setup("/workbench/seo-workbench.main?project=p1&view=bogus");
+    expect(await screen.findByLabelText("seo.seeds")).toBeVisible();
+    expect(
+      screen.getByRole("button", { name: "seo.research" }),
+    ).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("heading", { name: "seo.research" })).toBeVisible();
+  });
+  it("names the project's market and language, or shows the codes it has no name for", async () => {
+    vi.mocked(seoApi.projects).mockResolvedValue([
+      project,
+      {
+        ...project,
+        project_id: "p2",
+        name: "Elsewhere",
+        location_code: 2250,
+        language_code: "fr",
+      },
+    ]);
+    setup();
+    expect(await screen.findByText("seo.us · seo.english")).toBeVisible();
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "seo.project" }));
+    fireEvent.click(await screen.findByTitle("Elsewhere · example.com"));
+    expect(await screen.findByText("2250 · fr")).toBeVisible();
+  });
+  it("lists the US market first when creating a project", async () => {
+    setup();
+    await screen.findByLabelText("seo.seeds");
+    fireEvent.click(screen.getByRole("button", { name: "seo.createProject" }));
+    fireEvent.mouseDown(
+      await screen.findByRole("combobox", { name: "seo.market" }),
+    );
+    await screen.findByTitle("seo.au");
+    expect(
+      [...document.querySelectorAll(".ant-select-item-option")].map((item) =>
+        item.getAttribute("title"),
+      ),
+    ).toEqual(["seo.us", "seo.uk", "seo.ca", "seo.au"]);
   });
   it("opens the linked report's preview from a chat report link", async () => {
     vi.mocked(seoApi.projects).mockResolvedValue([
@@ -617,7 +671,7 @@ describe("SEO native workflow", () => {
     setup();
     await screen.findByLabelText("seo.seeds");
     expect(seoApi.context).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("tab", { name: "seo.context" }));
+    fireEvent.click(screen.getByRole("button", { name: "seo.context" }));
     fireEvent.change(
       await screen.findByLabelText("seo.section_business_overview"),
       { target: { value: "Short drama apps" } },
