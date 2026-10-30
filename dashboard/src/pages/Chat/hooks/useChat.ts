@@ -735,6 +735,11 @@ export function convertHistoryMessages(
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 
+/** Server page cap (HISTORY_MAX_LIMIT) used while reaching back to the latest user message. */
+const LATEST_TURN_PAGE_SIZE = 200;
+/** Stop reaching back after this many rows; a longer turn keeps the old behavior. */
+const LATEST_TURN_MAX_ROWS = 1000;
+
 async function loadThreadHistory(
   agentId: string,
   threadId: string,
@@ -763,6 +768,28 @@ async function loadThreadHistory(
     offset,
     cursor: params.cursor,
   });
+  // The latest page must reach back to the latest user message. A turn with
+  // many tool calls fills the page with its own rows, and without that user
+  // row mergeHistoryWithLocalTail cannot tell the turn is already stored, so
+  // the bubbles still on screen were appended under the stored reply.
+  let rowsRead = limit;
+  if (offset === 0 && !params.cursor) {
+    while (
+      history.has_more &&
+      rowsRead < LATEST_TURN_MAX_ROWS &&
+      !history.messages.some((message) => message.role === "user")
+    ) {
+      const older = await octopThreadsApi.history(agentId, threadId, {
+        limit: LATEST_TURN_PAGE_SIZE,
+        offset: rowsRead,
+        cursor: history.next_cursor,
+      });
+      history.messages = [...older.messages, ...history.messages];
+      history.has_more = older.has_more;
+      history.next_cursor = older.next_cursor;
+      rowsRead += LATEST_TURN_PAGE_SIZE;
+    }
+  }
   const artifacts = normalizeThreadArtifacts(
     history.artifacts,
     agentId,
@@ -793,7 +820,7 @@ async function loadThreadHistory(
   return {
     messages,
     hasMore: Boolean(history.has_more),
-    nextOffset: offset + limit,
+    nextOffset: offset + rowsRead,
     nextCursor: history.next_cursor ?? null,
     turnActive: Boolean(history.turn_active),
     artifacts,
@@ -1001,7 +1028,11 @@ export function useChat(
         const keptOlder = firstOverlap > 0;
         chatStore.setHistoryPage(
           key,
-          mergeHistoryWithLocalTail(loaded.messages, current.messages),
+          mergeHistoryWithLocalTail(
+            loaded.messages,
+            current.messages,
+            current.isStreaming,
+          ),
           {
             hasMore: keptOlder ? current.historyHasMore : loaded.hasMore,
             nextOffset: keptOlder
@@ -1130,7 +1161,11 @@ export function useChat(
         const keptOlder = firstOverlap > 0;
         chatStore.setHistoryPage(
           key,
-          mergeHistoryWithLocalTail(latest, current.messages),
+          mergeHistoryWithLocalTail(
+            latest,
+            current.messages,
+            current.isStreaming,
+          ),
           {
             hasMore: keptOlder ? current.historyHasMore : hasMore,
             nextOffset: keptOlder ? current.historyNextOffset : nextOffset,

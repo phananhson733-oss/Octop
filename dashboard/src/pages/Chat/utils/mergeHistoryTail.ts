@@ -20,25 +20,30 @@ function inFlightTail(current: ChatMessage[]): ChatMessage[] {
 
 /**
  * True when `base` already ends with this local turn (server persisted it
- * under different ids). A later send of the same text is kept.
+ * under different ids).
+ *
+ * The server writes a dashboard turn's rows when the turn ends, so a turn
+ * still streaming is never in `base` yet: a later send of the same text is
+ * kept while it runs. A finished turn matches on the user text alone.
+ * Comparing the browser clock with the stored timestamp treated the finished
+ * turn as a new send whenever the browser ran a second ahead, and its
+ * bubbles were drawn again under the stored reply.
  */
 function sameTurnAlreadyLoaded(
   base: ChatMessage[],
   tail: ChatMessage[],
+  isStreaming: boolean,
 ): boolean {
+  if (isStreaming || tail.some((message) => message.status === "streaming")) {
+    return false;
+  }
   const tailUserIdx = lastUserIndex(tail);
   if (tailUserIdx < 0) return false;
-  const tailUser = tail[tailUserIdx];
-  const tailText = textOf(tailUser);
+  const tailText = textOf(tail[tailUserIdx]);
   if (!tailText) return false;
   const baseUserIdx = lastUserIndex(base);
   if (baseUserIdx < 0) return false;
-  const baseUser = base[baseUserIdx];
-  if (textOf(baseUser) !== tailText) return false;
-  const baseTs = baseUser.timestamp || 0;
-  const tailTs = tailUser.timestamp || 0;
-  if (baseTs > 0 && tailTs > baseTs + 1000) return false;
-  return true;
+  return textOf(base[baseUserIdx]) === tailText;
 }
 
 /**
@@ -52,6 +57,7 @@ function sameTurnAlreadyLoaded(
 export function mergeHistoryWithLocalTail(
   loaded: ChatMessage[],
   current: ChatMessage[],
+  isStreaming = false,
 ): ChatMessage[] {
   if (current.length === 0) return loaded;
   if (loaded.length === 0) return current;
@@ -63,7 +69,7 @@ export function mergeHistoryWithLocalTail(
 
   if (firstOverlap < 0) {
     const tail = inFlightTail(current);
-    if (sameTurnAlreadyLoaded(loaded, tail)) return loaded;
+    if (sameTurnAlreadyLoaded(loaded, tail, isStreaming)) return loaded;
     return [...loaded, ...tail];
   }
 
@@ -84,6 +90,6 @@ export function mergeHistoryWithLocalTail(
   const loadedOverlap = loaded.findIndex((message) => message.id === overlapId);
   const serverAfter = loadedOverlap >= 0 ? loaded.slice(loadedOverlap + 1) : [];
   if (serverAfter.length === 0) return [...base, ...localTail];
-  if (sameTurnAlreadyLoaded(serverAfter, localTail)) return base;
+  if (sameTurnAlreadyLoaded(serverAfter, localTail, isStreaming)) return base;
   return [...base, ...localTail];
 }
