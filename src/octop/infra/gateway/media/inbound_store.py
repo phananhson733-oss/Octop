@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 import mimetypes
 import re
+import shutil
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +22,8 @@ from octop.infra.gateway.media.constants import INBOUND_DIR
 
 if TYPE_CHECKING:
     from octop_harness.backends.workspace import BackendWorkspace
+
+logger = logging.getLogger(__name__)
 
 MAX_INBOUND_BYTES = upload_mb_to_bytes(DEFAULT_MAX_UPLOAD_MB)
 
@@ -415,11 +420,7 @@ async def write_inbound(
 ) -> InboundFile:
     """Persist bytes under ``inbound/{unix_ts}_{original}``."""
     validate_inbound_size(data, max_bytes=max_bytes)
-    normalized_type = validate_inbound_media_type(media_type, filename)
-
-    display_name = sanitize_inbound_filename(filename)
-    if not Path(display_name).suffix:
-        display_name = f"{display_name}{inbound_extension(display_name, normalized_type)}"
+    display_name, normalized_type = _inbound_target(filename, media_type)
     stored_name = build_timestamped_inbound_name(display_name)
     path = await _unique_inbound_path(workspace, stored_name)
     await workspace.aupload_bytes(path, data)
@@ -429,6 +430,73 @@ async def write_inbound(
         media_type=normalized_type,
         size=len(data),
     )
+
+
+def _inbound_target(filename: str, media_type: str) -> tuple[str, str]:
+    """Return ``(display_name, normalized_media_type)`` for a new inbound file."""
+    normalized_type = validate_inbound_media_type(media_type, filename)
+    display_name = sanitize_inbound_filename(filename)
+    if not Path(display_name).suffix:
+        display_name = f"{display_name}{inbound_extension(display_name, normalized_type)}"
+    return display_name, normalized_type
+
+
+def _place_local_file(source: Path, workspace: BackendWorkspace, path: str) -> bool:
+    """Move *source* onto the on-disk file backing workspace *path*.
+
+    *path* must already exist (an empty placeholder written through the
+    workspace, so the backend picked its real location). Returns ``False``
+    when the workspace has no host file for it (sandbox / object storage).
+    """
+    local = workspace.materialize_local(path)
+    if local is None:
+        return False
+    cache = (workspace.workspace_dir / ".harness-materialize").resolve()
+    if local.resolve().is_relative_to(cache):
+        # Download cache for remote backends, not the stored file.
+        local.unlink(missing_ok=True)
+        return False
+    shutil.move(str(source), str(local))
+    return True
+
+
+async def write_inbound_file(
+    workspace: BackendWorkspace,
+    source: Path,
+    *,
+    filename: str,
+    media_type: str,
+    max_bytes: int | None = None,
+) -> InboundFile:
+    """Persist host file *source* under ``inbound/`` without reading it into memory.
+
+    Same naming and validation as :func:`write_inbound`. *source* is moved
+    (renamed when on the same filesystem); backends without a host file fall
+    back to a single in-memory upload.
+    """
+    size = source.stat().st_size
+    limit = MAX_INBOUND_BYTES if max_bytes is None else max_bytes
+    if size > limit:
+        max_mb = max(1, limit // (1024 * 1024))
+        raise OctopError(
+            ErrorCode.ATTACHMENT_TOO_LARGE,
+            f"file too large (max {max_mb}MB)",
+            details={"max_mb": max_mb},
+        )
+    display_name, normalized_type = _inbound_target(filename, media_type)
+    stored_name = build_timestamped_inbound_name(display_name)
+    path = await _unique_inbound_path(workspace, stored_name)
+    await workspace.aupload_bytes(path, b"")
+    if not await asyncio.to_thread(_place_local_file, source, workspace, path):
+        logger.warning(
+            "inbound upload %s: workspace has no host file, buffering %d bytes in memory",
+            path,
+            size,
+        )
+        data = await asyncio.to_thread(source.read_bytes)
+        await workspace.aupload_bytes(path, data)
+        source.unlink(missing_ok=True)
+    return InboundFile(path=path, filename=display_name, media_type=normalized_type, size=size)
 
 
 async def read_inbound_bytes(workspace: BackendWorkspace, path: str) -> bytes:
@@ -456,4 +524,5 @@ __all__ = [
     "validate_inbound_media_type",
     "validate_inbound_size",
     "write_inbound",
+    "write_inbound_file",
 ]

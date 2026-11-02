@@ -121,6 +121,11 @@ class PathLayout:
         return self.backups_dir / Path(filename).name
 
     @property
+    def chunked_uploads_dir(self) -> Path:
+        """Unfinished chunked chat uploads: ``~/.octop/uploads/chunked/``."""
+        return self.root / "uploads" / "chunked"
+
+    @property
     def user_avatars_dir(self) -> Path:
         """Uploaded user portraits: ``~/.octop/avatars/users/``."""
         return self.root / "avatars" / "users"

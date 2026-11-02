@@ -7,9 +7,15 @@ from typing import TYPE_CHECKING
 from urllib.parse import quote
 
 from octop.infra.gateway.media.attachment_hints import is_preview_media_type
-from octop.infra.gateway.media.inbound_store import InboundFile, write_inbound
+from octop.infra.gateway.media.inbound_store import (
+    InboundFile,
+    write_inbound,
+    write_inbound_file,
+)
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from octop_harness.backends.workspace import BackendWorkspace
 
 
@@ -62,6 +68,27 @@ async def save_attachment(
     inbound = await write_inbound(
         workspace,
         data,
+        filename=filename,
+        media_type=media_type,
+        max_bytes=max_bytes,
+    )
+    return _stored_from_inbound(inbound)
+
+
+async def save_attachment_file(
+    workspace: BackendWorkspace,
+    source: Path,
+    *,
+    owner_id: int,
+    filename: str,
+    media_type: str,
+    max_bytes: int | None = None,
+) -> StoredAttachment:
+    """Like :func:`save_attachment` for a host file; *source* is moved, not read."""
+    del owner_id  # access control is JWT + agent scope at download time
+    inbound = await write_inbound_file(
+        workspace,
+        source,
         filename=filename,
         media_type=media_type,
         max_bytes=max_bytes,

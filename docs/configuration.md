@@ -153,7 +153,9 @@ Notes:
   100). Existing `config.json` files that omit the key pick up the
   default on load. Change it and restart; reverse proxies may still
   impose their own body-size limit (for example nginx
-  `client_max_body_size`). Agent workspace file upload, plugin ZIPs,
+  `client_max_body_size`, or 100 MB per request on Cloudflare's free
+  plan). The dashboard sends chat attachments above 32 MiB as chunked
+  uploads, so only the per-chunk size has to pass the proxy. Agent workspace file upload, plugin ZIPs,
   and backup archives use separate limits and are not this setting.
 - `plugins.<id>.enabled` is the **global** plugin switch (Dashboard Admin →
   Plugins). Bundled plugins are copied into `~/.octop/plugins/` on init and
@@ -188,7 +190,7 @@ Each variable, when set, takes precedence over the matching key in
 | `OCTOP_ENABLE_DASHBOARD` | bool | `true` | Serve the built React SPA at `/` |
 | `OCTOP_ENABLE_API_DOCS` | bool | `false` | Expose Scalar API docs at `/api/docs` |
 | `OCTOP_REQUIRE_SETUP_PASSWORD` | bool | `true` | Require wizard password during initial setup |
-| `OCTOP_MAX_UPLOAD_MB` | int | `100` | Max upload size in MiB for chat attachments, IM inbound, and knowledge documents (1–1024) |
+| `OCTOP_MAX_UPLOAD_MB` | int | `100` | Max upload size in MiB for chat attachments, IM inbound, and knowledge documents (1–4096) |
 | `OCTOP_SEO_AUDIT_HEADERS` | JSON object | empty | SEO site audit: extra request headers per site, e.g. `{"example.com": {"x-audit-key": "…"}}`. Sent only to that host and its `www.` form (never to other hosts, redirect targets included), so the site's firewall can let the crawler through by a secret header. Read when each audit starts; malformed JSON is logged without its values and ignored |
 | `OCTOP_SEO_AUDIT_CHROMIUM` | path | empty | SEO site audit: the Chromium (or headless shell) binary used to render a sample of the audited pages. Empty uses Playwright's own browser install. If no browser starts, the audit checks the served HTML only and reports `render-unavailable` |
 | `OCTOP_DATABASE_URL` | string | empty | Full DSN — overrides the `OCTOP_DATABASE_*` fields below |

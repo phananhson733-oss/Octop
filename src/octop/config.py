@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_UPLOAD_MB = 100
 MIN_MAX_UPLOAD_MB = 1
-MAX_MAX_UPLOAD_MB = 1024
+MAX_MAX_UPLOAD_MB = 4096
 DEFAULT_BROWSER_IDLE_TIMEOUT_MINUTES = 30
 
 _VALID_DRIVERS = frozenset({"sqlite", "postgresql"})

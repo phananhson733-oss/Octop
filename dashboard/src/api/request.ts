@@ -575,7 +575,7 @@ export type UploadProgressHandler = (percent: number) => void;
  */
 export async function requestUpload<T = unknown>(
   path: string,
-  body: FormData,
+  body: FormData | Blob,
   options: RequestInit = {},
   onProgress?: UploadProgressHandler,
 ): Promise<T> {

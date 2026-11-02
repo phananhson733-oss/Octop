@@ -27,6 +27,7 @@ export function useChatAttachments(agentId: string | null | undefined) {
   const { maxUploadBytes, maxUploadMb } = useServerUploadLimit();
   const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
@@ -68,10 +69,21 @@ export function useChatAttachments(agentId: string | null | undefined) {
       }
 
       setUploading(true);
+      const totalBytes = fileArr.reduce((sum, f) => sum + f.size, 0);
+      const loaded = fileArr.map(() => 0);
+      const reportProgress = () => {
+        if (totalBytes <= 0) return;
+        const sent = loaded.reduce((sum, n) => sum + n, 0);
+        setUploadProgress(Math.min(100, Math.floor((sent / totalBytes) * 100)));
+      };
+      setUploadProgress(totalBytes > 0 ? 0 : null);
       try {
         const results = await Promise.all(
-          fileArr.map(async (file) => {
-            const res = await uploadFile(agentId, file);
+          fileArr.map(async (file, i) => {
+            const res = await uploadFile(agentId, file, (bytes) => {
+              loaded[i] = bytes;
+              reportProgress();
+            });
             const workspacePath = res.path || res.workspace_path;
             const previewUrl =
               res.access_url ||
@@ -99,6 +111,7 @@ export function useChatAttachments(agentId: string | null | undefined) {
         );
       } finally {
         setUploading(false);
+        setUploadProgress(null);
       }
     },
     [agentId, maxUploadBytes, maxUploadMb, t],
@@ -248,6 +261,7 @@ export function useChatAttachments(agentId: string | null | undefined) {
   return {
     attachments,
     uploading,
+    uploadProgress,
     dragOver,
     fileInputRef,
     folderInputRef,

@@ -701,6 +701,11 @@ endpoint (public, mounted directly in `api/app.py`).
 | `WS`/`POST`/`GET`/… | `/browser/...` | user | octop-browser sessions, live stream, record/replay |
 | `POST` | `/browser/shutdown` | user | stop the current user's Octop-managed Chrome |
 | `POST` | `/agents/{aid}/upload` | user | multipart upload → `{workspace}/inbound/` |
+| `POST` | `/agents/{aid}/upload/chunked` | user | start a chunked upload `{filename, size, content_type?}` → `{upload_id, chunk_size, chunk_count, received, expires_at}`; `size` capped at `max_upload_mb` |
+| `PUT` | `/agents/{aid}/upload/chunked/{upload_id}/chunks/{index}` | user | raw body, exactly `chunk_size` bytes (last chunk: the rest); any order, re-send to retry |
+| `GET` | `/agents/{aid}/upload/chunked/{upload_id}` | user | session status; `received` lists stored chunk indexes for resume |
+| `POST` | `/agents/{aid}/upload/chunked/{upload_id}/complete` | user | move the file into `{workspace}/inbound/`; same response as `/upload`; `409 UPLOAD_INCOMPLETE` while chunks are missing |
+| `DELETE` | `/agents/{aid}/upload/chunked/{upload_id}` | user | cancel; idle sessions are also deleted after 24 h |
 | `POST` | `/agents/{aid}/files/access-urls` | user | refresh inbound media URLs (signed) |
 | `GET`  | `/agents/{aid}/files/{path}` | owner | read an inbound file |
 | `POST` | `/downloads/link` | user | multipart `file` → `{url, filename, expires_in}`: short-lived link for in-app browsers (WeChat, …) that cannot save `blob:` downloads; capped at `max_upload_mb` |

@@ -15,6 +15,8 @@ import styles from "../index.module.less";
 interface ChatInputPreviewBarProps {
   attachments: ChatAttachment[];
   uploading: boolean;
+  /** Overall upload percent while ``uploading`` (null when unknown). */
+  uploadProgress?: number | null;
   selectedConnectors: string[];
   selectedKnowledgeBaseIds: string[];
   selectedModel?: string | null;
@@ -90,6 +92,7 @@ function ComposerImagePreview({
 export default function ChatInputPreviewBar({
   attachments,
   uploading,
+  uploadProgress,
   selectedConnectors,
   selectedKnowledgeBaseIds,
   availableConnectors,
@@ -215,6 +218,9 @@ export default function ChatInputPreviewBar({
         <div className={styles.imagePreviewItem}>
           <div className={styles.imagePreviewLoading}>
             <div className={styles.uploadSpinner} />
+            {uploadProgress != null && (
+              <span className={styles.uploadProgress}>{uploadProgress}%</span>
+            )}
           </div>
         </div>
       )}
