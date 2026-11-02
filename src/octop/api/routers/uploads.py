@@ -280,7 +280,7 @@ async def complete_chunked_upload(
 ) -> dict[str, str]:
     ws, upload = await _load_session(agent_id, upload_id, user=user, as_user=as_user, server=server)
     store = chunked_upload_store()
-    assembled = await asyncio.to_thread(store.claim, upload)
+    assembled = await store.claim(upload)
     try:
         payload = await _store_file(
             ws,

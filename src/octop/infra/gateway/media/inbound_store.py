@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import mimetypes
+import os
 import re
 import shutil
 import time
@@ -456,7 +458,10 @@ def _place_local_file(source: Path, workspace: BackendWorkspace, path: str) -> b
         # Download cache for remote backends, not the stored file.
         local.unlink(missing_ok=True)
         return False
-    shutil.move(str(source), str(local))
+    try:
+        os.replace(source, local)
+    except OSError:  # different filesystem
+        shutil.move(str(source), str(local))
     return True
 
 
@@ -487,15 +492,21 @@ async def write_inbound_file(
     stored_name = build_timestamped_inbound_name(display_name)
     path = await _unique_inbound_path(workspace, stored_name)
     await workspace.aupload_bytes(path, b"")
-    if not await asyncio.to_thread(_place_local_file, source, workspace, path):
-        logger.warning(
-            "inbound upload %s: workspace has no host file, buffering %d bytes in memory",
-            path,
-            size,
-        )
-        data = await asyncio.to_thread(source.read_bytes)
-        await workspace.aupload_bytes(path, data)
-        source.unlink(missing_ok=True)
+    try:
+        if not await asyncio.to_thread(_place_local_file, source, workspace, path):
+            logger.warning(
+                "inbound upload %s: workspace has no host file, buffering %d bytes in memory",
+                path,
+                size,
+            )
+            data = await asyncio.to_thread(source.read_bytes)
+            await workspace.aupload_bytes(path, data)
+            source.unlink(missing_ok=True)
+    except BaseException:
+        # Don't leave an empty placeholder the agent could pick up.
+        with contextlib.suppress(Exception):
+            await workspace.adelete(path)
+        raise
     return InboundFile(path=path, filename=display_name, media_type=normalized_type, size=size)
 
 

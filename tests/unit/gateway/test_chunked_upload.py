@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import io
 import os
 from collections.abc import AsyncIterator
@@ -12,6 +13,7 @@ from deepagents.backends.local_shell import LocalShellBackend
 from octop_harness.backends.workspace import BackendWorkspace
 
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.gateway.media import inbound_store
 from octop.infra.gateway.media.chunked_upload import ChunkedUpload, ChunkedUploadStore
 from octop.infra.gateway.media.inbound_store import read_inbound_bytes, write_inbound_file
 
@@ -59,7 +61,7 @@ async def test_chunks_out_of_order_assemble_in_place(tmp_path: Path) -> None:
     assert await _send(store, upload, 0) == 4
     assert store.received(upload) == [0, 2]
     await _send(store, upload, 1)
-    assembled = store.claim(upload)
+    assembled = await store.claim(upload)
     assert assembled.read_bytes() == DATA
 
 
@@ -69,7 +71,7 @@ async def test_resent_chunk_overwrites(tmp_path: Path) -> None:
     await store.write_chunk(upload, 0, _body(b"XXXX"))
     for index in range(3):
         await _send(store, upload, index)
-    assert store.claim(upload).read_bytes() == DATA
+    assert (await store.claim(upload)).read_bytes() == DATA
 
 
 async def test_claim_reports_missing_chunks(tmp_path: Path) -> None:
@@ -77,31 +79,52 @@ async def test_claim_reports_missing_chunks(tmp_path: Path) -> None:
     upload = _create(store)
     await _send(store, upload, 0)
     with pytest.raises(OctopError) as exc:
-        store.claim(upload)
+        await store.claim(upload)
     assert exc.value.code is ErrorCode.UPLOAD_INCOMPLETE
     assert exc.value.details["missing_chunks"] == [1, 2]
 
 
-async def test_claim_detects_chunk_rewritten_during_finish(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_overlapping_resends_of_one_chunk_never_mix(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    upload = _create(store)
+    for index in (0, 2):
+        await _send(store, upload, index)
+
+    async def slow(data: bytes) -> AsyncIterator[bytes]:
+        for byte in data:
+            await asyncio.sleep(0)
+            yield bytes([byte])
+
+    await asyncio.gather(
+        store.write_chunk(upload, 1, slow(b"AAAA")),
+        store.write_chunk(upload, 1, slow(b"BBBB")),
+    )
+    middle = (await store.claim(upload)).read_bytes()[4:8]
+    assert middle in (b"AAAA", b"BBBB")
+    assert not list((tmp_path / "chunked" / upload.upload_id / "parts").iterdir())
+
+
+async def test_failed_resend_keeps_stored_chunk(tmp_path: Path) -> None:
     store = _store(tmp_path)
     upload = _create(store)
     for index in range(3):
         await _send(store, upload, index)
-    session = tmp_path / "chunked" / upload.upload_id
-    real_replace = os.replace
+    with pytest.raises(OctopError):
+        await store.write_chunk(upload, 1, _body(b"zz"))
+    assert store.received(upload) == [0, 1, 2]
+    assert (await store.claim(upload)).read_bytes() == DATA
 
-    def replace_while_resending(src: Path, dst: Path) -> None:
-        # A re-send of chunk 1 starts (drops its marker) right before the rename.
-        (session / "chunks" / "1").unlink(missing_ok=True)
-        real_replace(src, dst)
 
-    monkeypatch.setattr(os, "replace", replace_while_resending)
+async def test_chunk_after_claim_is_not_found(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    upload = _create(store)
+    for index in range(3):
+        await _send(store, upload, index)
+    assembled = await store.claim(upload)
     with pytest.raises(OctopError) as exc:
-        store.claim(upload)
-    assert exc.value.code is ErrorCode.UPLOAD_INCOMPLETE
-    assert (session / "data.bin").exists(), "file goes back so the client can retry"
+        await store.write_chunk(upload, 0, _body(b"XXXX"))
+    assert exc.value.code is ErrorCode.UPLOAD_SESSION_NOT_FOUND
+    assert assembled.read_bytes() == DATA
 
 
 @pytest.mark.parametrize("payload", [b"abc", b"abcde"])
@@ -166,6 +189,19 @@ async def test_idle_sessions_expire_and_get_swept(tmp_path: Path) -> None:
     assert store.get(active.upload_id, agent_id="a1", owner_id=7) == active
 
 
+def test_sweep_keeps_session_still_being_created(tmp_path: Path) -> None:
+    clock = _Clock()
+    store = _store(tmp_path, clock)
+    creating = tmp_path / "chunked" / "01M6DYTKY2S5Q284DWJNJC6F5Z"
+    creating.mkdir(parents=True)  # no manifest yet
+    os.utime(creating, (clock.now, clock.now))
+    assert store.sweep_expired() == 0
+    assert creating.exists()
+    clock.now += store.ttl_seconds + 1
+    assert store.sweep_expired() == 1
+    assert not creating.exists()
+
+
 async def test_create_sweeps_expired_sessions(tmp_path: Path) -> None:
     clock = _Clock()
     store = _store(tmp_path, clock)
@@ -210,6 +246,27 @@ async def test_write_inbound_file_moves_source(tmp_path: Path) -> None:
     assert stored.size == len(DATA)
     assert not source.exists()
     assert await read_inbound_bytes(workspace, stored.path) == DATA
+
+
+async def test_write_inbound_file_removes_placeholder_on_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    ws_dir = tmp_path / "ws"
+    ws_dir.mkdir()
+    workspace = BackendWorkspace(
+        LocalShellBackend(root_dir=str(ws_dir), virtual_mode=False), ws_dir
+    )
+    source = tmp_path / "upload.bin"
+    source.write_bytes(DATA)
+
+    def boom(*_args: object, **_kwargs: object) -> bool:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(inbound_store, "_place_local_file", boom)
+    with pytest.raises(OSError):
+        await write_inbound_file(workspace, source, filename="a.mp4", media_type="video/mp4")
+    assert list((ws_dir / "inbound").iterdir()) == []
+    assert source.exists()
 
 
 async def test_write_inbound_file_enforces_limit(tmp_path: Path) -> None:

@@ -6,6 +6,13 @@ Each session lives in ``{root}/{upload_id}/``:
 * ``data.bin`` — sparse file of the final size; every chunk is written at its
   offset, so chunks may arrive in any order and be re-sent.
 * ``chunks/{index}`` — empty marker written after a chunk was fully stored.
+* ``parts/`` — one temp file per in-flight chunk request.
+
+A chunk request streams into its own part file; only once it has the exact
+length is it copied into ``data.bin`` under a per-session lock, which
+:meth:`ChunkedUploadStore.claim` also takes. Overlapping re-sends of one chunk
+therefore never mix bytes, and a failed re-send leaves the stored chunk alone.
+The lock is in-process (Octop serves from one process).
 
 Bytes stream from the request straight to disk; nothing holds a whole chunk or
 file in memory. Sessions idle longer than the TTL are removed by
@@ -20,6 +27,7 @@ import os
 import re
 import shutil
 import time
+import weakref
 from collections.abc import AsyncIterator, Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -38,6 +46,17 @@ _MANIFEST = "manifest.json"
 _DATA = "data.bin"
 _ASSEMBLED = "assembled.bin"
 _CHUNKS = "chunks"
+_PARTS = "parts"
+
+_LOCKS: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
+
+
+def _session_lock(upload_id: str) -> asyncio.Lock:
+    lock = _LOCKS.get(upload_id)
+    if lock is None:
+        lock = asyncio.Lock()
+        _LOCKS[upload_id] = lock
+    return lock
 
 
 class AsyncByteReader(Protocol):
@@ -107,11 +126,14 @@ class ChunkedUploadStore:
         return self._root / upload_id
 
     def _expired(self, session_dir: Path) -> bool:
-        try:
-            mtime = (session_dir / _MANIFEST).stat().st_mtime
-        except OSError:
-            return True
-        return self._clock() - mtime > self._ttl
+        # A session being created has no manifest yet; age it by the directory.
+        for candidate in (session_dir / _MANIFEST, session_dir):
+            try:
+                mtime = candidate.stat().st_mtime
+            except OSError:
+                continue
+            return self._clock() - mtime > self._ttl
+        return True
 
     def _touch(self, session_dir: Path) -> None:
         now = self._clock()
@@ -148,6 +170,7 @@ class ChunkedUploadStore:
         )
         session_dir = self._root / upload.upload_id
         (session_dir / _CHUNKS).mkdir(parents=True)
+        (session_dir / _PARTS).mkdir()
         with (session_dir / _DATA).open("wb") as fh:
             fh.truncate(size)
         (session_dir / _MANIFEST).write_text(json.dumps(asdict(upload)), encoding="utf-8")
@@ -181,13 +204,16 @@ class ChunkedUploadStore:
         have = set(self.received(upload))
         return [i for i in range(upload.chunk_count) if i not in have]
 
-    def claim(self, upload: ChunkedUpload) -> Path:
+    async def claim(self, upload: ChunkedUpload) -> Path:
         """Take the finished file out of the session; raise if chunks are missing.
 
-        The rename makes later chunk writes fail, and the marker check after it
-        catches a re-send that started earlier (markers are removed before a
-        chunk is rewritten).
+        Runs under the session lock, so no chunk is half-copied into the file;
+        after the rename, later chunk commits fail as not found.
         """
+        async with _session_lock(upload.upload_id):
+            return await asyncio.to_thread(self._claim, upload)
+
+    def _claim(self, upload: ChunkedUpload) -> Path:
         session_dir = self._dir(upload.upload_id)
         missing = self._missing(upload)
         if missing:
@@ -197,10 +223,6 @@ class ChunkedUploadStore:
             os.replace(session_dir / _DATA, assembled)
         except FileNotFoundError as exc:
             raise _not_found(upload.upload_id) from exc
-        missing = self._missing(upload)
-        if missing:
-            self.release(upload, assembled)
-            raise self._incomplete(missing)
         return assembled
 
     @staticmethod
@@ -277,37 +299,59 @@ class ChunkedUploadStore:
         """Stream *body* into chunk *index*; it must be exactly the expected length."""
         expected = upload.chunk_length(index)
         session_dir = self._dir(upload.upload_id)
-        marker = session_dir / _CHUNKS / str(index)
-        await asyncio.to_thread(marker.unlink, missing_ok=True)
+        part = session_dir / _PARTS / f"{index}.{new_ulid()}"
         try:
-            fh: BinaryIO = await asyncio.to_thread((session_dir / _DATA).open, "r+b")
+            fh: BinaryIO = await asyncio.to_thread(part.open, "wb")
         except FileNotFoundError as exc:
             raise _not_found(upload.upload_id) from exc
         written = 0
         try:
-            await asyncio.to_thread(fh.seek, index * upload.chunk_size)
-            pending: list[bytes] = []
-            pending_len = 0
-            async for piece in body:
-                if not piece:
-                    continue
-                written += len(piece)
-                if written > expected:
-                    raise self._bad_length(index, expected, written)
-                pending.append(piece)
-                pending_len += len(piece)
-                if pending_len >= _WRITE_BUFFER:
+            try:
+                pending: list[bytes] = []
+                pending_len = 0
+                async for piece in body:
+                    if not piece:
+                        continue
+                    written += len(piece)
+                    if written > expected:
+                        raise self._bad_length(index, expected, written)
+                    pending.append(piece)
+                    pending_len += len(piece)
+                    if pending_len >= _WRITE_BUFFER:
+                        await asyncio.to_thread(fh.write, b"".join(pending))
+                        pending, pending_len = [], 0
+                if pending:
                     await asyncio.to_thread(fh.write, b"".join(pending))
-                    pending, pending_len = [], 0
-            if pending:
-                await asyncio.to_thread(fh.write, b"".join(pending))
-        finally:
-            await asyncio.to_thread(fh.close)
-        if written != expected:
-            raise self._bad_length(index, expected, written)
-        await asyncio.to_thread(marker.touch)
-        await asyncio.to_thread(self._touch, session_dir)
+            finally:
+                await asyncio.to_thread(fh.close)
+            if written != expected:
+                raise self._bad_length(index, expected, written)
+        except BaseException:
+            await asyncio.to_thread(part.unlink, missing_ok=True)
+            raise
+        # Shielded so a dropped request cannot release the lock mid-copy.
+        await asyncio.shield(self._commit_part(upload, index, part))
         return written
+
+    async def _commit_part(self, upload: ChunkedUpload, index: int, part: Path) -> None:
+        try:
+            async with _session_lock(upload.upload_id):
+                await asyncio.to_thread(self._commit, upload, index, part)
+        finally:
+            await asyncio.to_thread(part.unlink, missing_ok=True)
+
+    def _commit(self, upload: ChunkedUpload, index: int, part: Path) -> None:
+        """Copy a verified part into ``data.bin`` and mark the chunk received."""
+        session_dir = self._dir(upload.upload_id)
+        try:
+            dst = (session_dir / _DATA).open("r+b")
+        except FileNotFoundError as exc:
+            raise _not_found(upload.upload_id) from exc
+        with dst, part.open("rb") as src:
+            dst.seek(index * upload.chunk_size)
+            shutil.copyfileobj(src, dst, _WRITE_BUFFER)
+        (session_dir / _CHUNKS / str(index)).touch()
+        self._touch(session_dir)
 
     @staticmethod
     def _bad_length(index: int, expected: int, got: int) -> OctopError:
