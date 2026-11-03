@@ -3,7 +3,7 @@ import { Menu as MenuIcon } from "lucide-react";
 import PwaInstallPrompt from "../components/PwaInstallPrompt";
 import AppVersionBadge from "../components/AppVersionBadge";
 import CurrentVersionBadge from "../components/CurrentVersionBadge";
-import { useTheme } from "../context/ThemeContext";
+import BrandWordmark from "../components/BrandWordmark";
 import { typeSize } from "../utils/mobileTypeScale";
 
 const { Header: AntHeader } = Layout;
@@ -20,11 +20,6 @@ interface HeaderProps {
  * Desktop GitHub / theme controls moved into the account popover.
  */
 export default function Header({ onToggle, isMobile }: HeaderProps) {
-  const { isDark } = useTheme();
-  const mobileLogoSrc = isDark
-    ? "/logo_horizontal_white.png"
-    : "/logo_horizontal_dark.png";
-
   if (!isMobile) return null;
 
   // iOS PWA (`apple-mobile-web-app-status-bar-style: black-translucent`) draws
@@ -77,18 +72,7 @@ export default function Header({ onToggle, isMobile }: HeaderProps) {
             <MenuIcon size={20} strokeWidth={1.8} />
           </button>
         )}
-        <img
-          src={mobileLogoSrc}
-          alt="octop"
-          style={{
-            height: 36,
-            width: "auto",
-            maxWidth: 160,
-            objectFit: "contain",
-            flexShrink: 0,
-            display: "block",
-          }}
-        />
+        <BrandWordmark size={30} />
         <div
           style={{
             display: "flex",

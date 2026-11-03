@@ -88,7 +88,7 @@ OPENAPI_TAGS: list[dict[str, str]] = [
     },
     {
         "name": "bridge",
-        "description": "Link this Octop to remote Octop instances (HTTP tunnel + remote chat).",
+        "description": "Link this GGwork to remote GGwork instances (HTTP tunnel + remote chat).",
     },
     {
         "name": "knowledge",
@@ -100,7 +100,7 @@ OPENAPI_TAGS: list[dict[str, str]] = [
     },
     {
         "name": "agent-mcp",
-        "description": "Authenticated MCP gateway for external agents to call Octop experts.",
+        "description": "Authenticated MCP gateway for external agents to call GGwork experts.",
     },
     {
         "name": "channels",

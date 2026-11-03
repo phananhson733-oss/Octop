@@ -50,11 +50,9 @@ describe("index.html boot theme", () => {
     );
   });
 
-  it("uses the white vertical mark in dark mode", () => {
-    expect(INDEX_HTML).toContain('src="/logo_vertical_white.svg"');
-    expect(INDEX_HTML).toContain(
-      'html[data-theme="dark"] .octop-boot-logo--dark',
-    );
+  it("uses the transparent GenGrowth mark in both themes", () => {
+    expect(INDEX_HTML).toContain('src="/logo-mark-256.png"');
+    expect(INDEX_HTML).not.toContain("octop-boot-logo--dark");
   });
 
   it("keeps a stored light preference over OS dark", () => {

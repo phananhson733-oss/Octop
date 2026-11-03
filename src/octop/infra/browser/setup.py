@@ -478,7 +478,7 @@ async def uninstall_browser_stream(*, locale: str = "en") -> AsyncIterator[str]:
     ``locale`` is reserved for future i18n of log lines.
     """
     _ = locale
-    yield _sse({"log": "Closing Octop browser sessions…"})
+    yield _sse({"log": "Closing GGwork browser sessions…"})
     closed = await _close_harness_registry()
     if closed:
         yield _sse({"log": f"Closed {closed} in-process session(s)."})

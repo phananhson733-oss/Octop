@@ -9,7 +9,7 @@ import { storeUiLocale, type UiLocale } from "../../utils/locale";
 import { authApi } from "../../api/modules/auth";
 import { preferencesApi } from "../../api/modules/preferences";
 import BootOfflinePanel from "../../components/BootOfflinePanel";
-import { useTheme } from "../../context/ThemeContext";
+import BrandWordmark from "../../components/BrandWordmark";
 import { isNetworkFetchError } from "../../utils/networkError";
 import DatabaseStep from "./steps/DatabaseStep";
 import PasswordStep from "./steps/PasswordStep";
@@ -32,7 +32,6 @@ const { Text } = Typography;
 
 export default function SetupPage() {
   const { t, i18n } = useTranslation();
-  const { isDark } = useTheme();
   const navigate = useNavigate();
   const [checking, setChecking] = useState(true);
   const [offline, setOffline] = useState(false);
@@ -256,15 +255,7 @@ export default function SetupPage() {
         <div className={styles.wizardHeader}>
           <div className={styles.wizardHeaderTop}>
             <div className={styles.wizardHeaderBrand}>
-              <img
-                src={
-                  isDark
-                    ? "/logo_horizontal_white.png"
-                    : "/logo_horizontal_dark.png"
-                }
-                alt="Octop"
-                className={styles.wizardHeaderLogo}
-              />
+              <BrandWordmark size={28} />
               <div className={styles.wizardHeaderBrandText}>
                 <Text type="secondary" className={styles.wizardHeaderSubtitle}>
                   <Wand2 size={11} /> {t("wizard.title")}

@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "Octop",
-  "short_name": "Octop",
+  "name": "GGwork",
+  "short_name": "GGwork",
   "description": "Smarter self-hosted AI assistant — multi-user, multi-agent",
   "start_url": "/",
   "scope": "/",
@@ -25,7 +25,7 @@
       "purpose": "any"
     },
     {
-      "src": "/pwa-512.png",
+      "src": "/pwa-maskable-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"

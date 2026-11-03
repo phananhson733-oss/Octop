@@ -1,6 +1,7 @@
 /** Brand palettes — orthogonal to light/dark mode (`data-theme`). */
 
 export type ThemePalette =
+  | "gengrowth"
   | "rose"
   | "tech"
   | "indigo"
@@ -12,6 +13,7 @@ export type ThemePalette =
   | "custom";
 
 export const VALID_PALETTES: ThemePalette[] = [
+  "gengrowth",
   "rose",
   "tech",
   "indigo",
@@ -25,7 +27,7 @@ export const VALID_PALETTES: ThemePalette[] = [
 /** Curated palettes only — "custom" is handled separately via a hex value. */
 export const CURATED_PALETTES: ThemePalette[] = [...VALID_PALETTES];
 
-export const DEFAULT_PALETTE: ThemePalette = "rose";
+export const DEFAULT_PALETTE: ThemePalette = "gengrowth";
 export const DEFAULT_CUSTOM_COLOR = "#4B74FA";
 
 /** True when the value is one of the curated palette keys (not "custom"/hex). */
@@ -44,6 +46,7 @@ export const PALETTE_STORAGE_KEY = LEGACY_PALETTE_STORAGE_KEY;
 
 /** Swatch color shown in the palette picker (light brand). */
 export const PALETTE_SWATCH: Record<ThemePalette, string> = {
+  gengrowth: "#097550",
   rose: "#E85D75",
   tech: "#4B74FA",
   indigo: "#6366F1",
@@ -74,6 +77,27 @@ export const ANTD_BRAND_TOKENS: Record<
   Exclude<ThemePalette, "custom">,
   { light: AntdBrandTokens; dark: AntdBrandTokens }
 > = {
+  gengrowth: {
+    light: {
+      colorPrimary: "#097550",
+      colorPrimaryHover: "#075F41",
+      colorPrimaryActive: "#064A33",
+      colorLink: "#097550",
+    },
+    dark: {
+      colorPrimary: "#097550",
+      colorPrimaryBg: "rgba(61, 220, 151, 0.14)",
+      colorPrimaryBgHover: "rgba(61, 220, 151, 0.2)",
+      colorPrimaryBorder: "rgba(61, 220, 151, 0.3)",
+      colorPrimaryBorderHover: "rgba(61, 220, 151, 0.4)",
+      colorPrimaryHover: "#075F41",
+      colorPrimaryActive: "#064A33",
+      colorPrimaryText: "#3DDC97",
+      colorPrimaryTextHover: "#74E8B5",
+      colorPrimaryTextActive: "#2FC283",
+      colorLink: "#3DDC97",
+    },
+  },
   rose: {
     light: {
       colorPrimary: "#E85D75",

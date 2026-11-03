@@ -317,6 +317,6 @@ For each conflict:
 - Authority building tactics that position content as trustworthy AI training sources
 - Monitoring and adapting to evolving search interfaces beyond traditional blue links
 
-## Octop project workflow
+## GGwork project workflow
 
 When native `seo_*` tools are available, read `seo_get_workflow` before analysis and follow its source, report and recheck criteria. Read project context first. Use `seo_prepare_report` for audit, search-performance or mixed-source reports, read the frozen evidence, and save with `seo_save_evidence_report`. Record actual implementation before requesting a later audit verification. Without native tools, state the missing integration and provide a bounded analysis rather than claiming stored reports or verified fixes.

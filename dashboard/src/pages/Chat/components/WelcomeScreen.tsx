@@ -1,23 +1,9 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useWelcomeQuickCardsLayout } from "../hooks/useWelcomeQuickCardsLayout";
 import WelcomeQuickCards, { WelcomeQuickCardProbe } from "./WelcomeQuickCards";
 import styles from "../index.module.less";
 
-// Animated WebP keeps alpha on Safari; VP9 WebM alpha is unreliable there.
-const MASCOT_PEEK = "/octop-mascot-peek.webp";
-const MASCOT_TYPE = "/octop-mascot-type.webp";
-const MASCOT_IMAGES = [MASCOT_PEEK, MASCOT_TYPE];
-
-function getRandomMascot(current?: string): string {
-  if (MASCOT_IMAGES.length <= 1) return MASCOT_IMAGES[0];
-  let next = current;
-  // Avoid picking the same image twice in a row.
-  while (next === current) {
-    next = MASCOT_IMAGES[Math.floor(Math.random() * MASCOT_IMAGES.length)];
-  }
-  return next as string;
-}
+const MASCOT_SRC = "/logo-mark-256.png";
 
 export interface WelcomeQuickCard {
   title: string;
@@ -47,7 +33,6 @@ export default function WelcomeScreen({
   isTeam = false,
 }: WelcomeScreenProps) {
   const { t } = useTranslation();
-  const [mascotSrc, setMascotSrc] = useState(MASCOT_PEEK);
   const {
     welcomeRef,
     headingRef,
@@ -60,10 +45,6 @@ export default function WelcomeScreen({
     autoHideMascot,
   } = useWelcomeQuickCardsLayout(quickCards);
 
-  const handleMascotClick = () => {
-    setMascotSrc((prev) => getRandomMascot(prev));
-  };
-
   const showMascot = !hideMascot && !autoHideMascot;
 
   return (
@@ -73,20 +54,10 @@ export default function WelcomeScreen({
           {showMascot && (
             <img
               className={styles.welcomeMascot}
-              src={mascotSrc}
+              src={MASCOT_SRC}
               alt=""
+              aria-hidden
               draggable={false}
-              onClick={handleMascotClick}
-              role="button"
-              tabIndex={0}
-              title={t("chatWelcome.mascotSwitchHint")}
-              aria-label="Octop mascot"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  handleMascotClick();
-                }
-              }}
             />
           )}
           <h1 className={styles.welcomeTitle}>

@@ -19,6 +19,17 @@ export type StoredAppearance = {
 
 const VALID_PREFERENCES: ThemePreference[] = ["system", "light", "dark"];
 
+/**
+ * Written next to the palette once the GenGrowth rebrand has run. Stored
+ * "rose" without it was the old default written on every boot, not a choice,
+ * so it moves to the new default once; a later explicit "rose" sticks.
+ */
+const BRAND_MARKER = "gengrowth";
+
+function migrateOldDefault(palette: ThemePalette): ThemePalette {
+  return palette === "rose" ? DEFAULT_PALETTE : palette;
+}
+
 function isPreference(value: unknown): value is ThemePreference {
   return (
     typeof value === "string" && (VALID_PREFERENCES as string[]).includes(value)
@@ -34,7 +45,7 @@ function isPalette(value: unknown): value is ThemePalette {
 
 function readLegacyPalette(): ThemePalette {
   const stored = localStorage.getItem(LEGACY_PALETTE_STORAGE_KEY);
-  if (isPalette(stored)) return stored;
+  if (isPalette(stored)) return migrateOldDefault(stored);
   return DEFAULT_PALETTE;
 }
 
@@ -68,9 +79,13 @@ export function readStoredAppearance(): StoredAppearance {
       const preference = isPreference(obj.preference)
         ? obj.preference
         : "system";
-      const palette = isPalette(obj.palette)
+      const storedPalette = isPalette(obj.palette)
         ? obj.palette
         : readLegacyPalette();
+      const palette =
+        obj.brand === BRAND_MARKER
+          ? storedPalette
+          : migrateOldDefault(storedPalette);
       const customColor =
         normalizeHexColor(obj.customColor as string) ?? DEFAULT_CUSTOM_COLOR;
       return { preference, palette, customColor };
@@ -93,6 +108,7 @@ export function writeStoredAppearance(appearance: StoredAppearance): void {
     JSON.stringify({
       preference: appearance.preference,
       palette: appearance.palette,
+      brand: BRAND_MARKER,
       customColor:
         normalizeHexColor(appearance.customColor ?? "") ?? DEFAULT_CUSTOM_COLOR,
     }),

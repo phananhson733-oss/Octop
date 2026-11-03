@@ -2,7 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/favico.svg" />
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icon-32x32.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <meta
       name="viewport"
@@ -26,10 +27,10 @@
       name="apple-mobile-web-app-status-bar-style"
       content="black-translucent"
     />
-    <meta name="apple-mobile-web-app-title" content="Octop" />
+    <meta name="apple-mobile-web-app-title" content="GGwork" />
     <!-- Web App Manifest -->
     <link rel="manifest" href="/manifest.json" />
-    <title>Octop</title>
+    <title>GGwork</title>
     <!--
       Resolve dashboard theme before first paint. Must stay a classic script:
       the splash CSS keys off html[data-theme], not prefers-color-scheme,
@@ -133,32 +134,22 @@
         position: absolute;
         inset: 0;
         border-radius: 50%;
-        border: 3px solid rgba(232, 93, 117, 0.18);
-        border-top-color: #e85d75;
+        border: 3px solid rgba(9, 117, 80, 0.18);
+        border-top-color: #097550;
         animation: octop-boot-spin 0.85s linear infinite;
       }
       html[data-theme="dark"] #octop-boot-ring {
-        border-color: rgba(240, 139, 154, 0.22);
-        border-top-color: #f08b9a;
+        border-color: rgba(61, 220, 151, 0.22);
+        border-top-color: #3ddc97;
       }
       .octop-boot-logo {
         position: absolute;
         inset: 14px;
         width: 60px;
         height: 60px;
-        border-radius: 14px;
         object-fit: contain;
         display: block;
         animation: octop-boot-breathe 1.6s ease-in-out infinite;
-      }
-      .octop-boot-logo--dark {
-        display: none;
-      }
-      html[data-theme="dark"] .octop-boot-logo--light {
-        display: none;
-      }
-      html[data-theme="dark"] .octop-boot-logo--dark {
-        display: block;
       }
       #octop-boot-text {
         font-size: 14px;
@@ -278,15 +269,8 @@
         <div id="octop-boot-mark" aria-hidden="true">
           <div id="octop-boot-ring"></div>
           <img
-            class="octop-boot-logo octop-boot-logo--light"
-            src="/logo_vertical_dark.svg"
-            alt=""
-            width="60"
-            height="60"
-          />
-          <img
-            class="octop-boot-logo octop-boot-logo--dark"
-            src="/logo_vertical_white.svg"
+            class="octop-boot-logo"
+            src="/logo-mark-256.png"
             alt=""
             width="60"
             height="60"

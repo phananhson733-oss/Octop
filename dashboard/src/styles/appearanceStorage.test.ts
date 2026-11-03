@@ -17,7 +17,7 @@ afterEach(() => {
 });
 
 describe("appearanceStorage", () => {
-  it("defaults to system preference and rose palette", () => {
+  it("defaults to system preference and the GenGrowth palette", () => {
     expect(readStoredAppearance().preference).toBe("system");
     expect(readStoredAppearance().palette).toBe(DEFAULT_PALETTE);
   });
@@ -84,6 +84,7 @@ describe("appearanceStorage", () => {
     expect(JSON.parse(localStorage.getItem(THEME_STORAGE_KEY)!)).toEqual({
       preference: "light",
       palette: "custom",
+      brand: "gengrowth",
       customColor: "#00aa55",
     });
   });
@@ -99,8 +100,26 @@ describe("appearanceStorage", () => {
     expect(JSON.parse(localStorage.getItem(THEME_STORAGE_KEY)!)).toEqual({
       preference: "dark",
       palette: "amber",
+      brand: "gengrowth",
       customColor: DEFAULT_CUSTOM_COLOR.toLowerCase(),
     });
+  });
+
+  it("moves the old rose default to GenGrowth once", () => {
+    localStorage.setItem(
+      THEME_STORAGE_KEY,
+      JSON.stringify({ preference: "dark", palette: "rose" }),
+    );
+    expect(loadAppearanceOnBoot().palette).toBe(DEFAULT_PALETTE);
+
+    localStorage.setItem(LEGACY_PALETTE_STORAGE_KEY, "rose");
+    localStorage.setItem(THEME_STORAGE_KEY, "light");
+    expect(readStoredAppearance().palette).toBe(DEFAULT_PALETTE);
+  });
+
+  it("keeps rose once it was picked after the rebrand", () => {
+    writeStoredAppearance({ preference: "light", palette: "rose" });
+    expect(loadAppearanceOnBoot().palette).toBe("rose");
   });
 
   it("falls back safely on invalid JSON or unknown values", () => {
