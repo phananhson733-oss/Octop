@@ -29,6 +29,8 @@ from octop.infra.db.migrate import run_migrations
 from octop.infra.db.services import SharedServices, build_shared_services
 from octop.infra.gateway.gateway import Gateway
 from octop.infra.gateway.media.chunked_upload import sweep_chunked_uploads_forever
+from octop.infra.gateway.media.inbound_retention import sweep_inbound_media_forever
+from octop.infra.gateway.process.agent_resolve import harness_workspace_for_agent
 from octop.infra.mobile.config_probe import ensure_mobile_capabilities_probed
 from octop.infra.proactive.scheduler import ProactiveCareScheduler
 from octop.infra.proactive.service import ProactiveCareService
@@ -336,6 +338,7 @@ class OctopServer:
         self._started_at: int | None = None
         self._sso_service: SsoService | None = None
         self._upload_sweeper: asyncio.Task[None] | None = None
+        self._inbound_sweeper: asyncio.Task[None] | None = None
         self._ldap_service: LdapAuthService | None = None
         self._ldap_bind_throttle: LdapBindThrottle | None = None
         self._ldap_bind_throttle_services: SharedServices | None = None
@@ -699,6 +702,23 @@ class OctopServer:
         self._upload_sweeper = asyncio.create_task(
             sweep_chunked_uploads_forever(), name="chunked-upload-sweep"
         )
+        if config.inbound_media_retention_days > 0:
+
+            def _running_workspaces() -> list[tuple[str, Any]]:
+                found: list[tuple[str, Any]] = []
+                for row in registry.list_rows():
+                    workspace = harness_workspace_for_agent(registry, row.agent_id)
+                    if workspace is not None:
+                        found.append((row.agent_id, workspace))
+                return found
+
+            self._inbound_sweeper = asyncio.create_task(
+                sweep_inbound_media_forever(
+                    _running_workspaces,
+                    retention_days=config.inbound_media_retention_days,
+                ),
+                name="inbound-media-retention",
+            )
 
     async def refresh_plugin_channels(self) -> None:
         """Reconcile only changed kinds and report registration failures to callers."""
@@ -773,11 +793,13 @@ class OctopServer:
     async def stop(self) -> None:
         if not self._started:
             return
-        if self._upload_sweeper is not None:
-            self._upload_sweeper.cancel()
-            with suppress(asyncio.CancelledError):
-                await self._upload_sweeper
-            self._upload_sweeper = None
+        for sweeper in (self._upload_sweeper, self._inbound_sweeper):
+            if sweeper is not None:
+                sweeper.cancel()
+                with suppress(asyncio.CancelledError):
+                    await sweeper
+        self._upload_sweeper = None
+        self._inbound_sweeper = None
         try:
             from octop.infra.connectors.gateway import agently_auth
 

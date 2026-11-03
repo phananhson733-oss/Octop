@@ -16,6 +16,8 @@ DEFAULT_MAX_UPLOAD_MB = 100
 MIN_MAX_UPLOAD_MB = 1
 MAX_MAX_UPLOAD_MB = 4096
 DEFAULT_BROWSER_IDLE_TIMEOUT_MINUTES = 30
+# Days an uploaded audio/video chat attachment stays in ``inbound/``; 0 keeps them.
+DEFAULT_INBOUND_MEDIA_RETENTION_DAYS = 7
 
 _VALID_DRIVERS = frozenset({"sqlite", "postgresql"})
 
@@ -143,6 +145,7 @@ class OctopConfig:
     capabilities: CapabilitiesConfig = field(default_factory=CapabilitiesConfig)
     max_upload_mb: int = DEFAULT_MAX_UPLOAD_MB
     browser_idle_timeout_minutes: int = DEFAULT_BROWSER_IDLE_TIMEOUT_MINUTES
+    inbound_media_retention_days: int = DEFAULT_INBOUND_MEDIA_RETENTION_DAYS
 
     @property
     def max_upload_bytes(self) -> int:
@@ -514,6 +517,17 @@ def load_config(path: Path) -> OctopConfig:
                 )
             ),
         )
+    if v := os.environ.get("OCTOP_INBOUND_MEDIA_RETENTION_DAYS"):
+        merged["inbound_media_retention_days"] = _coerce_int(
+            "OCTOP_INBOUND_MEDIA_RETENTION_DAYS",
+            v,
+            int(
+                merged.get(
+                    "inbound_media_retention_days",
+                    DEFAULT_INBOUND_MEDIA_RETENTION_DAYS,
+                )
+            ),
+        )
 
     capabilities = _parse_capabilities_section(raw.get("capabilities"))
     if v := os.environ.get("OCTOP_ENABLE_MOBILE"):
@@ -627,6 +641,15 @@ def load_config(path: Path) -> OctopConfig:
                 merged.get(
                     "browser_idle_timeout_minutes",
                     DEFAULT_BROWSER_IDLE_TIMEOUT_MINUTES,
+                )
+            ),
+        ),
+        inbound_media_retention_days=max(
+            0,
+            int(
+                merged.get(
+                    "inbound_media_retention_days",
+                    DEFAULT_INBOUND_MEDIA_RETENTION_DAYS,
                 )
             ),
         ),
