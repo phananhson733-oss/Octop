@@ -152,7 +152,8 @@ async def redeem_invite(
     """Create a regular user from a one-time invite and return a login token.
 
     Also bootstraps the same default ``general-assistant`` expert as the setup
-    wizard (auto-allocated agent id; setup pins ``main`` for the first admin).
+    wizard (auto-allocated agent id; setup pins ``main`` for the first admin),
+    unless the role names a published template, which is installed instead.
     """
     check_invite_rate_limit(_client_id(request))
     locale = resolve_request_locale(request)

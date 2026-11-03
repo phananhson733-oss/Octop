@@ -446,7 +446,7 @@ async def test_role_default_published_expert_reaches_its_accounts(env):
     _, gus = await account("gus", role_id)
     assert len(await from_template(gus)) == 1
 
-    # An invited account gets it next to the default assistant.
+    # An invited account gets it instead of the default assistant.
     invite = await c.post("/api/users/invites", headers=auth, json={"role": role_id})
     assert invite.status_code == 201, invite.text
     redeem = await c.post(
@@ -456,8 +456,7 @@ async def test_role_default_published_expert_reaches_its_accounts(env):
     assert redeem.status_code == 200, redeem.text
     ivy = bearer(redeem.json()["access_token"])
     ivy_agents = (await c.get("/api/agents", headers=ivy)).json()
-    assert sorted(str(row["template_name"]) for row in ivy_agents) == ["None", "general-assistant"]
-    assert len(await from_template(ivy)) == 1
+    assert [row["published_expert_id"] for row in ivy_agents] == [expert_id]
 
     # So does an account moved into the role.
     hal_id, hal = await account("hal", "user")
@@ -515,6 +514,75 @@ async def test_role_default_published_expert_reaches_its_accounts(env):
     assert "default_expert_installed" not in reordered.json()
     fern_me = await c.get("/api/auth/me", headers=fern)
     assert fern_me.json()["default_published_expert"] == second_id
+
+
+async def test_role_template_replaces_the_default_assistant(env):
+    c, _srv, auth = env
+    source = await c.post(
+        "/api/agents/from-expert/default", headers=auth, json={"name": "pick-source"}
+    )
+    assert source.status_code == 201, source.text
+    published = await c.post(
+        f"/api/agents/{source.json()['agent_id']}/publish-expert",
+        headers=auth,
+        json={"name": "选剧专家", "description": "找剧"},
+    )
+    assert published.status_code == 201, published.text
+    expert_id = published.json()["id"]
+
+    async def role_naming(name: str, template: str) -> str:
+        created = await c.post(
+            "/api/users/roles",
+            headers=auth,
+            json={
+                "user_role_name": name,
+                "permissions": [],
+                "policies": [
+                    {"name": "visible_nav", "value": "chat,workbench"},
+                    # One expert per account: the default assistant must not take the slot.
+                    {"name": "max_agents", "value": "1"},
+                    {"name": "default_published_expert", "value": template},
+                ],
+            },
+        )
+        assert created.status_code == 201, created.text
+        return str(created.json()["user_role_id"])
+
+    async def agents_of(headers: dict[str, str]) -> list[tuple[str | None, str | None]]:
+        rows = (await c.get("/api/agents", headers=headers)).json()
+        return [(row["published_expert_id"], row["template_name"]) for row in rows]
+
+    customer = await role_naming("客户", expert_id)
+    # The Experts page is hidden, yet the account gets only the template.
+    made = await c.post(
+        "/api/users",
+        headers=auth,
+        json={"username": "kim", "password": TEST_PASSWORD, "role": customer},
+    )
+    assert made.status_code == 201, made.text
+    kim = bearer(await login(c, username="kim", password=TEST_PASSWORD))
+    assert await agents_of(kim) == [(expert_id, None)]
+
+    invite = await c.post("/api/users/invites", headers=auth, json={"role": customer})
+    assert invite.status_code == 201, invite.text
+    redeem = await c.post(
+        "/api/auth/invite/redeem",
+        json={"code": invite.json()["code"], "username": "lea", "password": TEST_PASSWORD},
+    )
+    assert redeem.status_code == 200, redeem.text
+    lea = bearer(redeem.json()["access_token"])
+    assert await agents_of(lea) == [(expert_id, None)]
+
+    # A template that no longer exists does not leave the account without an expert.
+    stale = await role_naming("旧客户", "gone")
+    made = await c.post(
+        "/api/users",
+        headers=auth,
+        json={"username": "max", "password": TEST_PASSWORD, "role": stale},
+    )
+    assert made.status_code == 201, made.text
+    max_ = bearer(await login(c, username="max", password=TEST_PASSWORD))
+    assert await agents_of(max_) == [(None, "general-assistant")]
 
 
 async def test_role_default_knowledge_bases_reach_the_first_expert(env):
