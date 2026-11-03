@@ -1,5 +1,7 @@
 """Block ``read_file`` on binary inbound attachments (PDF, Office, …).
 
+Images pass when the thread's current model reads images: deepagents' ``read_file`` then
+returns them as image blocks, so the model can look at frames it extracted itself.
 Video and audio never pass: deepagents would inline the whole file as base64, which
 overflows the provider's per-item limit and breaks every later turn of the thread.
 """
@@ -11,8 +13,9 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
-from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware import AgentMiddleware, ModelRequest, ModelResponse
 from langchain_core.messages import ToolMessage
+from langgraph.config import get_config
 from langgraph.prebuilt.tool_node import ToolCallRequest
 from langgraph.types import Command
 
@@ -30,13 +33,9 @@ _BLOCKED_EXTENSIONS = frozenset(
         ".pptx",
         ".zip",
         ".bin",
-        ".gif",
-        ".webp",
-        ".jpg",
-        ".jpeg",
-        ".png",
     }
 )
+_IMAGE_EXTENSIONS = frozenset({".gif", ".webp", ".jpg", ".jpeg", ".png"})
 _MEDIA_EXTENSIONS = frozenset(
     {
         ".mp4",
@@ -101,7 +100,21 @@ def _is_inbound_attachment(path: str) -> bool:
     return normalized.startswith("inbound/") or "/inbound/" in normalized
 
 
-def read_file_block_reason(path: str) -> str | None:
+def _reads_images(model: Any) -> bool:
+    # octop-harness records the model's input types on the instance it builds; unknown means no
+    supported = getattr(model, "_harness_supported_input", None)
+    return isinstance(supported, (set, frozenset)) and "image" in supported
+
+
+def _thread_id() -> str:
+    try:
+        configurable = get_config().get("configurable") or {}
+    except RuntimeError:  # outside a LangGraph run
+        return ""
+    return str(configurable.get("thread_id") or "")
+
+
+def read_file_block_reason(path: str, *, allow_images: bool = False) -> str | None:
     """Return a rejection message when *path* must not be read via ``read_file``."""
     if not path:
         return None
@@ -112,12 +125,14 @@ def read_file_block_reason(path: str) -> str | None:
             "conversation. Use execute_shell_command with ffprobe/ffmpeg or the clip skill "
             "(extract frames, then read the .jpg frames) instead."
         )
+    if allow_images and ext in _IMAGE_EXTENSIONS:
+        return None
     if ext == ".pdf":
         return (
             f"read_file blocked for binary PDF `{path}`. "
             "Use execute_shell_command with the pdf skill (pdftotext, pdfplumber, etc.) instead."
         )
-    if ext in _BLOCKED_EXTENSIONS:
+    if ext in _BLOCKED_EXTENSIONS or ext in _IMAGE_EXTENSIONS:
         return (
             f"read_file blocked for binary file `{path}`. "
             "Use execute_shell_command or the matching skill instead."
@@ -133,6 +148,32 @@ def read_file_block_reason(path: str) -> str | None:
 class BinaryReadGuardMiddleware(AgentMiddleware[Any, Any]):
     """Reject read_file on PDF/Office inbound attachments before bytes hit context."""
 
+    def __init__(self) -> None:
+        super().__init__()
+        # Tool calls carry no model; remember per thread whether the last model call read images.
+        self._image_threads: dict[str, bool] = {}
+
+    def _note_model(self, request: ModelRequest[Any]) -> None:
+        thread_id = _thread_id()
+        if thread_id:
+            self._image_threads[thread_id] = _reads_images(request.model)
+
+    def wrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], ModelResponse[Any]],
+    ) -> ModelResponse[Any]:
+        self._note_model(request)
+        return handler(request)
+
+    async def awrap_model_call(
+        self,
+        request: ModelRequest[Any],
+        handler: Callable[[ModelRequest[Any]], Awaitable[ModelResponse[Any]]],
+    ) -> ModelResponse[Any]:
+        self._note_model(request)
+        return await handler(request)
+
     async def awrap_tool_call(
         self,
         request: ToolCallRequest,
@@ -147,7 +188,8 @@ class BinaryReadGuardMiddleware(AgentMiddleware[Any, Any]):
         if not isinstance(params, dict):
             params = {}
         path = _read_file_path_from_args(params)
-        reason = read_file_block_reason(path)
+        allow_images = self._image_threads.get(_thread_id(), False)
+        reason = read_file_block_reason(path, allow_images=allow_images)
         if reason is None:
             return await handler(request)
 
