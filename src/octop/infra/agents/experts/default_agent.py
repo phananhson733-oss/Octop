@@ -68,22 +68,6 @@ def role_knowledge_base_ids(server: Any, user_id: int) -> list[str] | None:
     return [kb_id for kb_id in wanted if kb_id in visible] or None
 
 
-def role_names_published_expert(server: Any, user_id: int) -> bool:
-    """True when the user's role names a published template that still exists.
-
-    That template is then the account's first expert, so no default assistant
-    is created next to it.
-    """
-    user = server.services.user_repo.get(user_id)
-    if user is None:
-        return False
-    repo = server.services.published_expert_repo
-    return any(
-        repo.get(expert_id) is not None
-        for expert_id in role_default_published_experts(server.services.db, str(user.role))
-    )
-
-
 async def bootstrap_default_agent(
     registry: Any,
     catalog: ExpertCatalog | None,
@@ -131,15 +115,9 @@ async def try_bootstrap_default_agent(
     locale: str = "zh",
     agent_id: str | None = None,
 ) -> None:
-    """Best-effort wrapper used by HTTP adapters (invite / admin-created account).
-
-    Skipped when the account's role names a published template: that template
-    is installed as the first expert instead.
-    """
+    """Best-effort wrapper used by HTTP adapters (setup / invite)."""
     if server.app_runtime is None:
         logger.warning("skip default agent bootstrap: app_runtime not ready")
-        return
-    if role_names_published_expert(server, user_id):
         return
     try:
         await bootstrap_default_agent(

@@ -153,7 +153,7 @@ async def redeem_invite(
 
     Also bootstraps the same default ``general-assistant`` expert as the setup
     wizard (auto-allocated agent id; setup pins ``main`` for the first admin),
-    unless the role names a published template, which is installed instead.
+    unless a published template the role names was installed.
     """
     check_invite_rate_limit(_client_id(request))
     locale = resolve_request_locale(request)
@@ -170,8 +170,9 @@ async def redeem_invite(
         try_install_role_published_expert,
     )
 
-    await try_bootstrap_default_agent(server, user_id=user.id, locale=user.locale)
+    # The role's templates first: the default assistant is only made when none landed.
     await try_install_role_published_expert(server, user_id=user.id)
+    await try_bootstrap_default_agent(server, user_id=user.id, locale=user.locale)
     secret = server.services.secret_repo.get("jwt")
     ttl = server.services.config.access_token_ttl_seconds
     token = sign_token(secret, sub=user.id, uname=user.username, role=user.role, ttl_seconds=ttl)

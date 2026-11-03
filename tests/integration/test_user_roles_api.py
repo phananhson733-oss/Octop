@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import shutil
+from pathlib import Path
+
 from tests.support.auth import TEST_PASSWORD, bearer, login
 
 
@@ -517,7 +520,7 @@ async def test_role_default_published_expert_reaches_its_accounts(env):
 
 
 async def test_role_template_replaces_the_default_assistant(env):
-    c, _srv, auth = env
+    c, srv, auth = env
     source = await c.post(
         "/api/agents/from-expert/default", headers=auth, json={"name": "pick-source"}
     )
@@ -583,6 +586,19 @@ async def test_role_template_replaces_the_default_assistant(env):
     assert made.status_code == 201, made.text
     max_ = bearer(await login(c, username="max", password=TEST_PASSWORD))
     assert await agents_of(max_) == [(None, "general-assistant")]
+
+    # Nor does one whose snapshot is gone, so installing it fails.
+    shutil.rmtree(Path(srv.services.paths.published_experts_dir) / expert_id)
+    no_snapshot = await role_naming("快照没了", expert_id)
+    invite = await c.post("/api/users/invites", headers=auth, json={"role": no_snapshot})
+    assert invite.status_code == 201, invite.text
+    redeem = await c.post(
+        "/api/auth/invite/redeem",
+        json={"code": invite.json()["code"], "username": "ned", "password": TEST_PASSWORD},
+    )
+    assert redeem.status_code == 200, redeem.text
+    ned = bearer(redeem.json()["access_token"])
+    assert await agents_of(ned) == [(None, "general-assistant")]
 
 
 async def test_role_default_knowledge_bases_reach_the_first_expert(env):

@@ -13,7 +13,6 @@ from octop.infra.agents.experts.default_agent import (
     SETUP_DEFAULT_AGENT_ID,
     bootstrap_default_agent,
     default_home_local_backend,
-    try_bootstrap_default_agent,
 )
 from octop.infra.errors import OctopError
 from octop.infra.utils.host_dirs import host_fs_tree_root
@@ -114,48 +113,3 @@ async def test_bootstrap_requires_catalog() -> None:
     registry.list_agents.return_value = []
     with pytest.raises(OctopError):
         await bootstrap_default_agent(registry, None, user_id=1, locale="zh")
-
-
-def _server_with_role(existing: set[str]) -> MagicMock:
-    server = MagicMock()
-    server.services.user_repo.get.return_value = MagicMock(role="customer")
-    server.services.published_expert_repo.get.side_effect = lambda eid: (
-        object() if eid in existing else None
-    )
-    server.app_runtime.agent_registry.list_agents.return_value = []
-    server.app_runtime.agent_registry.create = AsyncMock()
-    return server
-
-
-@pytest.mark.parametrize(
-    ("templates", "existing", "creates"),
-    [
-        ([], set(), True),
-        (["pick"], {"pick"}, False),
-        (["gone", "pick"], {"pick"}, False),
-        (["gone"], set(), True),
-    ],
-)
-async def test_try_bootstrap_skips_when_role_names_a_template(
-    catalog: ExpertCatalog,
-    monkeypatch: pytest.MonkeyPatch,
-    templates: list[str],
-    existing: set[str],
-    creates: bool,
-) -> None:
-    server = _server_with_role(existing)
-    server.expert_catalog = catalog
-    server.services.user_policy_repo.get.return_value = None
-    server.services.knowledge_repo.list_visible.return_value = []
-    monkeypatch.setattr(
-        "octop.infra.agents.experts.default_agent.role_default_published_experts",
-        lambda _db, _role: templates,
-    )
-    monkeypatch.setattr(
-        "octop.infra.agents.experts.default_agent.role_default_knowledge_bases",
-        lambda _db, _role: [],
-    )
-
-    await try_bootstrap_default_agent(server, user_id=5)
-
-    assert server.app_runtime.agent_registry.create.await_count == (1 if creates else 0)
