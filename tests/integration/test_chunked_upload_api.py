@@ -67,12 +67,17 @@ async def test_chunked_upload_matches_single_upload(env_with_agent: Any) -> None
     )
     assert r.status_code == 200, r.text
     assert r.content == DATA
-    staging = PathLayout.from_env().chunked_uploads_dir
-    assert not (staging / upload_id).exists()
+    session_dir = PathLayout.from_env().chunked_uploads_dir / upload_id
+    assert not (session_dir / "data.bin").exists()
+    assert not (session_dir / "assembled.bin").exists()
 
+    # A client that lost the response can check status and ask again.
+    status = (await client.get(f"{_base(aid)}/{upload_id}", headers=auth)).json()
+    assert status["received"] == list(range(65))
     r = await client.post(f"{_base(aid)}/{upload_id}/complete", headers=auth)
-    assert r.status_code == 404
-    assert r.json()["error"]["code"] == "UPLOAD_SESSION_NOT_FOUND"
+    assert r.status_code == 200, r.text
+    assert r.json() == body
+    assert (await _put(client, aid, auth, upload_id, 0)).status_code == 404
 
 
 async def test_missing_chunks_then_resume(env_with_agent: Any) -> None:

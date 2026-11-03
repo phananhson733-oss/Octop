@@ -268,7 +268,8 @@ async def put_chunk(
     description=(
         "Moves the assembled file into the agent workspace `inbound/` and returns "
         "the same attachment payload as `POST /agents/{agent_id}/upload`. "
-        "Fails with `UPLOAD_INCOMPLETE` while chunks are missing."
+        "Fails with `UPLOAD_INCOMPLETE` while chunks are missing. Repeating the call "
+        "after success returns the same payload until the session expires."
     ),
 )
 async def complete_chunked_upload(
@@ -280,6 +281,9 @@ async def complete_chunked_upload(
 ) -> dict[str, str]:
     ws, upload = await _load_session(agent_id, upload_id, user=user, as_user=as_user, server=server)
     store = chunked_upload_store()
+    done = await asyncio.to_thread(store.receipt, upload)
+    if done is not None:
+        return done
     assembled = await store.claim(upload)
     try:
         payload = await _store_file(
@@ -294,7 +298,7 @@ async def complete_chunked_upload(
     except BaseException:
         await asyncio.to_thread(store.release, upload, assembled)
         raise
-    await asyncio.to_thread(store.discard, upload.upload_id)
+    await asyncio.to_thread(store.finish, upload, payload)
     return payload
 
 

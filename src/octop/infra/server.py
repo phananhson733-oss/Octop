@@ -28,6 +28,7 @@ from octop.infra.db.factory import open_database, should_defer_control_plane_db
 from octop.infra.db.migrate import run_migrations
 from octop.infra.db.services import SharedServices, build_shared_services
 from octop.infra.gateway.gateway import Gateway
+from octop.infra.gateway.media.chunked_upload import sweep_chunked_uploads_forever
 from octop.infra.mobile.config_probe import ensure_mobile_capabilities_probed
 from octop.infra.proactive.scheduler import ProactiveCareScheduler
 from octop.infra.proactive.service import ProactiveCareService
@@ -334,6 +335,7 @@ class OctopServer:
         self._started = False
         self._started_at: int | None = None
         self._sso_service: SsoService | None = None
+        self._upload_sweeper: asyncio.Task[None] | None = None
         self._ldap_service: LdapAuthService | None = None
         self._ldap_bind_throttle: LdapBindThrottle | None = None
         self._ldap_bind_throttle_services: SharedServices | None = None
@@ -694,6 +696,9 @@ class OctopServer:
                 await bridge_mgr.resume_auto_connections()
 
         asyncio.create_task(_resume_bridges(), name="bridge-auto-resume")
+        self._upload_sweeper = asyncio.create_task(
+            sweep_chunked_uploads_forever(), name="chunked-upload-sweep"
+        )
 
     async def refresh_plugin_channels(self) -> None:
         """Reconcile only changed kinds and report registration failures to callers."""
@@ -768,6 +773,11 @@ class OctopServer:
     async def stop(self) -> None:
         if not self._started:
             return
+        if self._upload_sweeper is not None:
+            self._upload_sweeper.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._upload_sweeper
+            self._upload_sweeper = None
         try:
             from octop.infra.connectors.gateway import agently_auth
 

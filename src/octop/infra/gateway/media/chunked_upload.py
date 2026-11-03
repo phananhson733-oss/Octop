@@ -7,6 +7,9 @@ Each session lives in ``{root}/{upload_id}/``:
   offset, so chunks may arrive in any order and be re-sent.
 * ``chunks/{index}`` — empty marker written after a chunk was fully stored.
 * ``parts/`` — one temp file per in-flight chunk request.
+* ``receipt.json`` — the attachment payload, written once the file is stored;
+  the session then keeps only its manifest, chunk markers and receipt until the
+  TTL, so a client that lost the completion response can ask again.
 
 A chunk request streams into its own part file; only once it has the exact
 length is it copied into ``data.bin`` under a per-session lock, which
@@ -16,13 +19,15 @@ The lock is in-process (Octop serves from one process).
 
 Bytes stream from the request straight to disk; nothing holds a whole chunk or
 file in memory. Sessions idle longer than the TTL are removed by
-:meth:`ChunkedUploadStore.sweep_expired`.
+:meth:`ChunkedUploadStore.sweep_expired`, which the server runs at startup and
+then hourly (:func:`sweep_chunked_uploads_forever`).
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import os
 import re
 import shutil
@@ -37,6 +42,8 @@ from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.utils.paths import PathLayout
 from octop.infra.utils.ulid import new_ulid
 
+logger = logging.getLogger(__name__)
+
 CHUNK_BYTES = 32 * 1024 * 1024
 SESSION_TTL_SECONDS = 24 * 60 * 60
 
@@ -47,6 +54,8 @@ _DATA = "data.bin"
 _ASSEMBLED = "assembled.bin"
 _CHUNKS = "chunks"
 _PARTS = "parts"
+_RECEIPT = "receipt.json"
+SWEEP_INTERVAL_SECONDS = 60 * 60
 
 _LOCKS: weakref.WeakValueDictionary[str, asyncio.Lock] = weakref.WeakValueDictionary()
 
@@ -238,6 +247,26 @@ class ChunkedUploadStore:
         if assembled.exists():
             os.replace(assembled, self._dir(upload.upload_id) / _DATA)
 
+    def receipt(self, upload: ChunkedUpload) -> dict[str, str] | None:
+        """Payload of an already finished upload, or ``None``."""
+        try:
+            raw = (self._dir(upload.upload_id) / _RECEIPT).read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return None
+        payload: dict[str, str] = json.loads(raw)
+        return payload
+
+    def finish(self, upload: ChunkedUpload, payload: dict[str, str]) -> None:
+        """Record *payload* and drop the file data; markers stay until the TTL."""
+        session_dir = self._dir(upload.upload_id)
+        tmp = session_dir / f"{_RECEIPT}.tmp"
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(tmp, session_dir / _RECEIPT)
+        for name in (_DATA, _ASSEMBLED):
+            (session_dir / name).unlink(missing_ok=True)
+        shutil.rmtree(session_dir / _PARTS, ignore_errors=True)
+        self._touch(session_dir)
+
     def discard(self, upload_id: str) -> None:
         shutil.rmtree(self._dir(upload_id), ignore_errors=True)
 
@@ -362,6 +391,18 @@ class ChunkedUploadStore:
         )
 
 
+async def sweep_chunked_uploads_forever(
+    interval_seconds: float = SWEEP_INTERVAL_SECONDS,
+) -> None:
+    """Sweep expired sessions now and then every *interval_seconds* until cancelled."""
+    while True:
+        try:
+            await asyncio.to_thread(chunked_upload_store().sweep_expired)
+        except Exception:
+            logger.warning("chunked upload sweep failed", exc_info=True)
+        await asyncio.sleep(interval_seconds)
+
+
 def chunked_upload_store() -> ChunkedUploadStore:
     """Store under ``~/.octop/uploads/chunked`` (follows ``OCTOP_HOME``)."""
     return ChunkedUploadStore(PathLayout.from_env().chunked_uploads_dir, chunk_size=CHUNK_BYTES)
@@ -370,7 +411,9 @@ def chunked_upload_store() -> ChunkedUploadStore:
 __all__ = [
     "CHUNK_BYTES",
     "SESSION_TTL_SECONDS",
+    "SWEEP_INTERVAL_SECONDS",
     "ChunkedUpload",
     "ChunkedUploadStore",
     "chunked_upload_store",
+    "sweep_chunked_uploads_forever",
 ]

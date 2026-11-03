@@ -13,7 +13,7 @@ from deepagents.backends.local_shell import LocalShellBackend
 from octop_harness.backends.workspace import BackendWorkspace
 
 from octop.infra.errors import ErrorCode, OctopError
-from octop.infra.gateway.media import inbound_store
+from octop.infra.gateway.media import chunked_upload, inbound_store
 from octop.infra.gateway.media.chunked_upload import ChunkedUpload, ChunkedUploadStore
 from octop.infra.gateway.media.inbound_store import read_inbound_bytes, write_inbound_file
 
@@ -283,3 +283,44 @@ async def test_write_inbound_file_enforces_limit(tmp_path: Path) -> None:
         )
     assert exc.value.code is ErrorCode.ATTACHMENT_TOO_LARGE
     assert source.exists()
+
+
+async def test_finish_keeps_receipt_until_ttl(tmp_path: Path) -> None:
+    clock = _Clock()
+    store = _store(tmp_path, clock)
+    upload = _create(store)
+    for index in range(upload.chunk_count):
+        await _send(store, upload, index)
+    await store.claim(upload)
+    store.finish(upload, {"path": "inbound/x.mp4"})
+    assert store.receipt(upload) == {"path": "inbound/x.mp4"}
+    assert sorted(p.name for p in (tmp_path / "chunked" / upload.upload_id).iterdir()) == [
+        "chunks",
+        "manifest.json",
+        "receipt.json",
+    ]
+    clock.now += store.ttl_seconds + 1
+    assert store.sweep_expired() == 1
+    assert not (tmp_path / "chunked" / upload.upload_id).exists()
+
+
+async def test_background_sweep_runs_at_start(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[int] = []
+
+    class _Fake:
+        def sweep_expired(self) -> int:
+            calls.append(1)
+            return 0
+
+    monkeypatch.setattr(chunked_upload, "chunked_upload_store", _Fake)
+    task = asyncio.create_task(chunked_upload.sweep_chunked_uploads_forever(3600))
+    for _ in range(50):
+        if calls:
+            break
+        await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert calls == [1]
