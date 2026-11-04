@@ -1,8 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, vi } from "vitest";
 import type { OctopAgent } from "../../../context/AgentContext";
+import type { OctopUser } from "../../../api/modules/auth";
+import { CurrentUserProvider } from "../../../hooks/useCurrentUser";
 import { octopThreadsApi } from "../../../api/modules/octopThreads";
 import MinimalAgentSessionNav from "./MinimalAgentSessionNav";
 import SessionList from "./SessionList";
@@ -44,29 +46,43 @@ const agents = [
   }),
 ];
 
-function renderList() {
+function renderList(
+  list: OctopAgent[] = agents,
+  user: Partial<OctopUser> | null = null,
+) {
   render(
     <MemoryRouter>
-      <SessionList
-        agents={agents}
-        sessions={[]}
-        activeId={null}
-        activeAgentId="local-expert"
-        hasMore={false}
-        loadingMore={false}
-        onLoadMore={() => undefined}
-        onFetchAllSessions={() => undefined}
-        onSelect={() => undefined}
-        onAgentSelect={() => undefined}
-        onNewChat={() => undefined}
-        onDelete={() => undefined}
-        onRename={() => undefined}
-        onPin={() => undefined}
-        onFork={() => undefined}
-      />
+      <CurrentUserProvider
+        user={user as OctopUser | null}
+        setUser={() => undefined}
+      >
+        <SessionList
+          agents={list}
+          sessions={[]}
+          activeId={null}
+          activeAgentId="local-expert"
+          hasMore={false}
+          loadingMore={false}
+          onLoadMore={() => undefined}
+          onFetchAllSessions={() => undefined}
+          onSelect={() => undefined}
+          onAgentSelect={() => undefined}
+          onNewChat={() => undefined}
+          onDelete={() => undefined}
+          onRename={() => undefined}
+          onPin={() => undefined}
+          onFork={() => undefined}
+        />
+      </CurrentUserProvider>
     </MemoryRouter>,
   );
 }
+
+const chatAndWorkbench: Partial<OctopUser> = {
+  role: "01ROLE",
+  permissions: [],
+  visible_nav: ["chat", "workbench"],
+};
 
 describe("MinimalAgentSessionNav nav scopes", () => {
   beforeEach(() => {
@@ -102,6 +118,36 @@ describe("MinimalAgentSessionNav nav scopes", () => {
     expect(screen.getByText("云端团队")).toBeInTheDocument();
     expect(screen.queryByText("本地专家")).not.toBeInTheDocument();
     expect(screen.queryByText("本地团队")).not.toBeInTheDocument();
+  });
+
+  it("shows only experts when the role cannot open teams or cloud", async () => {
+    render(
+      <MemoryRouter>
+        <CurrentUserProvider
+          user={chatAndWorkbench as OctopUser}
+          setUser={() => undefined}
+        >
+          <MinimalAgentSessionNav
+            agents={[agents[0]]}
+            activeId={null}
+            activeAgentId="local-expert"
+            activeSessions={[]}
+            onSelect={() => undefined}
+            onAgentSelect={() => undefined}
+            onNewChat={() => undefined}
+            onDeleteActive={() => undefined}
+            onRenameActive={() => undefined}
+            onPinActive={() => undefined}
+            onFork={() => undefined}
+          />
+        </CurrentUserProvider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => expect(octopThreadsApi.list).toHaveBeenCalled());
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "专家",
+    ]);
   });
 });
 
@@ -140,6 +186,66 @@ describe("SessionList nav scopes", () => {
     expect(screen.getByText("云端团队")).toBeInTheDocument();
     expect(screen.queryByText("本地专家")).not.toBeInTheDocument();
     expect(screen.queryByText("本地团队")).not.toBeInTheDocument();
+  });
+
+  it("shows only experts when the role cannot open teams or cloud", () => {
+    renderList([agents[0]], chatAndWorkbench);
+
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "专家",
+    ]);
+    expect(screen.getByText("本地专家")).toBeInTheDocument();
+  });
+
+  it("keeps a tab the role already has agents in", () => {
+    renderList(agents.slice(0, 3), chatAndWorkbench);
+
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "专家",
+      "团队",
+      "云端",
+    ]);
+  });
+
+  it("falls back to experts when the open tab's last agent goes away", async () => {
+    const user = userEvent.setup();
+    const props = {
+      sessions: [],
+      activeId: null,
+      activeAgentId: "local-expert",
+      hasMore: false,
+      loadingMore: false,
+      onLoadMore: () => undefined,
+      onFetchAllSessions: () => undefined,
+      onSelect: () => undefined,
+      onAgentSelect: () => undefined,
+      onNewChat: () => undefined,
+      onDelete: () => undefined,
+      onRename: () => undefined,
+      onPin: () => undefined,
+      onFork: () => undefined,
+    };
+    const withUser = (list: OctopAgent[]) => (
+      <MemoryRouter>
+        <CurrentUserProvider
+          user={chatAndWorkbench as OctopUser}
+          setUser={() => undefined}
+        >
+          <SessionList agents={list} {...props} />
+        </CurrentUserProvider>
+      </MemoryRouter>
+    );
+    const { rerender } = render(withUser([agents[0], agents[2]]));
+
+    await user.click(screen.getByRole("tab", { name: "团队" }));
+    expect(screen.getByText("本地团队")).toBeInTheDocument();
+
+    rerender(withUser([agents[0]]));
+    expect(screen.getByRole("tab", { name: "专家" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByText("本地专家")).toBeInTheDocument();
   });
 
   it("links an empty team or cloud tab to the create page", async () => {

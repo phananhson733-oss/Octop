@@ -571,7 +571,11 @@ export default function MinimalAgentSessionNav({
           aria-label={t("chat.searchSessions", "搜索会话")}
         />
       </div>
-      <ChatNavScopeTabs value={navScope} onChange={setNavScope} />
+      <ChatNavScopeTabs
+        agents={agents}
+        value={navScope}
+        onChange={setNavScope}
+      />
       {visibleAgents.length === 0 ? (
         searching ? (
           <div className={styles.minimalAgentEmpty}>

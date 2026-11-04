@@ -1,6 +1,13 @@
+import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { CHAT_NAV_SCOPES, type ChatNavScope } from "../utils/chatNavScope";
+import type { OctopAgent } from "../../../context/AgentContext";
+import { usePathVisible } from "../../../hooks/usePathVisible";
+import {
+  CHAT_NAV_SCOPES,
+  matchesChatNavScope,
+  type ChatNavScope,
+} from "../utils/chatNavScope";
 import styles from "../index.module.less";
 
 const NAV_SCOPE_LABELS: Record<
@@ -74,18 +81,38 @@ export function ChatNavScopeEmpty({ scope }: { scope: ChatNavScope }) {
   );
 }
 
-/** Expert / team / cloud switch under the chat nav search box. */
+/**
+ * Expert / team / cloud switch under the chat nav search box.
+ * Team and cloud show only when the role can open their create page or
+ * already has such an agent (a chat-and-workbench role sees just experts).
+ */
 export default function ChatNavScopeTabs({
+  agents,
   value,
   onChange,
 }: {
+  agents: readonly OctopAgent[];
   value: ChatNavScope;
   onChange: (scope: ChatNavScope) => void;
 }) {
   const { t } = useTranslation();
+  const pathVisible = usePathVisible();
+  const scopes = CHAT_NAV_SCOPES.filter((scope) => {
+    const create = NAV_SCOPE_CREATE[scope];
+    return (
+      !create ||
+      pathVisible(create.to) ||
+      agents.some((agent) => matchesChatNavScope(agent, scope))
+    );
+  });
+  // The last team or cloud agent went away while its tab was open.
+  const valueHidden = !scopes.includes(value);
+  useEffect(() => {
+    if (valueHidden) onChange("experts");
+  }, [valueHidden, onChange]);
   return (
     <div className={styles.sessionScopeTabs} role="tablist">
-      {CHAT_NAV_SCOPES.map((scope) => {
+      {scopes.map((scope) => {
         const meta = NAV_SCOPE_LABELS[scope];
         const selected = value === scope;
         return (
