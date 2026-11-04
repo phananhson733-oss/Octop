@@ -197,6 +197,19 @@ describe("SessionList nav scopes", () => {
     expect(screen.getByText("本地专家")).toBeInTheDocument();
   });
 
+  it("hides teams when the role hides the Experts-page team tab", () => {
+    renderList([agents[0]], {
+      role: "01ROLE",
+      permissions: [],
+      visible_nav: ["chat", "experts", "workbench", "knowledge-bases"],
+      hidden_expert_tabs: ["teams", "library", "market"],
+    });
+
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "专家",
+    ]);
+  });
+
   it("keeps a tab the role already has agents in", () => {
     renderList(agents.slice(0, 3), chatAndWorkbench);
 

@@ -2,7 +2,9 @@ import { useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import type { OctopAgent } from "../../../context/AgentContext";
+import { useCurrentUser } from "../../../hooks/useCurrentUser";
 import { usePathVisible } from "../../../hooks/usePathVisible";
+import { expertTabHidden } from "../../../utils/permissions";
 import {
   CHAT_NAV_SCOPES,
   matchesChatNavScope,
@@ -84,7 +86,8 @@ export function ChatNavScopeEmpty({ scope }: { scope: ChatNavScope }) {
 /**
  * Expert / team / cloud switch under the chat nav search box.
  * Team and cloud show only when the role can open their create page or
- * already has such an agent (a chat-and-workbench role sees just experts).
+ * already has such an agent (a chat-and-workbench role sees just experts;
+ * a role that hides the Experts-page team tab sees no team tab here either).
  */
 export default function ChatNavScopeTabs({
   agents,
@@ -96,12 +99,17 @@ export default function ChatNavScopeTabs({
   onChange: (scope: ChatNavScope) => void;
 }) {
   const { t } = useTranslation();
+  const user = useCurrentUser();
   const pathVisible = usePathVisible();
   const scopes = CHAT_NAV_SCOPES.filter((scope) => {
     const create = NAV_SCOPE_CREATE[scope];
+    const canCreate =
+      !!create &&
+      pathVisible(create.to) &&
+      !(scope === "teams" && expertTabHidden(user, "teams"));
     return (
       !create ||
-      pathVisible(create.to) ||
+      canCreate ||
       agents.some((agent) => matchesChatNavScope(agent, scope))
     );
   });
