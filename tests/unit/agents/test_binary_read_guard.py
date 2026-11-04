@@ -37,6 +37,13 @@ def test_allows_images_for_image_models() -> None:
     assert read_file_block_reason("docs/report.pdf", allow_images=True) is not None
 
 
+def test_blocks_video_and_audio_even_for_image_models() -> None:
+    for path in ("/var/tmp/work/clip.mp4", "inbound/01JTEST.MOV", "ep01.mp3", "voice.m4a"):
+        reason = read_file_block_reason(path, allow_images=True)
+        assert reason is not None
+        assert "video/audio" in reason
+
+
 async def test_guard_follows_the_threads_last_model(monkeypatch: pytest.MonkeyPatch) -> None:
     from langchain_core.messages import ToolMessage
 

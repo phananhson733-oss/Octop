@@ -2,6 +2,8 @@
 
 Images pass when the thread's current model reads images: deepagents' ``read_file`` then
 returns them as image blocks, so the model can look at frames it extracted itself.
+Video and audio never pass: deepagents would inline the whole file as base64, which
+overflows the provider's per-item limit and breaks every later turn of the thread.
 """
 
 from __future__ import annotations
@@ -34,6 +36,30 @@ _BLOCKED_EXTENSIONS = frozenset(
     }
 )
 _IMAGE_EXTENSIONS = frozenset({".gif", ".webp", ".jpg", ".jpeg", ".png"})
+_MEDIA_EXTENSIONS = frozenset(
+    {
+        ".mp4",
+        ".m4v",
+        ".mov",
+        ".mkv",
+        ".webm",
+        ".avi",
+        ".flv",
+        ".wmv",
+        ".mpeg",
+        ".mpg",
+        ".3gp",
+        ".3gpp",
+        ".mp3",
+        ".m4a",
+        ".wav",
+        ".aac",
+        ".aiff",
+        ".ogg",
+        ".opus",
+        ".flac",
+    }
+)
 _TEXT_EXTENSIONS = frozenset(
     {
         ".txt",
@@ -93,6 +119,12 @@ def read_file_block_reason(path: str, *, allow_images: bool = False) -> str | No
     if not path:
         return None
     ext = _extension(path)
+    if ext in _MEDIA_EXTENSIONS:
+        return (
+            f"read_file blocked for video/audio `{path}`: it would put the whole file into the "
+            "conversation. Use execute_shell_command with ffprobe/ffmpeg or the clip skill "
+            "(extract frames, then read the .jpg frames) instead."
+        )
     if allow_images and ext in _IMAGE_EXTENSIONS:
         return None
     if ext == ".pdf":
