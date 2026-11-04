@@ -56,6 +56,50 @@ describe("uploadFile", () => {
     expect(request).not.toHaveBeenCalled();
   });
 
+  it("sends small videos in chunks so a dropped connection is retried", async () => {
+    const size = 6 * 1024 * 1024;
+    vi.mocked(request).mockImplementation(async (path) => {
+      if (path === "/agents/ag/upload/chunked")
+        return status("U7", size, 8 * 1024 * 1024, []);
+      if (path === "/agents/ag/upload/chunked/U7/complete") return DONE;
+      throw new Error(`unexpected ${path}`);
+    });
+    // Five failed attempts (about half a minute of backoff) still succeed.
+    let failures = 5;
+    vi.mocked(requestUpload).mockImplementation(async () => {
+      if (failures-- > 0) throw new Error("Network error");
+      return {};
+    });
+    const pending = uploadFile("ag", bigFile(size));
+    await vi.runAllTimersAsync();
+    await expect(pending).resolves.toEqual(DONE);
+    expect(
+      vi
+        .mocked(requestUpload)
+        .mock.calls.every(
+          (c) => c[0] === "/agents/ag/upload/chunked/U7/chunks/0",
+        ),
+    ).toBe(true);
+    expect(requestUpload).toHaveBeenCalledTimes(6);
+  });
+
+  it.each(["", "application/octet-stream"])(
+    "chunks a video the browser typed as %j by its extension",
+    async (type) => {
+      vi.mocked(request).mockImplementation(async (path) => {
+        if (path === "/agents/ag/upload/chunked")
+          return status("U10", 3, 8 * 1024 * 1024, []);
+        return DONE;
+      });
+      vi.mocked(requestUpload).mockResolvedValue({});
+      const file = new File(["abc"], "clip.MKV", { type });
+      await expect(uploadFile("ag", file)).resolves.toEqual(DONE);
+      expect(vi.mocked(requestUpload).mock.calls[0][0]).toBe(
+        "/agents/ag/upload/chunked/U10/chunks/0",
+      );
+    },
+  );
+
   it("chunks large files, retries a failed chunk and reports bytes", async () => {
     const chunk = 16 * 1024 * 1024;
     const size = CHUNKED_UPLOAD_THRESHOLD + 1;

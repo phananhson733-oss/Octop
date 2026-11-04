@@ -26,7 +26,24 @@ export type UploadBytesHandler = (loaded: number) => void;
  */
 export const CHUNKED_UPLOAD_THRESHOLD = 32 * 1024 * 1024;
 
-const CHUNK_RETRIES = 3;
+/**
+ * Video and audio always go up in chunks, however small: a one-request upload
+ * has no retry, so a short network drop would fail the file outright.
+ * The extension covers files the browser gives no or a generic type.
+ */
+const MEDIA_EXTENSION =
+  /\.(mp4|m4v|mov|mkv|webm|avi|flv|wmv|ts|mts|3gp|mp3|m4a|aac|wav|flac|ogg|opus)$/i;
+
+function sendsInChunks(file: File): boolean {
+  if (file.size > CHUNKED_UPLOAD_THRESHOLD) return true;
+  return (
+    file.size > 0 &&
+    (/^(video|audio)\//.test(file.type) || MEDIA_EXTENSION.test(file.name))
+  );
+}
+
+/** Backoff 1 + 2 + 4 + 8 + 16 s: a chunk rides out about half a minute offline. */
+const CHUNK_RETRIES = 5;
 /** Chunk requests in flight per file. */
 const CHUNK_CONCURRENCY = 6;
 
@@ -237,7 +254,7 @@ export async function uploadFile(
   file: File,
   onBytes?: UploadBytesHandler,
 ): Promise<UploadResponse> {
-  if (file.size > CHUNKED_UPLOAD_THRESHOLD) {
+  if (sendsInChunks(file)) {
     return uploadChunked(agentId, file, onBytes);
   }
   const formData = new FormData();

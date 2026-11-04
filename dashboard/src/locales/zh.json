@@ -4032,7 +4032,8 @@
     "tooMany": "一次最多上传 {{max}} 个文件，其余已跳过",
     "unsupportedType": "不支持的文件类型：{{type}}",
     "tooLarge": "文件过大（最大 {{maxMb}}MB）：{{name}}",
-    "failed": "上传失败"
+    "failed": "上传失败",
+    "failedSome": "{{total}} 个文件里有 {{count}} 个没传上去：{{names}}。其余的已附上，重新选这几个文件再传一次。"
   },
   "mention": {
     "empty": "没有匹配项",
