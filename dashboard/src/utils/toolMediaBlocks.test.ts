@@ -3,6 +3,8 @@ import {
   agentAttachmentAccessUrl,
   agentMediaPreviewUrl,
   canonicalizeMediaApiUrl,
+  collectToolMediaFromToolData,
+  extractOffloadedImagePath,
   isHostAbsoluteMediaPath,
   needsAuthBlobFetch,
   parseStructuredToolOutput,
@@ -200,5 +202,44 @@ describe("agentAttachmentAccessUrl", () => {
     expect(
       agentAttachmentAccessUrl("a1", "inbound/x.pdf", "application/pdf"),
     ).toContain("/workspace/download?");
+  });
+});
+
+describe("collectToolMediaFromToolData", () => {
+  const args = JSON.stringify({
+    file_path: "/data/.octop/agents/125VCW/temp/hook-inspection/hook.jpg",
+  });
+
+  it("shows the media-cache copy of an offloaded read_file image, not the deleted original", () => {
+    const output =
+      "[image offloaded: sha=7b41043857b9 path=/data/.octop/agents/125VCW/.media-cache/7b41043857b9ed5e.jpg size=152923B mime=image/jpeg; use read_file to retrieve bytes]";
+    const { images } = collectToolMediaFromToolData(
+      { name: "read_file", arguments: args, output },
+      "125VCW",
+    );
+    expect(images).toHaveLength(1);
+    expect(decodeURIComponent(images[0].url)).toContain(
+      ".media-cache/7b41043857b9ed5e.jpg",
+    );
+    expect(images[0].filename).toBe("hook.jpg");
+  });
+
+  it("keeps spaces in the cached path", () => {
+    const output =
+      "[image offloaded: sha=abcdef path=/data/Agent Files/.octop/agents/AG/.media-cache/abcdef.jpg size=10B mime=image/jpeg; use read_file to retrieve bytes]";
+    expect(extractOffloadedImagePath(output)).toBe(
+      "/data/Agent Files/.octop/agents/AG/.media-cache/abcdef.jpg",
+    );
+  });
+
+  it("still uses the call's path when there is no offload marker", () => {
+    const { images } = collectToolMediaFromToolData(
+      { name: "read_file", arguments: args, output: "" },
+      "125VCW",
+    );
+    expect(images).toHaveLength(1);
+    expect(decodeURIComponent(images[0].url)).toContain(
+      "temp/hook-inspection/hook.jpg",
+    );
   });
 });

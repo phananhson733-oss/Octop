@@ -712,6 +712,22 @@ export function extractImagePathFromText(text: string): string | null {
   return null;
 }
 
+/**
+ * Path in a ``MediaOffloadMiddleware`` placeholder
+ * (``[image offloaded: sha=… path=<.media-cache copy> size=…]``). The cached
+ * copy outlives the file read_file opened, which the agent may delete later.
+ */
+export function extractOffloadedImagePath(text: string): string | null {
+  // The path is written unquoted and may contain spaces; ``size=<n>B`` ends it.
+  const match = text.match(
+    new RegExp(
+      `\\[image offloaded: sha=\\S+ path=(.+?\\.${IMAGE_EXT}) size=\\d+B`,
+      "i",
+    ),
+  );
+  return match?.[1] ?? null;
+}
+
 /** Read ``file_path`` / ``path`` from tool-call JSON arguments. */
 export function extractImagePathFromToolArgs(
   argumentsJson: string | undefined,
@@ -826,7 +842,15 @@ export function collectToolMediaFromToolData(
 
   if (agentId && toolData) {
     const argPath = extractImagePathFromToolArgs(toolData.arguments);
-    if (argPath) {
+    const cachedPath = toolData.output
+      ? extractOffloadedImagePath(toolData.output)
+      : null;
+    if (cachedPath) {
+      images.push({
+        ...imageItemFromPath(agentId, cachedPath),
+        filename: argPath?.split("/").pop() || cachedPath.split("/").pop(),
+      });
+    } else if (argPath) {
       const already = images.some(
         (img) => img.filename === argPath.split("/").pop(),
       );
