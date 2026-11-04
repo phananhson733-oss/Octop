@@ -44,7 +44,7 @@ from octop.infra.utils.ulid import new_ulid
 
 logger = logging.getLogger(__name__)
 
-CHUNK_BYTES = 32 * 1024 * 1024
+CHUNK_BYTES = 8 * 1024 * 1024
 SESSION_TTL_SECONDS = 24 * 60 * 60
 
 _WRITE_BUFFER = 1024 * 1024
