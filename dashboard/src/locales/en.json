@@ -4032,7 +4032,8 @@
     "tooMany": "Only the first {{max}} files can be uploaded at once",
     "unsupportedType": "Unsupported file type: {{type}}",
     "tooLarge": "File too large (max {{maxMb}}MB): {{name}}",
-    "failed": "Upload failed"
+    "failed": "Upload failed",
+    "failedSome": "{{count}} of {{total}} files failed to upload: {{names}}. Pick them again to retry."
   },
   "mention": {
     "empty": "No matches",

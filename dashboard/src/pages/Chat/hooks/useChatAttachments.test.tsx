@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
-import type { DragEvent } from "react";
+import type { ChangeEvent, DragEvent } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { message } from "@/utils/antdMessage";
 import { uploadFile } from "../../../api/modules/upload";
@@ -200,5 +200,66 @@ describe("useChatAttachments drop", () => {
     );
     expect(result.current.dragOver).toBe(false);
     vi.unstubAllGlobals();
+  });
+
+  it("keeps the files that uploaded when others fail, two at a time", async () => {
+    let active = 0;
+    let peak = 0;
+    vi.mocked(uploadFile).mockImplementation(async (_agentId, file) => {
+      active++;
+      peak = Math.max(peak, active);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      active--;
+      if (file.name.startsWith("bad")) throw new Error("Network error");
+      return {
+        path: `inbound/${file.name}`,
+        workspace_path: `inbound/${file.name}`,
+        filename: file.name,
+        media_type: "video/mp4",
+        url: "",
+        access_url: `/files/${file.name}`,
+      };
+    });
+    const { result } = renderHook(() => useChatAttachments("agent-1"));
+    const files = ["a.mp4", "bad1.mp4", "b.mp4", "bad2.mp4"].map(
+      (name) => new File(["x"], name, { type: "video/mp4" }),
+    );
+
+    await act(async () => {
+      result.current.handleFileChange({
+        target: { files, value: "" },
+      } as unknown as ChangeEvent<HTMLInputElement>);
+    });
+
+    await waitFor(() => {
+      expect(result.current.uploading).toBe(false);
+    });
+    expect(result.current.attachments.map((item) => item.filename)).toEqual([
+      "a.mp4",
+      "b.mp4",
+    ]);
+    expect(uploadFile).toHaveBeenCalledTimes(4);
+    expect(peak).toBe(2);
+    expect(message.error).toHaveBeenCalledWith(
+      "2 of 4 files failed to upload: bad1.mp4, bad2.mp4. Pick them again to retry.",
+    );
+  });
+
+  it("shows the upload error when every file fails", async () => {
+    vi.mocked(uploadFile).mockRejectedValue(new Error("Network error"));
+    const { result } = renderHook(() => useChatAttachments("agent-1"));
+    const file = new File(["x"], "a.mp4", { type: "video/mp4" });
+
+    await act(async () => {
+      result.current.handleFileChange({
+        target: { files: [file], value: "" },
+      } as unknown as ChangeEvent<HTMLInputElement>);
+    });
+
+    await waitFor(() => {
+      expect(result.current.uploading).toBe(false);
+    });
+    expect(result.current.attachments).toEqual([]);
+    expect(message.error).toHaveBeenCalledTimes(1);
   });
 });

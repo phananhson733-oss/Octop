@@ -22,6 +22,9 @@ import {
 } from "../utils/droppedFiles";
 import { useServerUploadLimit } from "../../../hooks/useServerUploadLimit";
 
+/** Files uploading at once; the rest wait their turn. */
+const FILES_IN_FLIGHT = 2;
+
 export function useChatAttachments(agentId: string | null | undefined) {
   const { t } = useTranslation();
   const { maxUploadBytes, maxUploadMb } = useServerUploadLimit();
@@ -77,38 +80,79 @@ export function useChatAttachments(agentId: string | null | undefined) {
         setUploadProgress(Math.min(100, Math.floor((sent / totalBytes) * 100)));
       };
       setUploadProgress(totalBytes > 0 ? 0 : null);
+      const uploadOne = async (file: File, i: number) => {
+        const res = await uploadFile(agentId, file, (bytes) => {
+          loaded[i] = bytes;
+          reportProgress();
+        });
+        const workspacePath = res.path || res.workspace_path;
+        const previewUrl =
+          res.access_url ||
+          res.url ||
+          (workspacePath
+            ? agentAttachmentAccessUrl(agentId, workspacePath, res.media_type)
+            : "");
+        return {
+          url: previewUrl,
+          filename: res.filename,
+          mediaType: res.media_type,
+          workspacePath,
+          kind: inferAttachmentKind(file, res.media_type),
+        } satisfies ChatAttachment;
+      };
       try {
-        const results = await Promise.all(
-          fileArr.map(async (file, i) => {
-            const res = await uploadFile(agentId, file, (bytes) => {
-              loaded[i] = bytes;
-              reportProgress();
-            });
-            const workspacePath = res.path || res.workspace_path;
-            const previewUrl =
-              res.access_url ||
-              res.url ||
-              (workspacePath
-                ? agentAttachmentAccessUrl(
-                    agentId,
-                    workspacePath,
-                    res.media_type,
-                  )
-                : "");
-            return {
-              url: previewUrl,
-              filename: res.filename,
-              mediaType: res.media_type,
-              workspacePath,
-              kind: inferAttachmentKind(file, res.media_type),
-            } satisfies ChatAttachment;
-          }),
+        // A few files at a time, so a dropped connection loses less progress.
+        const settled: PromiseSettledResult<ChatAttachment>[] = [];
+        let next = 0;
+        const worker = async () => {
+          while (next < fileArr.length) {
+            const i = next++;
+            try {
+              settled[i] = {
+                status: "fulfilled",
+                value: await uploadOne(fileArr[i], i),
+              };
+            } catch (reason: unknown) {
+              settled[i] = { status: "rejected", reason };
+            }
+          }
+        };
+        await Promise.all(
+          Array.from(
+            { length: Math.min(FILES_IN_FLIGHT, fileArr.length) },
+            worker,
+          ),
         );
-        setAttachments((prev) => [...prev, ...results]);
-      } catch (err: unknown) {
-        antMessage.error(
-          apiErrorMessage(err, t("upload.failed", "Upload failed"), t),
-        );
+        // Keep the files that made it; name only the ones that didn't.
+        const done: ChatAttachment[] = [];
+        const failed: string[] = [];
+        let firstError: unknown;
+        settled.forEach((result, i) => {
+          if (result.status === "fulfilled") {
+            done.push(result.value);
+          } else {
+            failed.push(fileArr[i].name);
+            firstError ??= result.reason;
+          }
+        });
+        if (done.length > 0) setAttachments((prev) => [...prev, ...done]);
+        if (failed.length > 0 && done.length === 0) {
+          antMessage.error(
+            apiErrorMessage(firstError, t("upload.failed", "Upload failed"), t),
+          );
+        } else if (failed.length > 0) {
+          antMessage.error(
+            t(
+              "upload.failedSome",
+              "{{count}} of {{total}} files failed to upload: {{names}}. Pick them again to retry.",
+              {
+                count: failed.length,
+                total: fileArr.length,
+                names: failed.join(", "),
+              },
+            ),
+          );
+        }
       } finally {
         setUploading(false);
         setUploadProgress(null);
