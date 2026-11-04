@@ -716,7 +716,11 @@ export default function SessionList({
       ) : null}
 
       {agents.length > 0 ? (
-        <ChatNavScopeTabs value={navScope} onChange={setNavScope} />
+        <ChatNavScopeTabs
+          agents={agents}
+          value={navScope}
+          onChange={setNavScope}
+        />
       ) : null}
 
       {agents.length === 0 ? (
