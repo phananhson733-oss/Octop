@@ -160,6 +160,17 @@ export interface HistoryMigrationStatus {
 
 export const CHAT_HISTORY_PAGE_SIZE = 25;
 
+/** Waits before each retry of a history page; the error banner shows after the last. */
+export const HISTORY_RETRY_DELAYS_MS = [1000, 2000, 4000];
+
+/** A dropped connection (fetch throws TypeError) or a gateway 502/503/504. */
+function isTransientHistoryError(error: unknown): boolean {
+  if (error instanceof TypeError) return true;
+  return (
+    error instanceof Error && /^Request failed: 50[234]\b/.test(error.message)
+  );
+}
+
 export const octopThreadsApi = {
   list: (agentId: string, limit = 50) =>
     request<OctopThread[]>(
@@ -183,20 +194,31 @@ export const octopThreadsApi = {
       { method: "POST" },
     ),
 
-  history: (
+  history: async (
     agentId: string,
     threadId: string,
     params: { limit?: number; offset?: number; cursor?: string | null } = {},
   ) => {
     const limit = params.limit ?? CHAT_HISTORY_PAGE_SIZE;
     const offset = params.offset ?? 0;
-    return request<OctopThreadHistory>(
-      `/agents/${encodeURIComponent(agentId)}/threads/${encodeURIComponent(
-        threadId,
-      )}/history?limit=${limit}&offset=${offset}${
-        params.cursor ? `&cursor=${encodeURIComponent(params.cursor)}` : ""
-      }`,
-    );
+    const path = `/agents/${encodeURIComponent(
+      agentId,
+    )}/threads/${encodeURIComponent(
+      threadId,
+    )}/history?limit=${limit}&offset=${offset}${
+      params.cursor ? `&cursor=${encodeURIComponent(params.cursor)}` : ""
+    }`;
+    // A flaky link (Cloudflare tunnel drops) would otherwise show the
+    // 历史记录加载失败 banner for one lost request; the read is safe to repeat.
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        return await request<OctopThreadHistory>(path);
+      } catch (error) {
+        const delay = HISTORY_RETRY_DELAYS_MS[attempt];
+        if (delay === undefined || !isTransientHistoryError(error)) throw error;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+      }
+    }
   },
 
   contextUsage: (
