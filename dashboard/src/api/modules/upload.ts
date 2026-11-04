@@ -28,7 +28,7 @@ export const CHUNKED_UPLOAD_THRESHOLD = 32 * 1024 * 1024;
 
 const CHUNK_RETRIES = 3;
 /** Chunk requests in flight per file. */
-const CHUNK_CONCURRENCY = 3;
+const CHUNK_CONCURRENCY = 6;
 
 /**
  * Unfinished chunked uploads are remembered per browser so picking the same

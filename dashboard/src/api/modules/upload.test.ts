@@ -94,7 +94,7 @@ describe("uploadFile", () => {
     expect(localStorage.getItem(RESUME_KEY(size))).toBeNull();
   });
 
-  it("keeps at most three chunks in flight", async () => {
+  it("keeps at most six chunks in flight", async () => {
     const chunk = 8 * 1024 * 1024;
     const size = chunk * 10;
     vi.mocked(request).mockImplementation(async (path) => {
@@ -115,7 +115,7 @@ describe("uploadFile", () => {
     await vi.runAllTimersAsync();
     await expect(pending).resolves.toEqual(DONE);
     expect(requestUpload).toHaveBeenCalledTimes(10);
-    expect(peak).toBe(3);
+    expect(peak).toBe(6);
   });
 
   it("resumes a remembered session and sends only missing chunks", async () => {
