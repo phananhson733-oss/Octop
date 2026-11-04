@@ -2615,6 +2615,33 @@ export async function attachThread(
     onStreamEnd?.();
   };
 
+  // Set when this socket joins a turn already under way (page load, reconnect):
+  // whatever streamed before it subscribed never reached this tab. Reload on
+  // turn.ended only: the server sends it after the turn is stored, while an
+  // error frame or a team wrap-up done can come before that.
+  let joinedLiveTurn = false;
+  const reloadStoredTurn = () => {
+    invalidateHistory(threadId);
+    emitSessionEvent({ kind: "sessionsChanged", sessionId: threadId, agentId });
+  };
+  const endHostTurn = (data: Record<string, unknown>) => {
+    if (hitlKeepsSocket(data)) {
+      parkLiveSocketForHitl(data, state, sessionId, live);
+      return;
+    }
+    if (keepRoomSocket(state, agentId)) {
+      live.listenOnly = true;
+      finish("host");
+    } else {
+      finish("all");
+      closeLiveSocket(sessionId, { intentional: true });
+    }
+    if (joinedLiveTurn && data.type === "turn.ended") {
+      joinedLiveTurn = false;
+      reloadStoredTurn();
+    }
+  };
+
   await new Promise<void>((resolve) => {
     let opened = false;
     const settleOpen = () => {
@@ -2655,6 +2682,7 @@ export async function attachThread(
 
         if (data.type === "turn_status") {
           if (turnStatusAction(Boolean(data.active)) === "expect_stream") {
+            joinedLiveTurn = true;
             if (!state.isStreaming) {
               state.runUsage = null;
               usageSamplesByState.delete(state);
@@ -2684,12 +2712,7 @@ export async function attachThread(
               finish();
               // The turn ended while this tab was disconnected, so its last
               // chunks never arrived: reload the stored turn instead.
-              invalidateHistory(threadId);
-              emitSessionEvent({
-                kind: "sessionsChanged",
-                sessionId: threadId,
-                agentId,
-              });
+              reloadStoredTurn();
             }
           } else if (state.abortController === controller) {
             state.abortController = previousController;
@@ -2707,15 +2730,7 @@ export async function attachThread(
               state.activeTurnId,
             )
           ) {
-            if (hitlKeepsSocket(data)) {
-              parkLiveSocketForHitl(data, state, sessionId, live);
-            } else if (keepRoomSocket(state, agentId)) {
-              live.listenOnly = true;
-              finish("host");
-            } else {
-              finish("all");
-              closeLiveSocket(sessionId, { intentional: true });
-            }
+            endHostTurn(data);
           }
           return;
         }
@@ -2728,15 +2743,7 @@ export async function attachThread(
             state.activeTurnId,
           )
         ) {
-          if (hitlKeepsSocket(data)) {
-            parkLiveSocketForHitl(data, state, sessionId, live);
-          } else if (keepRoomSocket(state, agentId)) {
-            live.listenOnly = true;
-            finish("host");
-          } else {
-            finish("all");
-            closeLiveSocket(sessionId, { intentional: true });
-          }
+          endHostTurn(data);
         }
       } catch {
         // ignore malformed frames

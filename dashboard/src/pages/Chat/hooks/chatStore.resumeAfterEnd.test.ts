@@ -99,4 +99,65 @@ describe("stream resume after the turn ended", () => {
       for (const ws of FakeWebSocket.instances) ws.readyState = 3;
     }
   });
+
+  it("reloads the stored turn when a rejoined turn ends, since the gap never arrived", async () => {
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"],
+    });
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const events: SessionEvent[] = [];
+    const stop = onSessionEvent((event) => events.push(event));
+    try {
+      setHistoryPage(THREAD, [], { hasMore: false, nextOffset: 0 });
+      const turn = sendTurn(
+        THREAD,
+        "cut one highlight",
+        "agent-1",
+        "",
+        undefined,
+        undefined,
+        null,
+        THREAD,
+      );
+      await Promise.resolve();
+      const first = FakeWebSocket.instances[0];
+      first.receive({ type: "token", content: "Rendering now." });
+      // The socket drops while the turn keeps running on the server.
+      first.close();
+      await turn;
+
+      vi.advanceTimersByTime(400);
+      await Promise.resolve();
+      const second = FakeWebSocket.instances[1];
+      second.receive({ type: "turn_status", thread_id: THREAD, active: true });
+      second.receive({
+        type: "steer.queue_snapshot",
+        seq: 1,
+        turn_id: "turn-1",
+        queue_length: 0,
+        continuation_count: 0,
+        items: [],
+        thread_id: THREAD,
+      });
+      second.receive({ type: "token", content: "Here is the MP4." });
+      second.receive({ type: "done" });
+      expect(second.readyState).toBe(1);
+      expect(events).not.toContainEqual(
+        expect.objectContaining({ kind: "sessionsChanged" }),
+      );
+      second.receive({ type: "turn.ended", thread_id: THREAD });
+
+      expect(getSnapshot(THREAD).isStreaming).toBe(false);
+      expect(isHistoryStale(THREAD)).toBe(true);
+      expect(events).toContainEqual({
+        kind: "sessionsChanged",
+        sessionId: THREAD,
+        agentId: "agent-1",
+      });
+    } finally {
+      stop();
+      for (const ws of FakeWebSocket.instances) ws.readyState = 3;
+    }
+  });
 });
