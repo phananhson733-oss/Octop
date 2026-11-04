@@ -1,4 +1,8 @@
-"""Block ``read_file`` on binary inbound attachments (PDF, Office, …)."""
+"""Block ``read_file`` on binary inbound attachments (PDF, Office, …).
+
+Video and audio never pass: deepagents would inline the whole file as base64, which
+overflows the provider's per-item limit and breaks every later turn of the thread.
+"""
 
 from __future__ import annotations
 
@@ -31,6 +35,30 @@ _BLOCKED_EXTENSIONS = frozenset(
         ".jpg",
         ".jpeg",
         ".png",
+    }
+)
+_MEDIA_EXTENSIONS = frozenset(
+    {
+        ".mp4",
+        ".m4v",
+        ".mov",
+        ".mkv",
+        ".webm",
+        ".avi",
+        ".flv",
+        ".wmv",
+        ".mpeg",
+        ".mpg",
+        ".3gp",
+        ".3gpp",
+        ".mp3",
+        ".m4a",
+        ".wav",
+        ".aac",
+        ".aiff",
+        ".ogg",
+        ".opus",
+        ".flac",
     }
 )
 _TEXT_EXTENSIONS = frozenset(
@@ -78,6 +106,12 @@ def read_file_block_reason(path: str) -> str | None:
     if not path:
         return None
     ext = _extension(path)
+    if ext in _MEDIA_EXTENSIONS:
+        return (
+            f"read_file blocked for video/audio `{path}`: it would put the whole file into the "
+            "conversation. Use execute_shell_command with ffprobe/ffmpeg or the clip skill "
+            "(extract frames, then read the .jpg frames) instead."
+        )
     if ext == ".pdf":
         return (
             f"read_file blocked for binary PDF `{path}`. "

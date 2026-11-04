@@ -18,3 +18,10 @@ def test_allows_inbound_txt() -> None:
 
 def test_blocks_pdf_anywhere() -> None:
     assert read_file_block_reason("docs/report.pdf") is not None
+
+
+def test_blocks_video_and_audio_anywhere() -> None:
+    for path in ("/var/tmp/work/clip.mp4", "inbound/01JTEST.MOV", "ep01.mp3", "voice.m4a"):
+        reason = read_file_block_reason(path)
+        assert reason is not None
+        assert "video/audio" in reason
