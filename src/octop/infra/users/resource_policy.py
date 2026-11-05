@@ -27,7 +27,6 @@ POLICY_DEFAULT_KNOWLEDGE_BASES = "default_knowledge_bases"
 POLICY_HIDDEN_EXPERT_TABS = "hidden_expert_tabs"
 # Read from the role template when an account joins the role.
 POLICY_DEFAULT_PUBLISHED_EXPERT = "default_published_expert"
-_HOME_NAV_KEY = "chat"
 # Tabs of the Experts page a role can hide. "My experts" always stays.
 EXPERT_TAB_KEYS = frozenset({"teams", "library", "market"})
 
@@ -265,7 +264,8 @@ def normalize_max_agents(raw: int | None) -> int | None:
 def normalize_visible_nav(raw: str | None) -> str | None:
     """Return comma-joined nav keys, or ``None`` when unrestricted.
 
-    ``chat`` is always kept, since that is where login lands.
+    A role may leave ``chat`` out: its accounts then land on the first page it
+    keeps (the dashboard's Roles panel still always adds it).
     """
     if raw is None or not raw.strip():
         return None
@@ -273,7 +273,7 @@ def normalize_visible_nav(raw: str | None) -> str | None:
     unknown = sorted(set(keys) - SIDEBAR_NAV_KEYS)
     if unknown:
         raise OctopError(ErrorCode.FORBIDDEN, f"unknown nav keys: {unknown}", status=400)
-    return ",".join(dict.fromkeys([_HOME_NAV_KEY, *keys]))
+    return ",".join(dict.fromkeys(keys))
 
 
 def normalize_hidden_expert_tabs(raw: str | None) -> str | None:

@@ -243,12 +243,11 @@ async def test_role_visible_nav_limits_its_accounts(env):
         json={
             "user_role_name": "对话成员",
             "permissions": ["knowledge_bases"],
-            "policies": [{"name": "visible_nav", "value": "knowledge-bases"}],
+            "policies": [{"name": "visible_nav", "value": "chat,knowledge-bases"}],
         },
     )
     assert created.status_code == 201, created.text
     role_id = created.json()["user_role_id"]
-    # Chat is always kept, since that is where login lands.
     assert created.json()["visible_nav"] == ["chat", "knowledge-bases"]
 
     unknown = await c.patch(
@@ -281,6 +280,66 @@ async def test_role_visible_nav_limits_its_accounts(env):
     assert opened.json()["visible_nav"] is None
     me = await c.get("/api/auth/me", headers=dora)
     assert me.json()["visible_nav"] is None
+
+
+async def test_role_can_hide_chat(env):
+    c, _srv, auth = env
+    created = await c.post(
+        "/api/users/roles",
+        headers=auth,
+        json={
+            "user_role_name": "只看工作台",
+            "permissions": [],
+            "policies": [{"name": "visible_nav", "value": "workbench"}],
+        },
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["visible_nav"] == ["workbench"]
+
+    user = await c.post(
+        "/api/users",
+        headers=auth,
+        json={
+            "username": "wren",
+            "password": TEST_PASSWORD,
+            "role": created.json()["user_role_id"],
+        },
+    )
+    assert user.status_code == 201, user.text
+    wren = bearer(await login(c, username="wren", password=TEST_PASSWORD))
+    me = await c.get("/api/auth/me", headers=wren)
+    assert me.json()["visible_nav"] == ["workbench"]
+    # No chat page to talk in, so no default assistant either.
+    agents = await c.get("/api/agents", headers=wren)
+    assert agents.json() == [], agents.text
+
+
+async def test_role_hiding_chat_keeps_the_assistant_for_its_modules(env):
+    c, _srv, auth = env
+    created = await c.post(
+        "/api/users/roles",
+        headers=auth,
+        json={
+            "user_role_name": "只用终端",
+            "permissions": ["terminal"],
+            "policies": [{"name": "visible_nav", "value": "workbench"}],
+        },
+    )
+    assert created.status_code == 201, created.text
+    user = await c.post(
+        "/api/users",
+        headers=auth,
+        json={
+            "username": "quinn",
+            "password": TEST_PASSWORD,
+            "role": created.json()["user_role_id"],
+        },
+    )
+    assert user.status_code == 201, user.text
+    quinn = bearer(await login(c, username="quinn", password=TEST_PASSWORD))
+    # The terminal runs on an agent, so the account still gets one.
+    agents = await c.get("/api/agents", headers=quinn)
+    assert len(agents.json()) == 1, agents.text
 
 
 async def test_role_permission_edits_reach_its_accounts(env):

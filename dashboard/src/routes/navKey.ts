@@ -1,5 +1,7 @@
 /** Path → sidebar key. Kept free of the route table so any component can import it. */
 
+import { canAccessPath, type PermissionHolder } from "../utils/permissions";
+
 export const pathToKey: Record<string, string> = {
   "/chat": "chat",
   // Common
@@ -55,4 +57,35 @@ export function resolveSelectedKey(pathname: string): string {
   if (pathname.startsWith("/remote-desktop/")) return "remote-desktop";
   if (pathname.startsWith("/personalization/")) return "personalization";
   return "";
+}
+
+/**
+ * Where an account lands: the chat page, or the first page the role keeps
+ * when it hides chat (``null`` when none of its pages has a path or opens).
+ * Whether the Workbench opens is the caller's to say: plugin pages there need
+ * no module permission, so it depends on which plugin UIs loaded.
+ */
+export function homePath(
+  user: PermissionHolder | null | undefined,
+  workbenchOpen = false,
+): string | null {
+  const visibleNav = user?.visible_nav;
+  if (!visibleNav || visibleNav.includes("chat")) return "/chat";
+  const paths = Object.keys(pathToKey);
+  for (const key of visibleNav) {
+    if (key === "workbench") {
+      if (workbenchOpen) return "/workbench";
+      continue;
+    }
+    // A tab, not its parent: a bare parent reopens the last tab, which may
+    // belong to a key the role hides (/personalization → .../channels).
+    const path = paths.find(
+      (p) =>
+        pathToKey[p] === key &&
+        !paths.some((q) => q.startsWith(p + "/")) &&
+        canAccessPath(user, p),
+    );
+    if (path) return path;
+  }
+  return null;
 }

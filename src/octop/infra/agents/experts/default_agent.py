@@ -25,6 +25,7 @@ from octop.infra.users.resource_policy import (
     effective_workspace_root_dir,
     role_default_knowledge_bases,
     role_default_published_experts,
+    role_visible_nav,
 )
 from octop.infra.utils.host_dirs import host_fs_tree_root
 from octop.infra.utils.locale import normalize_locale
@@ -120,6 +121,15 @@ async def try_bootstrap_default_agent(
         logger.warning("skip default agent bootstrap: app_runtime not ready")
         return
     try:
+        user = server.user_manager.get_by_id(user_id)
+        nav = role_visible_nav(server.services.db, user) if user is not None else None
+        if nav is not None and "chat" not in nav and not user.permissions:
+            # No chat page and no module (terminal, browser, ...) that runs on an agent:
+            # an assistant would only take an expert slot.
+            logger.info(
+                "skip default agent bootstrap for user %s: no chat and no permissions", user_id
+            )
+            return
         await bootstrap_default_agent(
             server.app_runtime.agent_registry,
             server.expert_catalog,

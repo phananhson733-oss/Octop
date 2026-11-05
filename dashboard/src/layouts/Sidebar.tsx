@@ -13,6 +13,7 @@ import BrandWordmark, {
 import { useLayoutMode } from "../context/LayoutModeContext";
 import { useUserRole } from "../hooks/useUserRole";
 import { useCurrentUser, useSetCurrentUser } from "../hooks/useCurrentUser";
+import { navKeyVisible } from "../utils/permissions";
 import { useUpdateStatus } from "../hooks/useUpdateStatus";
 import { prefetchRoute } from "../routes/prefetch";
 import { useServerCapabilities } from "../hooks/useServerCapabilities";
@@ -570,6 +571,9 @@ export default function Sidebar({
   const namedSections = navSections.filter((section) => section.id);
   const firstNamed = namedSections[0];
   const settingsPaneLabel = firstNamed ? navSectionLabel(firstNamed, t) : null;
+  // A role without chat has no records pane, whatever pane was last picked.
+  const chatVisible = navKeyVisible(user, "chat");
+  const shownPane = chatVisible ? minimalPane : "settings";
   const groupedItems = namedSections.flatMap((section) =>
     section.id && isGroupCollapsed(section.id) ? [] : section.items,
   );
@@ -580,14 +584,15 @@ export default function Sidebar({
     }
   }, [isMinimal, settingsPaneLabel, minimalPane, setMinimalPane]);
 
-  const paneToggle = settingsPaneLabel ? (
-    <SidebarMinimalPaneToggle
-      settingsLabel={settingsPaneLabel}
-      minimalPane={minimalPane}
-      collapsed={isRailCollapsed}
-      onSelect={selectMinimalPane}
-    />
-  ) : null;
+  const paneToggle =
+    settingsPaneLabel && chatVisible ? (
+      <SidebarMinimalPaneToggle
+        settingsLabel={settingsPaneLabel}
+        minimalPane={minimalPane}
+        collapsed={isRailCollapsed}
+        onSelect={selectMinimalPane}
+      />
+    ) : null;
 
   const classicNavBody = isRailCollapsed ? (
     <div style={{ padding: "8px 0" }}>
@@ -632,7 +637,7 @@ export default function Sidebar({
             t={t}
           />
           {paneToggle}
-          {minimalPane === "settings" ? (
+          {shownPane === "settings" ? (
             <SidebarCollapsedIconNav
               items={groupedItems}
               selectedKey={selectedKey}
@@ -661,7 +666,7 @@ export default function Sidebar({
           </div>
           <div
             className={styles.minimalSettingsPane}
-            hidden={minimalPane !== "settings"}
+            hidden={shownPane !== "settings"}
           >
             <NavList
               sections={navSections}
@@ -685,9 +690,9 @@ export default function Sidebar({
       <div
         id={CHAT_HISTORY_RAIL_ID}
         className={styles.minimalRecordsPane}
-        hidden={isRailCollapsed || minimalPane !== "records"}
+        hidden={isRailCollapsed || shownPane !== "records"}
       >
-        {!onChatPath ? <MinimalRecordsHost /> : null}
+        {!onChatPath && chatVisible ? <MinimalRecordsHost /> : null}
       </div>
     </div>
   );
@@ -766,8 +771,7 @@ export default function Sidebar({
         <div
           style={{
             flex: 1,
-            overflow:
-              isMinimal && minimalPane === "records" ? "hidden" : "auto",
+            overflow: isMinimal && shownPane === "records" ? "hidden" : "auto",
             minHeight: 0,
             display: "flex",
             flexDirection: "column",
@@ -826,7 +830,7 @@ export default function Sidebar({
         style={{
           flex: 1,
           minHeight: 0,
-          overflowY: isMinimal && minimalPane === "records" ? "hidden" : "auto",
+          overflowY: isMinimal && shownPane === "records" ? "hidden" : "auto",
           overflowX: "hidden",
           display: "flex",
           flexDirection: "column",

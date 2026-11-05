@@ -1,6 +1,6 @@
 import { Layout } from "antd";
 import { lazy, Suspense, useEffect, useState, useCallback } from "react";
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Navigate, Routes, Route, useLocation } from "react-router-dom";
 import Sidebar from "../Sidebar";
 import Header from "../Header";
 import RailEdgeControl from "../../components/RailEdgeControl";
@@ -25,8 +25,14 @@ import { useChatSidebarOpen } from "../../pages/Chat/hooks/useChatSidebarState";
 import { EXPAND_CHAT_RAIL_EVENT } from "../../pages/Chat/components/ChatSidebarPanel";
 import RequirePermission from "../../components/RequirePermission";
 import WorkbenchGate from "../../pages/Control/Workbench/WorkbenchGate";
-import { useInstalledPluginUis } from "../../plugins/workbenchPages";
+import {
+  useInstalledPluginUis,
+  usePluginUisSettled,
+  useWorkbenchPages,
+  workbenchAccess,
+} from "../../plugins/workbenchPages";
 import ForbiddenPage from "../../components/ForbiddenPage";
+import { homePath } from "../../routes/navKey";
 import { navKeyVisible, routeNeedsPermission } from "../../utils/permissions";
 import { useCurrentUser } from "../../hooks/useCurrentUser";
 import { useLayoutMode } from "../../context/LayoutModeContext";
@@ -73,6 +79,13 @@ export default function MainLayout() {
     (isMobile && MOBILE_FULLSCREEN_PATHS.has(currentPath));
   const user = useCurrentUser();
   useInstalledPluginUis(user !== null);
+  const workbenchSlugs = useWorkbenchPages().map((page) => page.slug);
+  const workbench = workbenchAccess(
+    user,
+    "/workbench",
+    workbenchSlugs,
+    usePluginUisSettled(),
+  );
   const onWorkbench =
     isWorkbenchPath(currentPath) && navKeyVisible(user, "workbench");
 
@@ -175,7 +188,20 @@ export default function MainLayout() {
           const navKey =
             (rc.path.endsWith("/*") && selectedKey) || routeNavKey(rc.path);
           if (navKey && !navKeyVisible(user, navKey)) {
-            el = <ForbiddenPage />;
+            // Login and most "back" links go to /chat; a role without chat
+            // lands on its first page instead. Wait for the plugin UIs only
+            // when whether the Workbench opens changes that page.
+            const home =
+              navKey === "chat" && homePath(user, workbench === "allow");
+            if (
+              navKey === "chat" &&
+              workbench === "pending" &&
+              homePath(user, true) !== homePath(user, false)
+            ) {
+              el = <PageLoading />;
+            } else {
+              el = home ? <Navigate to={home} replace /> : <ForbiddenPage />;
+            }
           }
           return <Route key={rc.path} path={rc.path} element={el} />;
         })}
