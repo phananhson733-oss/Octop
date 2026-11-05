@@ -62,17 +62,21 @@ export function resolveSelectedKey(pathname: string): string {
 /**
  * Where an account lands: the chat page, or the first page the role keeps
  * when it hides chat (``null`` when none of its pages has a path or opens).
- * The Workbench is left to its own guard: plugin pages there need no module
- * permission.
+ * Whether the Workbench opens is the caller's to say: plugin pages there need
+ * no module permission, so it depends on which plugin UIs loaded.
  */
 export function homePath(
   user: PermissionHolder | null | undefined,
+  workbenchOpen = false,
 ): string | null {
   const visibleNav = user?.visible_nav;
   if (!visibleNav || visibleNav.includes("chat")) return "/chat";
   for (const key of visibleNav) {
     const path = Object.keys(pathToKey).find((p) => pathToKey[p] === key);
-    if (path && (key === "workbench" || canAccessPath(user, path))) {
+    if (
+      path &&
+      (key === "workbench" ? workbenchOpen : canAccessPath(user, path))
+    ) {
       return path;
     }
   }

@@ -123,9 +123,12 @@ async def try_bootstrap_default_agent(
     try:
         user = server.user_manager.get_by_id(user_id)
         nav = role_visible_nav(server.services.db, user) if user is not None else None
-        if nav is not None and "chat" not in nav:
-            # The account cannot open the chat page, so an assistant would only take an expert slot.
-            logger.info("skip default agent bootstrap for user %s: the role hides chat", user_id)
+        if nav is not None and "chat" not in nav and not user.permissions:
+            # No chat page and no module (terminal, browser, ...) that runs on an agent:
+            # an assistant would only take an expert slot.
+            logger.info(
+                "skip default agent bootstrap for user %s: no chat and no permissions", user_id
+            )
             return
         await bootstrap_default_agent(
             server.app_runtime.agent_registry,
