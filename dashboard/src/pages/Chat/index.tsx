@@ -577,6 +577,7 @@ function ChatPageInner() {
     chatKnowledgeBases,
     availableModels,
     modelsReady,
+    modelsLoadFailed,
     activeModelRef,
     reasoningMode,
     reasoningEffort,
@@ -1558,7 +1559,10 @@ function ChatPageInner() {
                   loading={agentsLoading}
                 />
               ) : showWelcome && modelsReady && availableModels.length === 0 ? (
-                <ModelConfigEmpty canConfigure={canConfigureModels} />
+                <ModelConfigEmpty
+                  canConfigure={canConfigureModels}
+                  loadFailed={modelsLoadFailed}
+                />
               ) : showWelcome ? (
                 <WelcomeScreen
                   agentName={activeAgent?.name ?? null}
@@ -1834,16 +1838,22 @@ function ChatPageInner() {
               <div className={styles.modelConfigDock}>
                 <div className={styles.modelConfigDockInner}>
                   <Alert
-                    type="info"
+                    type={modelsLoadFailed ? "warning" : "info"}
                     showIcon
-                    message={t("modelConfig.promptTitle")}
+                    message={
+                      modelsLoadFailed
+                        ? t("modelConfig.loadFailedTitle")
+                        : t("modelConfig.promptTitle")
+                    }
                     description={
-                      canConfigureModels
+                      modelsLoadFailed
+                        ? t("modelConfig.loadFailedMessage")
+                        : canConfigureModels
                         ? t("modelConfig.promptMessage")
                         : t("modelConfig.promptMessageNoPermission")
                     }
                     action={
-                      canConfigureModels ? (
+                      canConfigureModels && !modelsLoadFailed ? (
                         <Button
                           type="primary"
                           size="small"

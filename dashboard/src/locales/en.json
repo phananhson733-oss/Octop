@@ -4051,6 +4051,8 @@
     "promptTitle": "A model is required",
     "promptMessage": "Open Admin → Model Management, add a provider, and enable at least one model before you can chat.",
     "promptMessageNoPermission": "No models are available yet. Ask an administrator to configure one before you can chat.",
+    "loadFailedTitle": "Could not load the model list",
+    "loadFailedMessage": "The server is unreachable, possibly restarting. This page retries every few seconds; you can keep chatting once it answers, with no need to reconfigure models.",
     "configureButton": "Configure models",
     "skipButton": "Skip",
     "chatDisabledTitle": "Chat Disabled",

@@ -45,6 +45,8 @@ import {
   type HitlSessionPolicy,
 } from "../utils/hitlSessionPolicy";
 
+const MODELS_RETRY_MS = 5000;
+
 export function useChatComposerResources(
   resolvedAgentId: string | null | undefined,
   activeThreadId?: string | null,
@@ -93,6 +95,9 @@ export function useChatComposerResources(
   >([]);
   const [availableModels, setAvailableModels] = useState<ResolvedModel[]>([]);
   const [modelsReady, setModelsReady] = useState(false);
+  // The last model-list fetch failed (server restarting, network): not the
+  // same as "no models configured", so the page must not say that.
+  const [modelsLoadFailed, setModelsLoadFailed] = useState(false);
   const [activeModelRef, setActiveModelRef] = useState<string | null>(null);
   const [selectedModel, setSelectedModel] = useState<string | null>(null);
   const [preferredModel, setPreferredModel] = useState<string | null>(null);
@@ -368,20 +373,25 @@ export function useChatComposerResources(
 
   useEffect(() => {
     let cancelled = false;
+    let retryTimer: ReturnType<typeof setTimeout> | undefined;
     setModelsReady(false);
     const loadModels = () => {
+      clearTimeout(retryTimer);
       void providerApi
         .listResolvedModels(resolvedAgentId)
         .then((data) => {
           if (!cancelled) {
             setAvailableModels(data);
+            setModelsLoadFailed(false);
             setModelsReady(true);
           }
         })
         .catch(() => {
           if (!cancelled) {
-            setAvailableModels([]);
+            // Keep the last good list; retry until the server answers.
+            setModelsLoadFailed(true);
             setModelsReady(true);
+            retryTimer = setTimeout(loadModels, MODELS_RETRY_MS);
           }
         });
     };
@@ -390,6 +400,7 @@ export function useChatComposerResources(
     window.addEventListener("focus", onFocus);
     return () => {
       cancelled = true;
+      clearTimeout(retryTimer);
       window.removeEventListener("focus", onFocus);
     };
   }, [resolvedAgentId]);
@@ -581,6 +592,7 @@ export function useChatComposerResources(
     chatKnowledgeBases,
     availableModels,
     modelsReady,
+    modelsLoadFailed,
     activeModelRef,
     handleConnectorsChange,
     handleKnowledgeBaseIdsChange,
