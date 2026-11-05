@@ -311,6 +311,34 @@ async def test_role_can_hide_chat(env):
     assert agents.json() == [], agents.text
 
 
+async def test_role_hiding_chat_keeps_the_assistant_for_its_modules(env):
+    c, _srv, auth = env
+    created = await c.post(
+        "/api/users/roles",
+        headers=auth,
+        json={
+            "user_role_name": "只用终端",
+            "permissions": ["terminal"],
+            "policies": [{"name": "visible_nav", "value": "workbench"}],
+        },
+    )
+    assert created.status_code == 201, created.text
+    user = await c.post(
+        "/api/users",
+        headers=auth,
+        json={
+            "username": "quinn",
+            "password": TEST_PASSWORD,
+            "role": created.json()["user_role_id"],
+        },
+    )
+    assert user.status_code == 201, user.text
+    quinn = bearer(await login(c, username="quinn", password=TEST_PASSWORD))
+    # The terminal runs on an agent, so the account still gets one.
+    agents = await c.get("/api/agents", headers=quinn)
+    assert len(agents.json()) == 1, agents.text
+
+
 async def test_role_permission_edits_reach_its_accounts(env):
     c, _srv, auth = env
     created = await c.post(

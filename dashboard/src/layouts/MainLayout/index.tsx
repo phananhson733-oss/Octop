@@ -25,7 +25,12 @@ import { useChatSidebarOpen } from "../../pages/Chat/hooks/useChatSidebarState";
 import { EXPAND_CHAT_RAIL_EVENT } from "../../pages/Chat/components/ChatSidebarPanel";
 import RequirePermission from "../../components/RequirePermission";
 import WorkbenchGate from "../../pages/Control/Workbench/WorkbenchGate";
-import { useInstalledPluginUis } from "../../plugins/workbenchPages";
+import {
+  useInstalledPluginUis,
+  usePluginUisSettled,
+  useWorkbenchPages,
+  workbenchAccess,
+} from "../../plugins/workbenchPages";
 import ForbiddenPage from "../../components/ForbiddenPage";
 import { homePath } from "../../routes/navKey";
 import { navKeyVisible, routeNeedsPermission } from "../../utils/permissions";
@@ -74,6 +79,13 @@ export default function MainLayout() {
     (isMobile && MOBILE_FULLSCREEN_PATHS.has(currentPath));
   const user = useCurrentUser();
   useInstalledPluginUis(user !== null);
+  const workbenchSlugs = useWorkbenchPages().map((page) => page.slug);
+  const workbench = workbenchAccess(
+    user,
+    "/workbench",
+    workbenchSlugs,
+    usePluginUisSettled(),
+  );
   const onWorkbench =
     isWorkbenchPath(currentPath) && navKeyVisible(user, "workbench");
 
@@ -177,9 +189,15 @@ export default function MainLayout() {
             (rc.path.endsWith("/*") && selectedKey) || routeNavKey(rc.path);
           if (navKey && !navKeyVisible(user, navKey)) {
             // Login and most "back" links go to /chat; a role without chat
-            // lands on its first page instead.
-            const home = navKey === "chat" && homePath(user);
-            el = home ? <Navigate to={home} replace /> : <ForbiddenPage />;
+            // lands on its first page instead, once it is known whether the
+            // Workbench (plugin pages) opens for it.
+            const home =
+              navKey === "chat" && homePath(user, workbench === "allow");
+            if (navKey === "chat" && workbench === "pending") {
+              el = <PageLoading />;
+            } else {
+              el = home ? <Navigate to={home} replace /> : <ForbiddenPage />;
+            }
           }
           return <Route key={rc.path} path={rc.path} element={el} />;
         })}
