@@ -4052,6 +4052,8 @@
     "promptTitle": "还没有可用模型",
     "promptMessage": "请先到「管理 → 模型」添加提供商并启用至少一个模型，才能开始对话。",
     "promptMessageNoPermission": "当前没有可用模型，请联系管理员配置后再开始对话。",
+    "loadFailedTitle": "暂时取不到模型列表",
+    "loadFailedMessage": "连不上服务器，可能正在重启。页面会每几秒自动重试，恢复后就能继续对话，不用重新配置模型。",
     "configureButton": "去配置模型",
     "skipButton": "跳过",
     "chatDisabledTitle": "聊天已禁用",

@@ -78,6 +78,7 @@ vi.mock("../../../context/AgentContext", () => ({
 }));
 
 import { preferencesApi } from "../../../api/modules/preferences";
+import { providerApi } from "../../../api/modules/provider";
 import { useChatComposerResources } from "./useChatComposerResources";
 
 const baseAgents = [
@@ -278,5 +279,33 @@ describe("useChatComposerResources — peer expert defaults", () => {
       expect(result.current.selectedKnowledgeBaseIds).toEqual(["k2"]);
       expect(result.current.conversationMode).toBe("plan");
     });
+  });
+});
+
+describe("useChatComposerResources — model list fetch failure", () => {
+  it("flags a failed fetch instead of reporting no models, then retries", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const models = [{ provider_name: "prov", model: "m1" }];
+      vi.mocked(providerApi.listResolvedModels)
+        .mockRejectedValueOnce(new Error("502"))
+        .mockResolvedValue(models as never);
+
+      const { result } = renderHook(() =>
+        useChatComposerResources("expertA", null),
+      );
+
+      await waitFor(() => expect(result.current.modelsLoadFailed).toBe(true));
+      expect(result.current.modelsReady).toBe(true);
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      await waitFor(() => expect(result.current.modelsLoadFailed).toBe(false));
+      expect(result.current.availableModels).toEqual(models);
+    } finally {
+      vi.useRealTimers();
+      vi.mocked(providerApi.listResolvedModels).mockResolvedValue([]);
+    }
   });
 });
