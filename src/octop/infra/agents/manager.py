@@ -3896,6 +3896,7 @@ class AgentManager:
         policy = SecurityPolicy.merge(global_policy, agent_override)
 
         from octop.infra.agents.middleware.binary_read_guard import BinaryReadGuardMiddleware
+        from octop.infra.agents.middleware.blocked_image_retry import BlockedImageRetryMiddleware
         from octop.infra.agents.middleware.browser_profile import BrowserProfileMiddleware
         from octop.infra.agents.middleware.octop_ui_offload import OctopUiOffloadMiddleware
         from octop.infra.agents.middleware.reasoning import ReasoningRequestMiddleware
@@ -3910,6 +3911,7 @@ class AgentManager:
         # BinaryReadGuard stays Octop-specific (inbound/attachment product policy).
         # ThreadArtifacts writes workspace paths onto threads after successful tools.
         # WorkspaceImageMaterialize expands path-only vision refs at model-call time.
+        # BlockedImageRetry sits inside it so it sees the images the provider gets.
         # OctopUiOffload stays innermost so every outer middleware observes the
         # slimmed content consistently; it only touches octop_ui plugin envelopes,
         # disjoint from the file-tool results ThreadArtifacts cares about.
@@ -3924,6 +3926,7 @@ class AgentManager:
             BrowserProfileMiddleware(),
             BinaryReadGuardMiddleware(),
             WorkspaceImageMaterializeMiddleware(workspace=ws),
+            BlockedImageRetryMiddleware(),
             ThreadArtifactsMiddleware(
                 thread_repo=self._repos.thread_repo,
                 workspace_dir=harness_workspace,
