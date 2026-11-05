@@ -137,3 +137,20 @@ def test_status_only_model_does_not_emit_fake_controls() -> None:
     assert capability is not None
     assert capability["efforts"] == []
     assert reasoning_request_parameters(capability, mode="disabled", effort="high") == {}
+
+
+def test_chatgpt_login_models_take_an_effort() -> None:
+    codex = "https://chatgpt.com/backend-api/codex"
+    capability = reasoning_capability({"id": "gpt-6.1-sol"}, base_url=codex)
+    assert capability is not None
+    assert capability["adapter"] == "openai_reasoning_effort"
+    assert capability["toggle"] is False
+    assert capability["efforts"] == ["low", "medium", "high", "xhigh", "max"]
+    # Nothing picked: no effort is sent and the backend keeps its own default.
+    assert capability["default_effort"] is None
+    assert reasoning_request_parameters(capability, mode=None, effort=None) == {}
+    assert reasoning_request_parameters(capability, mode="auto", effort="low") == {
+        "model_fields": {"reasoning_effort": "low"}
+    }
+    # Other providers without metadata are unchanged.
+    assert reasoning_capability({"id": "gpt-6.1-sol"}, base_url="https://example.com/v1") is None

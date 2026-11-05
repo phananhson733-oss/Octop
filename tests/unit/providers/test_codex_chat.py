@@ -203,6 +203,15 @@ def test_payload_moves_the_system_prompt_into_instructions() -> None:
     assert image["type"] == "input_image"
 
 
+def test_payload_sends_the_effort_the_responses_way() -> None:
+    model = build_codex_chat_model(model_id="gpt-6.1-sol", base_url=CODEX_URL, api_key="t")
+    # What ReasoningRequestMiddleware does for a picked effort
+    low = model.model_copy(update={"reasoning_effort": "low"})
+    payload = low._get_request_payload([HumanMessage("hi")])
+    assert payload["reasoning"]["effort"] == "low"
+    assert "reasoning_effort" not in payload
+
+
 def test_payload_without_a_system_prompt_still_sends_instructions() -> None:
     model = build_codex_chat_model(model_id="gpt-6-astra", base_url=CODEX_URL, api_key="t")
     payload = model._get_request_payload([HumanMessage("hi")])

@@ -241,15 +241,44 @@ def fetch_codex_models(access_token: str, account_id: str) -> list[dict[str, Any
     for m in listed:
         slug = str(m["slug"])
         inputs = [x for x in m.get("input_modalities") or [] if isinstance(x, str)]
-        models.append(
-            {
-                "id": slug,
-                "name": str(m.get("display_name") or slug),
-                "enabled": True,
-                "input": inputs or ["text"],
-            }
-        )
+        model: dict[str, Any] = {
+            "id": slug,
+            "name": str(m.get("display_name") or slug),
+            "enabled": True,
+            "input": inputs or ["text"],
+        }
+        reasoning = _catalog_reasoning(m)
+        if reasoning is not None:
+            model["reasoning_config"] = reasoning
+        models.append(model)
     return models or None
+
+
+def _catalog_reasoning(entry: dict[str, Any]) -> dict[str, Any] | None:
+    """The model's efforts and its default, as the Codex CLI reads them from the catalog.
+
+    The backend runs medium when a request names no effort, which is not every model's
+    default (gpt-6.1-sol's is low), so the default is kept and sent.
+    """
+    levels = entry.get("supported_reasoning_levels")
+    if not isinstance(levels, list):
+        return None
+    efforts = [
+        str(level["effort"])
+        for level in levels
+        if isinstance(level, dict) and isinstance(level.get("effort"), str)
+    ]
+    if not efforts:
+        return None
+    default = entry.get("default_reasoning_level")
+    return {
+        "supported": True,
+        "adapter": "openai_reasoning_effort",
+        "toggle": False,
+        "default_mode": "enabled",
+        "efforts": efforts,
+        "default_effort": default if default in efforts else None,
+    }
 
 
 class DeviceCodeInfo(TypedDict):
