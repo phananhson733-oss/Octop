@@ -189,11 +189,15 @@ export default function MainLayout() {
             (rc.path.endsWith("/*") && selectedKey) || routeNavKey(rc.path);
           if (navKey && !navKeyVisible(user, navKey)) {
             // Login and most "back" links go to /chat; a role without chat
-            // lands on its first page instead, once it is known whether the
-            // Workbench (plugin pages) opens for it.
+            // lands on its first page instead. Wait for the plugin UIs only
+            // when whether the Workbench opens changes that page.
             const home =
               navKey === "chat" && homePath(user, workbench === "allow");
-            if (navKey === "chat" && workbench === "pending") {
+            if (
+              navKey === "chat" &&
+              workbench === "pending" &&
+              homePath(user, true) !== homePath(user, false)
+            ) {
               el = <PageLoading />;
             } else {
               el = home ? <Navigate to={home} replace /> : <ForbiddenPage />;
