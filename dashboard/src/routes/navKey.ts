@@ -71,14 +71,21 @@ export function homePath(
 ): string | null {
   const visibleNav = user?.visible_nav;
   if (!visibleNav || visibleNav.includes("chat")) return "/chat";
+  const paths = Object.keys(pathToKey);
   for (const key of visibleNav) {
-    const path = Object.keys(pathToKey).find((p) => pathToKey[p] === key);
-    if (
-      path &&
-      (key === "workbench" ? workbenchOpen : canAccessPath(user, path))
-    ) {
-      return path;
+    if (key === "workbench") {
+      if (workbenchOpen) return "/workbench";
+      continue;
     }
+    // A tab, not its parent: a bare parent reopens the last tab, which may
+    // belong to a key the role hides (/personalization → .../channels).
+    const path = paths.find(
+      (p) =>
+        pathToKey[p] === key &&
+        !paths.some((q) => q.startsWith(p + "/")) &&
+        canAccessPath(user, p),
+    );
+    if (path) return path;
   }
   return null;
 }
