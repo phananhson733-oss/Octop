@@ -28,6 +28,12 @@ describe("homePath", () => {
     ).toBe("/knowledge-bases");
   });
 
+  it("lands on a tab rather than a parent that reopens the last tab", () => {
+    expect(homePath(user(["personalization"], ["skills", "channels"]))).toBe(
+      "/personalization/skills",
+    );
+  });
+
   it("gives up rather than loop back to chat", () => {
     expect(homePath(user(["nope"]))).toBeNull();
     expect(homePath(user(["workbench"]))).toBeNull();
