@@ -189,6 +189,33 @@ def test_fetch_codex_models_keeps_listed_models_by_priority() -> None:
     ]
 
 
+def test_fetch_codex_models_keeps_each_models_efforts_and_default() -> None:
+    sol = _catalog_entry("gpt-6.1-sol", priority=1)
+    sol["default_reasoning_level"] = "low"
+    sol["supported_reasoning_levels"] = [
+        {"effort": "low", "description": "Fast"},
+        {"effort": "medium", "description": "Balanced"},
+        {"effort": "max", "description": "Deepest"},
+    ]
+    bare = _catalog_entry("gpt-6-astra", priority=2)
+    payload = json.dumps({"models": [sol, bare]}).encode()
+
+    with mock.patch("urllib.request.urlopen", lambda req, timeout=30: _Resp(payload)):
+        models = fetch_codex_models("access-tok", "acct-123")
+
+    assert models is not None
+    assert models[0]["reasoning_config"] == {
+        "supported": True,
+        "adapter": "openai_reasoning_effort",
+        "toggle": False,
+        "default_mode": "enabled",
+        "efforts": ["low", "medium", "max"],
+        "default_effort": "low",
+    }
+    # Without catalog levels, reasoning_capability's ChatGPT-login fallback applies.
+    assert "reasoning_config" not in models[1]
+
+
 @pytest.mark.parametrize(
     "failure",
     [

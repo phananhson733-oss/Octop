@@ -18,6 +18,10 @@ REASONING_ADAPTERS = frozenset(
     }
 )
 EFFORT_TYPES = frozenset({"enum", "token_budget"})
+# A ChatGPT login (Codex backend) stores its catalog without reasoning metadata. Every
+# model it listed on 2026-11-05 takes these efforts; left unset, the backend uses medium.
+CODEX_BASE_URL_MARK = "chatgpt.com/backend-api/codex"
+CODEX_EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 TOKEN_PLAN_REASONING_MODELS = frozenset(
     {
         "tc-code-latest",
@@ -70,6 +74,13 @@ def reasoning_capability(
     thinking_option = options.get("thinking") if isinstance(options, dict) else None
     model_id = str(model.get("id") or "").strip().lower()
     known_token_plan_model = model_id in TOKEN_PLAN_REASONING_MODELS
+    if not isinstance(raw, dict) and CODEX_BASE_URL_MARK in (base_url or "").lower():
+        raw = {
+            "adapter": "openai_reasoning_effort",
+            "toggle": False,
+            "default_mode": "enabled",
+            "efforts": CODEX_EFFORTS,
+        }
     if not isinstance(raw, dict):
         if not legacy and not isinstance(thinking_option, dict) and not known_token_plan_model:
             return None
