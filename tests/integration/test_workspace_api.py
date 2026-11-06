@@ -6,6 +6,7 @@ through ``agent.workspace`` backed by ``local_shell`` on the agent dir.
 
 from __future__ import annotations
 
+import os
 from io import BytesIO
 from typing import Any
 
@@ -14,6 +15,7 @@ from docx import Document
 
 # Workspace UI semantics: leading '/' is relative to agent workspace.
 FROM_WORKSPACE = {"from_workspace": "true"}
+posix_only = pytest.mark.skipif(os.name != "posix", reason="POSIX system paths")
 
 
 def _sample_docx_bytes() -> bytes:
@@ -528,3 +530,126 @@ async def test_doc_write_invalid_content_400(env: Any) -> None:
         headers=auth,
     )
     assert r.status_code == 400
+
+
+# --- host paths ------------------------------------------------------------
+
+
+@posix_only
+async def test_read_system_path_forbidden(env: Any) -> None:
+    c, _srv, auth, aid = env
+    r = await c.get(
+        f"/api/agents/{aid}/workspace/file", params={"path": "/etc/hosts"}, headers=auth
+    )
+    assert r.status_code == 403, r.text
+
+
+async def test_write_outside_workspace_forbidden_as_root(
+    env: Any, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import tempfile
+
+    from octop.api.routers import workspace as workspace_router
+
+    c, _srv, auth, aid = env
+    temp_root = tmp_path / "temp"
+    temp_root.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_root))
+    monkeypatch.setattr(workspace_router, "runs_as_root", lambda: True)
+    outside = tmp_path / "outside" / "note.txt"
+    outside.parent.mkdir()
+
+    r = await c.put(
+        f"/api/agents/{aid}/workspace/file",
+        params={"path": str(outside)},
+        headers=auth,
+        json={"content": "x"},
+    )
+    assert r.status_code == 403, r.text
+    assert not outside.exists()
+
+    r = await c.post(
+        f"/api/agents/{aid}/workspace/upload",
+        params={"path": str(outside)},
+        headers=auth,
+        files={"file": ("note.txt", b"x")},
+    )
+    assert r.status_code == 403, r.text
+
+    outside.write_text("server file")
+    r = await c.get(
+        f"/api/agents/{aid}/workspace/file", params={"path": str(outside)}, headers=auth
+    )
+    assert r.status_code == 403, r.text
+    r = await c.get(
+        f"/api/agents/{aid}/workspace/download", params={"path": str(outside)}, headers=auth
+    )
+    assert r.status_code == 403, r.text
+    outside.unlink()
+    # BackendWorkspace reads ``./~/x`` as ``~/x``, the server's home.
+    for sneaky in ("./~/.octop/config.json", "././~/.octop/config.json", f"./ {outside}"):
+        r = await c.get(
+            f"/api/agents/{aid}/workspace/download", params={"path": sneaky}, headers=auth
+        )
+        assert r.status_code == 403, (sneaky, r.text)
+
+    # Searches read every file below their root.
+    r = await c.get(
+        f"/api/agents/{aid}/workspace/grep",
+        params={"pattern": "x", "path": str(outside.parent)},
+        headers=auth,
+    )
+    assert r.status_code == 403, r.text
+
+    # The dashboard's own workspace views keep working.
+    for route, params in (
+        ("tree", {**FROM_WORKSPACE, "path": "/"}),
+        ("grep", {**FROM_WORKSPACE, "pattern": "x", "path": "/"}),
+        ("glob", {**FROM_WORKSPACE, "pattern": "*", "path": "/"}),
+    ):
+        r = await c.get(f"/api/agents/{aid}/workspace/{route}", params=params, headers=auth)
+        assert r.status_code == 200, (route, r.text)
+    r = await c.put(
+        f"/api/agents/{aid}/workspace/file",
+        params={**FROM_WORKSPACE, "path": "/.media-cache/a b.txt"},
+        headers=auth,
+        json={"content": "x"},
+    )
+    assert r.status_code == 200, r.text
+    r = await c.get(
+        f"/api/agents/{aid}/workspace/download",
+        params={"path": ".media-cache/a b.txt"},
+        headers=auth,
+    )
+    assert r.status_code == 200, r.text
+
+    inside = temp_root / "ok.txt"
+    r = await c.put(
+        f"/api/agents/{aid}/workspace/file",
+        params={"path": str(inside)},
+        headers=auth,
+        json={"content": "x"},
+    )
+    assert r.status_code == 200, r.text
+
+
+async def test_home_and_file_url_paths_not_mutable(env: Any) -> None:
+    c, _srv, auth, aid = env
+    r = await c.delete(
+        f"/api/agents/{aid}/workspace/file",
+        params={"path": "file:///tmp/nothing-here"},
+        headers=auth,
+    )
+    assert r.status_code == 403, r.text
+    r = await c.delete(
+        f"/api/agents/{aid}/workspace/file",
+        params={**FROM_WORKSPACE, "path": "/~/nothing-here"},
+        headers=auth,
+    )
+    assert r.status_code == 403, r.text
+    r = await c.get(
+        f"/api/agents/{aid}/workspace/file",
+        params={**FROM_WORKSPACE, "path": "/~/.ssh/id_rsa"},
+        headers=auth,
+    )
+    assert r.status_code in (403, 404), r.text

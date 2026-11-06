@@ -4,15 +4,22 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+from dataclasses import replace
 from typing import Any
 
-from octop_harness.security.models import SecurityPolicy
+from octop_harness.security.models import FilesystemPolicy, FilesystemRule, SecurityPolicy
 
 from octop.infra.db.repos.settings import SettingsRepo
 
 logger = logging.getLogger(__name__)
 
 _SETTINGS_KEY = "security_policy"
+# Deployment-level path denies for the built-in file tools, ``os.pathsep``-separated globs.
+# They go in front of the stored rules (first match wins), so an admin or agent policy
+# cannot re-open them, and they keep the guard on even when the stored policy turns it off.
+# Writes are confined separately (``OCTOP_FS_CONFINE_WRITES``, see ``path_rules_guard``).
+_DENY_ENV = "OCTOP_FS_DENY"
 
 
 def _default_policy() -> SecurityPolicy:
@@ -50,7 +57,7 @@ class SecuritySettingsStore:
         return resolved
 
     def harness_policy(self) -> SecurityPolicy:
-        return self.load()
+        return with_deployment_path_denies(self.load())
 
 
 def tool_execution_may_pause(policy: SecurityPolicy) -> bool:
@@ -63,3 +70,17 @@ def tool_execution_may_pause(policy: SecurityPolicy) -> bool:
         return True
     guard = policy.tool_guard
     return bool(guard.enabled and guard.mode == "require_approval")
+
+
+def _env_globs(name: str) -> list[str]:
+    return [p.strip() for p in os.environ.get(name, "").split(os.pathsep) if p.strip()]
+
+
+def with_deployment_path_denies(policy: SecurityPolicy) -> SecurityPolicy:
+    """Prepend the ``OCTOP_FS_DENY`` rule to *policy*."""
+    deny = _env_globs(_DENY_ENV)
+    if not deny:
+        return policy
+    rule = FilesystemRule(operations=["read", "write"], paths=deny, mode="deny")
+    stored = policy.filesystem.rules if policy.filesystem.enabled else []
+    return replace(policy, filesystem=FilesystemPolicy(enabled=True, rules=[rule, *stored]))
