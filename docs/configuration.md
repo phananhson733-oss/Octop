@@ -191,6 +191,7 @@ Each variable, when set, takes precedence over the matching key in
 | `OCTOP_ENABLE_API_DOCS` | bool | `false` | Expose Scalar API docs at `/api/docs` |
 | `OCTOP_REQUIRE_SETUP_PASSWORD` | bool | `true` | Require wizard password during initial setup |
 | `OCTOP_MAX_UPLOAD_MB` | int | `100` | Max upload size in MiB for chat attachments, IM inbound, and knowledge documents (1–4096) |
+| `OCTOP_CODEX_FALLBACK_MODEL` | str | empty | `provider/model` that answers for agents on the ChatGPT login while its Codex allowance is used up, until the allowance resets; empty keeps them failing with the 429 |
 | `OCTOP_INBOUND_MEDIA_RETENTION_DAYS` | int | `7` | Days an audio/video chat attachment stays in a running agent's `inbound/` before the hourly sweep deletes it; `0` keeps them. Images and documents are never deleted |
 | `OCTOP_SEO_AUDIT_HEADERS` | JSON object | empty | SEO site audit: extra request headers per site, e.g. `{"example.com": {"x-audit-key": "…"}}`. Sent only to that host and its `www.` form (never to other hosts, redirect targets included), so the site's firewall can let the crawler through by a secret header. Read when each audit starts; malformed JSON is logged without its values and ignored |
 | `OCTOP_SEO_AUDIT_CHROMIUM` | path | empty | SEO site audit: the Chromium (or headless shell) binary used to render a sample of the audited pages. Empty uses Playwright's own browser install. If no browser starts, the audit checks the served HTML only and reports `render-unavailable` |

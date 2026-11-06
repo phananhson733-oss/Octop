@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import functools
 import json
 import logging
 import re
@@ -734,6 +735,13 @@ class AgentManager:
     @property
     def octop_config(self) -> OctopConfig:
         return self._config
+
+    def _chat_model_for_ref(self, model_ref: str) -> Any:
+        """Chat model for ``provider/model`` from the shared factory the agents use."""
+        factory = self._harness_manager.shared_factory if self._harness_manager else None
+        if factory is None:
+            raise RuntimeError(NO_MODELS_CONFIGURED)
+        return factory.get_chat_model(model_ref)
 
     # ------------------------------------------------------------------
     # CRUD — persist agent rows and sync harness runtime
@@ -3898,6 +3906,11 @@ class AgentManager:
         from octop.infra.agents.middleware.binary_read_guard import BinaryReadGuardMiddleware
         from octop.infra.agents.middleware.blocked_image_retry import BlockedImageRetryMiddleware
         from octop.infra.agents.middleware.browser_profile import BrowserProfileMiddleware
+        from octop.infra.agents.middleware.codex_quota_fallback import (
+            CodexQuotaFallbackMiddleware,
+            read_codex_account,
+            read_codex_quota,
+        )
         from octop.infra.agents.middleware.octop_ui_offload import OctopUiOffloadMiddleware
         from octop.infra.agents.middleware.reasoning import ReasoningRequestMiddleware
         from octop.infra.agents.middleware.thread_artifacts import ThreadArtifactsMiddleware
@@ -3911,7 +3924,8 @@ class AgentManager:
         # BinaryReadGuard stays Octop-specific (inbound/attachment product policy).
         # ThreadArtifacts writes workspace paths onto threads after successful tools.
         # WorkspaceImageMaterialize expands path-only vision refs at model-call time.
-        # BlockedImageRetry sits inside it so it sees the images the provider gets.
+        # CodexQuotaFallback swaps the model after that, so BlockedImageRetry (inside it)
+        # covers the fallback too and sees the images the provider gets.
         # OctopUiOffload stays innermost so every outer middleware observes the
         # slimmed content consistently; it only touches octop_ui plugin envelopes,
         # disjoint from the file-tool results ThreadArtifacts cares about.
@@ -3926,6 +3940,18 @@ class AgentManager:
             BrowserProfileMiddleware(),
             BinaryReadGuardMiddleware(),
             WorkspaceImageMaterializeMiddleware(workspace=ws),
+            *(
+                [
+                    CodexQuotaFallbackMiddleware(
+                        fallback_ref=self._config.codex_fallback_model,
+                        build_model=self._chat_model_for_ref,
+                        read_quota=functools.partial(read_codex_quota, self.paths),
+                        read_account=functools.partial(read_codex_account, self.paths),
+                    )
+                ]
+                if self._config.codex_fallback_model
+                else []
+            ),
             BlockedImageRetryMiddleware(),
             ThreadArtifactsMiddleware(
                 thread_repo=self._repos.thread_repo,
