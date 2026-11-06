@@ -77,6 +77,8 @@ describe("<MBTISelector /> selection line", () => {
 
     expect(await meta(1)).toHaveTextContent("当前有（1）个人格，尚未选择人格");
     expect((await meta(1)).textContent).not.toContain("「」");
+    expect(api.listMBTITypes).toHaveBeenCalledTimes(1);
+    expect(api.getCurrentMBTI).toHaveBeenCalledTimes(1);
   });
 
   it("keeps showing code and name for a configured personality", async () => {

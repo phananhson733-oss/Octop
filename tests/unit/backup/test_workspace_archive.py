@@ -14,6 +14,7 @@ from octop_harness.backends import resolve_backend
 from octop_harness.backends.workspace import BackendWorkspace
 
 from octop.infra.backup.workspace_archive import export_workspace_zip, import_workspace_zip
+from octop.infra.errors import OctopError
 
 
 @pytest.mark.asyncio
@@ -204,6 +205,91 @@ class _MountlessBackend:
         return [
             SimpleNamespace(path=name, content=self._files.get(name), error=None) for name in paths
         ]
+
+
+class _MutableMountlessBackend(_MountlessBackend):
+    async def als(self, path: str = "/") -> Any:
+        names = {name.lstrip("/").split("/")[0] for name in self._files}
+        return SimpleNamespace(
+            error=None,
+            entries=[{"path": f"/{name}", "is_dir": False} for name in sorted(names)],
+        )
+
+    async def adelete_path(self, path: str) -> None:
+        for name in list(self._files):
+            if name == path or name.startswith(path.rstrip("/") + "/"):
+                del self._files[name]
+
+    async def aupload_files(self, pairs: list[tuple[str, bytes]]) -> list[Any]:
+        self._files.update(pairs)
+        return [SimpleNamespace(path=name, error=None) for name, _ in pairs]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("system_files_path", ["", ".octop"])
+async def test_remote_replace_clears_remote_files_not_local_shadow(
+    tmp_path: Path, system_files_path: str
+) -> None:
+    (tmp_path / "local.txt").write_bytes(b"local shadow")
+    protected = {
+        "/.octop/sessions/state.db": b"sessions",
+        "/.env": b"config",
+        "/node_modules/pkg.js": b"dependency",
+        "/_builtin_skills/a/SKILL.md": b"builtin",
+        "/.octop/skills/current/SKILL.md": b"current skill",
+    }
+    backend = _MutableMountlessBackend({"/old.txt": b"old", "/dir/old.txt": b"old", **protected})
+    workspace = BackendWorkspace(backend, tmp_path, system_files_path=system_files_path)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("new.txt", "new")
+
+    result = await import_workspace_zip(
+        workspace, buf.getvalue(), mode="replace", local_workspace_dir=tmp_path
+    )
+
+    assert backend._files == {**protected, "/new.txt": b"new"}
+    assert (tmp_path / "local.txt").read_bytes() == b"local shadow"
+    assert result == {"mode": "replace", "imported": 1, "warnings": []}
+
+
+@pytest.mark.asyncio
+async def test_remote_replace_listing_failure_does_not_upload(tmp_path: Path) -> None:
+    class BrokenListing(_MutableMountlessBackend):
+        async def als(self, path: str = "/") -> Any:
+            return SimpleNamespace(error="unavailable", entries=[])
+
+    backend = BrokenListing({"/old.txt": b"old"})
+    workspace = BackendWorkspace(backend, tmp_path)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("new.txt", "new")
+
+    with pytest.raises(OctopError):
+        await import_workspace_zip(workspace, buf.getvalue(), mode="replace")
+    assert backend._files == {"/old.txt": b"old"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unsafe_name", ["sessions", "skills", "~other"])
+async def test_remote_replace_rejects_remapped_paths_before_deletion(
+    tmp_path: Path, unsafe_name: str
+) -> None:
+    files = {
+        "/a.txt": b"keep until all paths validated",
+        f"/{unsafe_name}/old": b"legacy",
+        "/.octop/sessions/state.db": b"session",
+        "/.octop/skills/current/SKILL.md": b"skill",
+    }
+    backend = _MutableMountlessBackend(dict(files))
+    workspace = BackendWorkspace(backend, tmp_path, system_files_path=".octop")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as zf:
+        zf.writestr("new.txt", "new")
+
+    with pytest.raises(OctopError):
+        await import_workspace_zip(workspace, buf.getvalue(), mode="replace")
+    assert backend._files == files
 
 
 @pytest.mark.asyncio

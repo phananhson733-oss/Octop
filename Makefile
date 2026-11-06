@@ -198,7 +198,7 @@ run-online:
 # ─── Quality (backend) ───────────────────────────────────────────────────────
 
 .PHONY: all
-all: format-all lint typecheck test
+all: format-all lint lint-frontend typecheck typecheck-frontend test test-frontend
 
 .PHONY: lint
 lint:
@@ -264,6 +264,10 @@ lint-frontend:
 	cd $(DASHBOARD_DIR) && npm run lint
 	@echo "[lint-frontend] Prettier check..."
 	cd $(DASHBOARD_DIR) && npm run format:check
+
+.PHONY: test-frontend
+test-frontend:
+	cd $(DASHBOARD_DIR) && npm test -- --maxWorkers=2
 
 .PHONY: format-frontend
 format-frontend:

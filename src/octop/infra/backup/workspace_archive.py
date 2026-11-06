@@ -12,10 +12,12 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from octop_harness.backends.utils import materialize_storage_path
 
+from octop.i18n import error_message
 from octop.infra.agents.builtin_skills import (
     OCTOP_BUILTIN_SKILLS_ROOT,
     is_octop_builtin_skills_path,
 )
+from octop.infra.errors import ErrorCode, OctopError
 
 if TYPE_CHECKING:
     from octop_harness.backends.workspace import BackendWorkspace
@@ -161,6 +163,38 @@ def _clear_local_workspace(workspace_dir: Path) -> None:
             child.unlink()
 
 
+async def _clear_remote_workspace(workspace: BackendWorkspace) -> None:
+    listing = await workspace.als(".")
+    if listing is None or getattr(listing, "error", None) or listing.entries is None:
+        raise OctopError(
+            ErrorCode.WORKSPACE_OP_UNSUPPORTED, error_message(ErrorCode.WORKSPACE_OP_UNSUPPORTED)
+        )
+    paths: list[str] = []
+    for item in listing.entries:
+        rel, _ = _entry_rel_path(item)
+        # A root listing must contain immediate children, never a parent/root path.
+        if (
+            not rel
+            or rel in (".", "..")
+            or rel.startswith("~")
+            or len(PurePosixPath(rel).parts) != 1
+        ):
+            raise OctopError(
+                ErrorCode.WORKSPACE_OP_UNSUPPORTED,
+                error_message(ErrorCode.WORKSPACE_OP_UNSUPPORTED),
+            )
+        if rel.startswith(".") or rel in _SKIP_DIR_NAMES or is_octop_builtin_skills_path(rel):
+            continue
+        if workspace.system_rel(rel) != rel:
+            raise OctopError(
+                ErrorCode.WORKSPACE_OP_UNSUPPORTED,
+                error_message(ErrorCode.WORKSPACE_OP_UNSUPPORTED),
+            )
+        paths.append(rel)
+    for path in paths:
+        await workspace.adelete(path)
+
+
 def _iter_zip_entries(data: bytes) -> list[tuple[str, bytes]]:
     out: list[tuple[str, bytes]] = []
     with zipfile.ZipFile(io.BytesIO(data), "r") as zf:
@@ -243,12 +277,13 @@ async def import_workspace_zip(
     entries = _iter_zip_entries(data)
     warnings: list[str] = []
 
-    if mode == "replace" and local_workspace_dir is not None:
-        _clear_local_workspace(local_workspace_dir)
-    elif mode == "replace":
-        warnings.append(
-            "replace mode cleared only the local harness workspace; remote-only files may remain"
-        )
+    if mode == "replace":
+        if _local_mount(workspace) is not None:
+            await asyncio.get_running_loop().run_in_executor(
+                None, _clear_local_workspace, Path(workspace.workspace_dir)
+            )
+        else:
+            await _clear_remote_workspace(workspace)
 
     # ``DELETE`` / ``move`` refuse this prefix, so writing it from an archive would
     # leave entries the user cannot remove; the files Octop owns are re-seeded on
