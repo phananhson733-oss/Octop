@@ -146,6 +146,9 @@ class OctopConfig:
     max_upload_mb: int = DEFAULT_MAX_UPLOAD_MB
     browser_idle_timeout_minutes: int = DEFAULT_BROWSER_IDLE_TIMEOUT_MINUTES
     inbound_media_retention_days: int = DEFAULT_INBOUND_MEDIA_RETENTION_DAYS
+    # ``provider/model`` that answers while the ChatGPT login's Codex allowance is used up;
+    # empty keeps Codex agents failing with the provider's 429.
+    codex_fallback_model: str = ""
 
     @property
     def max_upload_bytes(self) -> int:
@@ -506,6 +509,8 @@ def load_config(path: Path) -> OctopConfig:
         merged["max_upload_mb"] = parse_max_upload_mb(
             merged.get("max_upload_mb", DEFAULT_MAX_UPLOAD_MB)
         )
+    if v := os.environ.get("OCTOP_CODEX_FALLBACK_MODEL"):
+        merged["codex_fallback_model"] = v.strip()
     if v := os.environ.get("OCTOP_BROWSER_IDLE_TIMEOUT_MINUTES"):
         merged["browser_idle_timeout_minutes"] = _coerce_int(
             "OCTOP_BROWSER_IDLE_TIMEOUT_MINUTES",
@@ -635,6 +640,7 @@ def load_config(path: Path) -> OctopConfig:
         backup=backup,
         capabilities=capabilities,
         max_upload_mb=int(merged.get("max_upload_mb", DEFAULT_MAX_UPLOAD_MB)),
+        codex_fallback_model=str(merged.get("codex_fallback_model") or "").strip(),
         browser_idle_timeout_minutes=max(
             0,
             int(
