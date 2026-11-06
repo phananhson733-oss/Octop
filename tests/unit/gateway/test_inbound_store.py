@@ -52,7 +52,7 @@ async def test_write_inbound_uses_timestamp_prefix_keeps_chinese() -> None:
             media_type="application/pdf",
         )
         assert stored.filename == "地球介绍.pdf"
-        assert re.fullmatch(r"inbound/\d{10,}_地球介绍\.pdf", stored.path)
+        assert re.fullmatch(r"inbound/\d{10,}-[0-9A-HJKMNP-TV-Z]{26}_地球介绍\.pdf", stored.path)
         on_disk = await read_inbound_bytes(workspace, stored.path)
         assert on_disk == b"%PDF-1.4"
 
@@ -103,3 +103,12 @@ async def test_write_inbound_flat_docx_path() -> None:
         )
         assert stored.path.endswith(".docx")
         assert stored.filename == "report.docx"
+
+
+def test_unique_storage_name_fits_multibyte_filesystem_limit() -> None:
+    original = "中" * 75 + ".mp4"
+    stored = build_timestamped_inbound_name(
+        original, now=1_800_000_000, upload_id="01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    )
+    assert len(stored.encode("utf-8")) <= 255
+    assert stored.endswith(".mp4")
