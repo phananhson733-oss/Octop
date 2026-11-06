@@ -35,6 +35,7 @@ from octop.infra.agents.security.hitl_session import (
     hitl_thread_scope,
     thread_id_from_request,
 )
+from octop.infra.agents.security.policy_store import with_deployment_path_denies
 from octop.infra.agents.settings.acp import ACPSettingsStore
 from octop.infra.agents.settings.chatgpt_image import (
     ChatgptImageSettings,
@@ -3891,15 +3892,24 @@ class AgentManager:
         plugin_middleware = PluginRegistry().build_middleware_chain(
             global_enabled=effective_plugins
         )
-        global_policy = self._security.harness_policy()
+        # Deployment denies go on after the agent override, which replaces the rule list.
+        global_policy = self._security.load()
         agent_override = cfg.get("security") if isinstance(cfg.get("security"), dict) else None
-        policy = SecurityPolicy.merge(global_policy, agent_override)
+        policy = with_deployment_path_denies(SecurityPolicy.merge(global_policy, agent_override))
 
         from octop.infra.agents.middleware.binary_read_guard import BinaryReadGuardMiddleware
         from octop.infra.agents.middleware.blocked_image_retry import BlockedImageRetryMiddleware
         from octop.infra.agents.middleware.browser_profile import BrowserProfileMiddleware
         from octop.infra.agents.middleware.octop_ui_offload import OctopUiOffloadMiddleware
+        from octop.infra.agents.middleware.path_rules_guard import (
+            PathRulesGuardMiddleware,
+            confine_writes_from_env,
+        )
         from octop.infra.agents.middleware.reasoning import ReasoningRequestMiddleware
+        from octop.infra.agents.middleware.shell_user import (
+            install_shell_user,
+            shell_run_as_from_env,
+        )
         from octop.infra.agents.middleware.thread_artifacts import ThreadArtifactsMiddleware
         from octop.infra.agents.middleware.token_quota import TokenQuotaMiddleware
         from octop.infra.agents.middleware.workspace_image import (
@@ -3934,6 +3944,17 @@ class AgentManager:
             ),
             OctopUiOffloadMiddleware(),
         ]
+        permissions = policy.resolve_permissions()
+        confine_writes = confine_writes_from_env()
+        if permissions or confine_writes:
+            agent_middleware.insert(
+                -1,
+                PathRulesGuardMiddleware(
+                    permissions or [], workspace_dir=workspace_dir, confine_writes=confine_writes
+                ),
+            )
+        if run_as := shell_run_as_from_env():
+            install_shell_user(*run_as)
 
         merged_tools: list[Any] = []
         if cron_tools:

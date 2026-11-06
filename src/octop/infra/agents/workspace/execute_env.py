@@ -7,10 +7,16 @@ Global admin env (``~/.octop/env``) and workspace ``.env`` are merged at
 ``OCTOP_AUTH_DIR`` / ``OCTOP_SKILLS_DIR`` use agent-facing paths when the
 backend is scoped (bwrap / virtual rootfs), so skill scripts resolve the same
 locations inside the jail. Host paths are still mkdir'd for Octop host ops.
+
+``OCTOP_SHELL_ENV_ALLOW`` (comma-separated names, ``*`` wildcards) stops a
+local shell from inheriting the server environment: only matching variables
+pass, so commands do not see the server's database URL or API tokens.
 """
 
 from __future__ import annotations
 
+import fnmatch
+import os
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +34,16 @@ from octop.infra.db.repos.agents import AgentRow
 from octop.infra.utils.paths import PathLayout
 
 _EXECUTE_BACKEND_KINDS = frozenset({"local_shell", "docker"})
+_SHELL_ENV_ALLOW = "OCTOP_SHELL_ENV_ALLOW"
+
+
+def allowed_server_env() -> dict[str, str] | None:
+    """Server variables a local shell may see, or ``None`` to inherit all of them."""
+    raw = os.environ.get(_SHELL_ENV_ALLOW, "").strip()
+    if not raw:
+        return None
+    patterns = [p.strip() for p in raw.split(",") if p.strip()]
+    return {k: v for k, v in os.environ.items() if any(fnmatch.fnmatchcase(k, p) for p in patterns)}
 
 
 def _agent_facing_auth_and_skills(
@@ -134,5 +150,10 @@ def inject_agent_execute_env(
     out = dict(backend)
     out["env"] = extra
     if kind == "local_shell":
-        out.setdefault("inherit_env", True)
+        allowed = allowed_server_env()
+        if allowed is None:
+            out.setdefault("inherit_env", True)
+        else:
+            out["inherit_env"] = False
+            out["env"] = {**allowed, **extra}
     return out

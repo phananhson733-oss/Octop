@@ -163,3 +163,27 @@ def test_inject_docker_only_sets_platform_defaults(tmp_path: Path, monkeypatch) 
     assert env["OCTOP_AGENT_ID"] == "agent-2"
     assert env["OCTOP_AUTH_DIR"] == str(ws / ".octop" / "auth")
     assert "GLOBAL_KEY" not in env
+
+
+def test_shell_env_allowlist_drops_server_secrets(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("OCTOP_HOME", str(tmp_path))
+    monkeypatch.setenv("OCTOP_SHELL_ENV_ALLOW", "PATH, SHORT_DRAMA_*")
+    monkeypatch.setenv("SHORT_DRAMA_ASR_MODEL", "whisper")
+    monkeypatch.setenv("OCTOP_DATABASE_URL", "postgresql://secret")
+    paths = PathLayout(tmp_path)
+    paths.ensure_root()
+    ws = paths.ensure_agent_workspace("agent-1")
+
+    spec = inject_agent_execute_env(
+        {"type": "local_shell", "root_dir": "/", "env": {"OWN": "1"}},
+        paths=paths,
+        row=_row("agent-1"),
+        workspace_dir=ws,
+    )
+    env = spec["env"]
+    assert spec["inherit_env"] is False
+    assert env["SHORT_DRAMA_ASR_MODEL"] == "whisper"
+    assert "PATH" in env
+    assert env["OWN"] == "1"
+    assert env["OCTOP_AGENT_ID"] == "agent-1"
+    assert "OCTOP_DATABASE_URL" not in env
