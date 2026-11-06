@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import stat
 from datetime import datetime
 from pathlib import Path
 
@@ -289,3 +291,17 @@ def test_peek_skips_scan_when_manifest_not_first(tmp_path: Path) -> None:
     )
     # Deliberately no deep scan: treat as full contents.
     assert peek_backup_contents(archive) == BackupContentFlags()
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX backup permissions")
+def test_backup_storage_is_private(tmp_path):
+    from octop.infra.backup.store import place_backup_file
+    from octop.infra.utils.paths import PathLayout
+
+    paths = PathLayout(tmp_path / "home")
+    source = tmp_path / "backup.tar.gz"
+    source.write_bytes(b"private archive")
+    source.chmod(0o644)
+    info = place_backup_file(paths, "octop-backup-20261106T000000Z.tar.gz", source)
+    assert stat.S_IMODE(paths.backups_dir.stat().st_mode) == 0o700
+    assert stat.S_IMODE(paths.backup_file(info.name).stat().st_mode) == 0o600

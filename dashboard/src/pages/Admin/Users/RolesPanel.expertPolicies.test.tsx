@@ -133,4 +133,31 @@ describe("<RolesPanel /> expert policies", () => {
       ),
     );
   });
+  it("preserves a workbench-only role when saving other settings", async () => {
+    const original = stable.request.getMockImplementation()!;
+    stable.request.mockImplementation((path: string, ...args: unknown[]) =>
+      path === "/users/roles"
+        ? Promise.resolve([{ ...pickRole, visible_nav: ["workbench"] }])
+        : original(path, ...args),
+    );
+    const user = userEvent.setup();
+    render(<RolesPanel />);
+    const row = (await screen.findByText("选剧角色")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "common.edit" }));
+    await screen.findByText("adminUsers.roleHiddenExpertTabs");
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+    await waitFor(() =>
+      expect(stable.request).toHaveBeenCalledWith(
+        "/users/roles/01ROLE",
+        expect.objectContaining({ method: "PATCH" }),
+      ),
+    );
+    const patch = stable.request.mock.calls.find(
+      ([path]) => path === "/users/roles/01ROLE",
+    );
+    expect(JSON.parse(patch?.[1].body).policies).toContainEqual({
+      name: "visible_nav",
+      value: "workbench",
+    });
+  });
 });

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import shutil
 import tarfile
@@ -190,6 +191,8 @@ def place_backup_file(paths: PathLayout, filename: str, src: Path) -> BackupFile
     safe = normalize_backup_filename(filename)
     dest = paths.backup_file(safe)
     src = Path(src)
+    if os.name == "posix":
+        src.chmod(0o600)
     if src.resolve() == dest.resolve():
         return backup_file_info(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)

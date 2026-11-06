@@ -15,6 +15,7 @@ from typing import Any
 
 from octop import __version__
 from octop.config import DatabaseConfig
+from octop.i18n import error_message
 from octop.infra.agents.workspace.dir import (
     system_files_path_from_config,
     workspace_dir_from_config_json,
@@ -184,6 +185,28 @@ def _build_manifest(
     )
 
 
+def _backup_workspace_paths(agent_rows: list[Any], paths: PathLayout) -> dict[str, Path]:
+    """Validate the local-only archive contract before writing any backup."""
+    result: dict[str, Path] = {}
+    for row in agent_rows:
+        raw = getattr(row, "config_json", None)
+        config = json.loads(raw) if raw else {}
+        backend = config.get("backend") or {}
+        kind = backend.get("type", "local_shell") if isinstance(backend, dict) else backend
+        if kind not in ("local_shell", "filesystem"):
+            raise OctopError(
+                ErrorCode.WORKSPACE_OP_UNSUPPORTED,
+                error_message(ErrorCode.WORKSPACE_OP_UNSUPPORTED),
+                details={"agent_id": str(row.agent_id), "operation": "system_backup"},
+            )
+        ws = workspace_dir_from_config_json(
+            raw, paths=paths, agent_id=str(row.agent_id), ensure=False
+        )
+        if ws.is_dir():
+            result[str(row.agent_id)] = ws
+    return result
+
+
 def create_system_backup(
     *,
     paths: PathLayout,
@@ -222,6 +245,7 @@ def create_system_backup(
         if not pool.path.is_file():
             raise OctopError(ErrorCode.NOT_FOUND, f"database not found: {pool.path}")
 
+    workspaces = _backup_workspace_paths(agent_rows, paths) if include_workspaces else {}
     env_path = env_file_path(paths.root)
     manifest = _build_manifest(
         paths=paths,
@@ -238,6 +262,8 @@ def create_system_backup(
         include_knowledge=include_knowledge,
         include_chats=include_chats,
     )
+    for entry in manifest.agents:
+        entry.workspace_included = entry.agent_id in workspaces
     filename = suggested_backup_filename()
     dest = Path(dest)
     dest.parent.mkdir(parents=True, exist_ok=True)
@@ -297,27 +323,14 @@ def create_system_backup(
                 if include_workspaces:
                     for row in agent_rows:
                         agent_id = str(row.agent_id)
-                        try:
-                            ws = workspace_dir_from_config_json(
-                                getattr(row, "config_json", None),
-                                paths=paths,
-                                agent_id=agent_id,
-                                ensure=False,
-                            )
-                            if not ws.is_dir():
-                                continue
+                        ws = workspaces.get(agent_id)
+                        if ws is not None:
                             _add_dir(
                                 tf,
                                 ws,
                                 f"{_WORKSPACES_DIR}/{agent_id}",
                                 skip_chats=not include_chats,
                                 system_files_path=_system_files_path_from_row(row),
-                            )
-                        except OSError:
-                            logger.warning(
-                                "skipping workspace for agent %s",
-                                agent_id,
-                                exc_info=True,
                             )
                 if include_skill_packages and paths.skill_packages_dir.is_dir():
                     _add_dir(

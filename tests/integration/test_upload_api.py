@@ -18,7 +18,7 @@ async def test_upload_and_workspace_download(env_with_agent: Any) -> None:
     assert body["media_type"] == "text/plain"
     assert body["workspace_path"].endswith(".txt")
     assert body["workspace_path"].startswith("inbound/")
-    assert re.search(r"inbound/\d{10,}_note\.txt$", body["workspace_path"])
+    assert re.search(r"inbound/\d{10,}-[0-9A-HJKMNP-TV-Z]{26}_note\.txt$", body["workspace_path"])
     assert "file_id" not in body
     assert "legacy_url" not in body
 

@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, File, Query, UploadFile
-from fastapi.responses import Response, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from octop_harness.backends.utils import BackendOperationNotSupportedError
 from pydantic import BaseModel, Field
 
@@ -31,6 +32,7 @@ from octop.infra.gateway.media.backend_files import (
     backend_workspace_path,
     is_allowed_host_download_abs_path,
     is_host_absolute_path,
+    resolve_preview_file,
     resolve_preview_payload,
 )
 from octop.infra.utils.doc_edit import DocConverter, get_doc_converter
@@ -371,7 +373,15 @@ async def upload_file(
     return {"path": target, "size": len(data)}
 
 
-@router.get("/agents/{agent_id}/workspace/download")
+@router.get(
+    "/agents/{agent_id}/workspace/download",
+    summary="Download a workspace file",
+    description="Authenticated file download. Materialized files support HTTP byte ranges without buffering the whole file.",
+    responses={
+        206: {"description": "Requested byte range"},
+        416: {"description": "Invalid byte range"},
+    },
+)
 async def download_file(
     agent_id: str,
     path: str,
@@ -379,7 +389,7 @@ async def download_file(
     as_user: int | None = None,
     user: Any = Depends(current_user),
     server: Any = Depends(get_server),
-) -> StreamingResponse:
+) -> Response:
     """Stream ``path`` back as application/octet-stream.
 
     See ``from_workspace``: workspace UI uses true; chat/tool downloads use false.
@@ -390,6 +400,19 @@ async def download_file(
     ws = await require_agent_workspace(agent_id, user=user, as_user=as_user, server=server)
     io_path = _require_allowed_path(_workspace_io_path(path, from_workspace=from_workspace), ws)
 
+    try:
+        local = await asyncio.to_thread(ws.materialize_local, io_path)
+    except PermissionError as exc:
+        raise OctopError(ErrorCode.NOT_FOUND, f"cannot download {path!r}") from exc
+    if local is not None:
+        _require_allowed_path(str(local), ws)
+        if not is_allowed_host_download_abs_path(str(local), workspace=ws.workspace_dir):
+            raise OctopError(ErrorCode.FORBIDDEN, "download path not allowed")
+        return FileResponse(
+            local,
+            media_type="application/octet-stream",
+            headers={"Content-Disposition": content_disposition(io_path.rsplit("/", 1)[-1])},
+        )
     try:
         file_blob = await ws.adownload_bytes(io_path)
     except PermissionError as exc:
@@ -448,7 +471,10 @@ async def write_doc(
     _ = from_workspace  # Mutations always use workspace-relative paths.
     rel = _assert_workspace_mutable(path)
     converter = _ensure_editable_doc(path)
-    ws = await require_running_workspace(agent_id, user=user, as_user=as_user, server=server)
+    ws = await require_running_workspace(
+        agent_id, user=user, as_user=as_user, server=server, owner_only=True
+    )
+    rel = _require_allowed_path(rel, ws, write=True)
     try:
         data = converter.from_markdown(body.content)
     except Exception as exc:
@@ -466,6 +492,11 @@ async def write_doc(
 @router.get(
     "/agents/{agent_id}/media/preview",
     summary="Preview image or video",
+    description="Authenticated sandboxed media preview. Materialized files support HTTP byte ranges.",
+    responses={
+        206: {"description": "Requested byte range"},
+        416: {"description": "Invalid byte range"},
+    },
     response_class=StreamingResponse,
 )
 async def preview_media(
@@ -475,11 +506,23 @@ async def preview_media(
     as_user: int | None = None,
     user: Any = Depends(current_user),
     server: Any = Depends(get_server),
-) -> StreamingResponse:
+) -> Response:
     """Stream an image or video inline for dashboard tool-result previews."""
     path_agent = _agent_id_from_media_source(source)
     effective_agent = path_agent or agent_id
     ws = await require_running_workspace(effective_agent, user=user, as_user=as_user, server=server)
+    local = await resolve_preview_file(source=source, workspace=ws, mime_hint=mime_type or "")
+    if local is not None:
+        path, mime = local
+        return FileResponse(
+            path,
+            media_type=mime,
+            headers={
+                "Content-Disposition": "inline",
+                "Content-Security-Policy": "sandbox",
+                "X-Content-Type-Options": "nosniff",
+            },
+        )
     payload = await resolve_preview_payload(
         source=source,
         workspace=ws,

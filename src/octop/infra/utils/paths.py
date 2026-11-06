@@ -114,6 +114,8 @@ class PathLayout:
     def ensure_backups_dir(self) -> Path:
         out = self.backups_dir
         out.mkdir(parents=True, exist_ok=True)
+        if os.name == "posix":
+            out.chmod(0o700)
         return out
 
     def backup_file(self, filename: str) -> Path:

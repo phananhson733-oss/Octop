@@ -33,7 +33,7 @@ import re
 import shutil
 import time
 import weakref
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import BinaryIO, Protocol
@@ -199,6 +199,8 @@ class ChunkedUploadStore:
             raise _not_found(upload_id) from exc
         if upload.agent_id != agent_id or upload.owner_id != owner_id:
             raise _not_found(upload_id)
+        if not any((session_dir / name).is_file() for name in (_DATA, _ASSEMBLED, _RECEIPT)):
+            raise _not_found(upload_id)
         return upload
 
     def received(self, upload: ChunkedUpload) -> list[int]:
@@ -228,11 +230,26 @@ class ChunkedUploadStore:
         if missing:
             raise self._incomplete(missing)
         assembled = session_dir / _ASSEMBLED
+        if assembled.is_file():
+            return assembled
         try:
             os.replace(session_dir / _DATA, assembled)
         except FileNotFoundError as exc:
             raise _not_found(upload.upload_id) from exc
         return assembled
+
+    async def complete(
+        self, upload: ChunkedUpload, persist: Callable[[Path], Awaitable[dict[str, str]]]
+    ) -> dict[str, str]:
+        """Serialize completion; retain assembled bytes until the receipt is durable."""
+        async with _session_lock(upload.upload_id):
+            done = await asyncio.to_thread(self.receipt, upload)
+            if done is not None:
+                return done
+            assembled = await asyncio.to_thread(self._claim, upload)
+            payload = await persist(assembled)
+            await asyncio.to_thread(self.finish, upload, payload)
+            return payload
 
     @staticmethod
     def _incomplete(missing: list[int]) -> OctopError:

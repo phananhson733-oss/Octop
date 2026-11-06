@@ -841,3 +841,54 @@ async def test_create_role_accepts_caller_role_id(env):
     )
     assert builtin.status_code == 409, builtin.text
     assert builtin.json()["error"]["code"] == "USER_ROLE_ID_TAKEN"
+
+
+async def test_user_manager_cannot_modify_admin_account(env):
+    from tests.support.auth import create_user
+
+    c, srv, auth = env
+    operator = await create_user(c, auth, username="operator", permissions=["users"])
+    admin = srv.services.user_repo.get_by_username("admin")
+    assert admin is not None
+    prefix = f"/api/users/{admin.id}"
+    for method, path, body in (
+        ("POST", prefix + "/reset-password", {"new_password": "AuditOnly987"}),
+        ("PATCH", prefix, {"disabled": True}),
+        ("PATCH", prefix, {"email": "changed@example.com"}),
+        ("DELETE", prefix, None),
+    ):
+        result = await c.request(method, path, headers=operator, json=body)
+        assert result.status_code == 403, (path, result.text)
+    assert await login(c, username="admin", password=TEST_PASSWORD)
+
+
+async def test_delegated_manager_batch_protects_admin_and_does_not_grant_template_permissions(env):
+    from tests.support.auth import create_user
+
+    c, srv, auth = env
+    operator = await create_user(c, auth, username="limited-operator", permissions=["users"])
+    await create_user(c, auth, username="managed-user", permissions=[])
+    target = srv.services.user_repo.get_by_username("managed-user")
+    admin = srv.services.user_repo.get_by_username("admin")
+    assert target is not None and admin is not None
+    role = await c.post(
+        "/api/users/roles",
+        headers=auth,
+        json={
+            "user_role_name": "Provider manager",
+            "permissions": ["providers"],
+        },
+    )
+    assert role.status_code == 201, role.text
+    denied = await c.patch(
+        f"/api/users/{target.id}", headers=operator, json={"role": role.json()["user_role_id"]}
+    )
+    assert denied.status_code == 403
+    result = await c.post(
+        "/api/users/batch",
+        headers=operator,
+        json={"action": "disable", "user_ids": [admin.id, target.id]},
+    )
+    assert result.status_code == 200, result.text
+    assert not srv.user_manager.get_row(admin.id).disabled
+    assert srv.user_manager.get_row(target.id).disabled

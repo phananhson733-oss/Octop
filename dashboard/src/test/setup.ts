@@ -33,21 +33,24 @@ vi.mock("react-i18next", async (importOriginal) => {
     );
   };
 
+  // Like real i18next, keep t stable while the language is unchanged.
+  const t = (
+    key: string,
+    fallback?: string | TOptions,
+    options?: TOptions,
+  ): string => {
+    if (typeof fallback === "string") return interpolate(fallback, options);
+    if (fallback && typeof fallback === "object") {
+      const template = fallback.defaultValue ?? key;
+      return interpolate(template, fallback);
+    }
+    return key;
+  };
+
   return {
     ...actual,
     useTranslation: () => ({
-      t: (
-        key: string,
-        fallback?: string | TOptions,
-        options?: TOptions,
-      ): string => {
-        if (typeof fallback === "string") return interpolate(fallback, options);
-        if (fallback && typeof fallback === "object") {
-          const template = fallback.defaultValue ?? key;
-          return interpolate(template, fallback);
-        }
-        return key;
-      },
+      t,
       i18n: { language: "zh", changeLanguage: () => Promise.resolve() },
     }),
     Trans: ({ children }: { children?: React.ReactNode }) => children,

@@ -1282,3 +1282,45 @@ def test_refuse_cross_engine_restore(layout: PathLayout, tmp_path: Path) -> None
         )
     assert excinfo.value.code == ErrorCode.BACKUP_DRIVER_MISMATCH
     pool.close()
+
+
+@pytest.mark.parametrize("kind", ["s3", "docker", "named", "composite"])
+def test_system_backup_rejects_nonlocal_workspace_instead_of_packing_shadow(layout, tmp_path, kind):
+    from types import SimpleNamespace
+
+    pool = SqlitePool(layout.db)
+    run_migrations(pool)
+    shadow = tmp_path / "shadow"
+    shadow.mkdir()
+    (shadow / "SOUL.md").write_text("stale shadow")
+    row = SimpleNamespace(
+        agent_id="remote",
+        name="Remote",
+        config_json=json.dumps(
+            {
+                "workspace_dir": str(shadow),
+                "backend": {"type": kind},
+            }
+        ),
+    )
+    dest = tmp_path / "backup.tar.gz"
+    try:
+        with pytest.raises(OctopError) as exc:
+            create_system_backup(
+                paths=layout, agent_rows=[row], pool=pool, db_config=DatabaseConfig(), dest=dest
+            )
+        assert exc.value.code == ErrorCode.WORKSPACE_OP_UNSUPPORTED
+        assert not dest.exists()
+        create_system_backup(
+            paths=layout,
+            agent_rows=[row],
+            pool=pool,
+            db_config=DatabaseConfig(),
+            dest=dest,
+            include_workspaces=False,
+        )
+        with tarfile.open(dest) as archive:
+            manifest = json.load(archive.extractfile("manifest.json"))
+            assert manifest["agents"][0]["workspace_included"] is False
+    finally:
+        pool.close()

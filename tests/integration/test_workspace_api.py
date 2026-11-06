@@ -653,3 +653,53 @@ async def test_home_and_file_url_paths_not_mutable(env: Any) -> None:
         headers=auth,
     )
     assert r.status_code in (403, 404), r.text
+
+
+async def test_shared_agent_document_writes_require_owner(env):
+    from tests.support.auth import create_user
+
+    c, _srv, auth, aid = env
+    member = await create_user(c, auth, username="doc-reader")
+    shared = await c.patch(f"/api/agents/{aid}", headers=auth, json={"is_shared": True})
+    assert shared.status_code == 200
+    response = await c.put(
+        f"/api/agents/{aid}/workspace/doc",
+        params={"path": "report.docx"},
+        headers=member,
+        json={"content": "# Must not write"},
+    )
+    assert response.status_code == 403
+    owner = await c.put(
+        f"/api/agents/{aid}/workspace/doc",
+        params={"path": "report.docx"},
+        headers=auth,
+        json={"content": "# Owner document"},
+    )
+    assert owner.status_code == 200
+
+
+async def test_media_download_and_preview_support_ranges_without_buffering(env, monkeypatch):
+    c, srv, auth, aid = env
+    ws = srv.app_runtime.agent_registry.get_agent(aid).workspace
+    await ws.aupload_bytes("inbound/clip.mp4", b"0123456789")
+
+    async def no_buffer(*args, **kwargs):
+        raise AssertionError("local download must not read the entire file into memory")
+
+    monkeypatch.setattr(ws, "adownload_bytes", no_buffer)
+    for route, params in (
+        ("workspace/download", {"path": "inbound/clip.mp4"}),
+        ("media/preview", {"source": "inbound/clip.mp4"}),
+    ):
+        r = await c.get(
+            f"/api/agents/{aid}/{route}", params=params, headers={**auth, "Range": "bytes=2-5"}
+        )
+        assert r.status_code == 206, r.text
+        assert r.content == b"2345"
+        assert r.headers["content-range"] == "bytes 2-5/10"
+        if route == "media/preview":
+            assert r.headers["content-security-policy"] == "sandbox"
+        invalid = await c.get(
+            f"/api/agents/{aid}/{route}", params=params, headers={**auth, "Range": "bytes=99-100"}
+        )
+        assert invalid.status_code == 416

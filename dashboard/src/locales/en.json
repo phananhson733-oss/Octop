@@ -6005,8 +6005,8 @@
       "set_max_agents": "Set expert limit"
     },
     "roleVisibleNav": "Limit visible pages",
-    "roleVisibleNavHint": "When on, accounts in this role see only Chat and the pages selected below in the sidebar, and other pages cannot be opened by URL. Experts, skills and knowledge bases still work inside Chat. Changes apply at once to every account in the role. Administrators are never limited.",
-    "roleVisibleNavPlaceholder": "Leave empty to show Chat only",
+    "roleVisibleNavHint": "When enabled, accounts in this role can open only the selected pages. Chat may be omitted for workbench-only accounts. Changes apply immediately; administrators are not restricted.",
+    "roleVisibleNavPlaceholder": "Select at least one page",
     "roleHiddenExpertTabs": "Hidden tabs on the Experts page",
     "roleHiddenExpertTabsHint": "Accounts in this role do not see the tabs selected here on the Experts page, nor the buttons that lead to them. My Experts always stays. This only hides them: teams, templates and existing experts are not deleted. Changes apply at once to every account in the role. Administrators are never limited.",
     "roleHiddenExpertTabsPlaceholder": "Leave empty to show every tab",

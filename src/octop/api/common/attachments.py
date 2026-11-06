@@ -83,6 +83,8 @@ async def save_attachment_file(
     filename: str,
     media_type: str,
     max_bytes: int | None = None,
+    stored_name: str | None = None,
+    preserve_source: bool = False,
 ) -> StoredAttachment:
     """Like :func:`save_attachment` for a host file; *source* is moved, not read."""
     del owner_id  # access control is JWT + agent scope at download time
@@ -92,5 +94,7 @@ async def save_attachment_file(
         filename=filename,
         media_type=media_type,
         max_bytes=max_bytes,
+        stored_name=stored_name,
+        preserve_source=preserve_source,
     )
     return _stored_from_inbound(inbound)
