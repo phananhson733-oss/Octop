@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import Mock
 
 import httpx
 import pytest
@@ -34,7 +35,8 @@ async def test_save_local_download_writes_downloads(
         "octop.infra.utils.user_downloads.downloads_dir",
         lambda home=None: downloads,
     )
-    monkeypatch.setattr("octop.infra.utils.user_downloads.reveal_download", lambda _path: None)
+    reveal = Mock()
+    monkeypatch.setattr("octop.api.routers.settings.reveal_download", reveal)
     await bootstrap_admin(c, home)
     token = await login(c)
     response = await c.post(
@@ -45,12 +47,14 @@ async def test_save_local_download_writes_downloads(
     assert response.status_code == 200, response.text
     assert response.json()["filename"] == "note.txt"
     assert (downloads / "note.txt").read_bytes() == b"hello"
+    reveal.assert_called_once_with(downloads / "note.txt")
 
 
 async def test_save_local_download_rejects_public_host(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("octop.infra.utils.user_downloads.reveal_download", lambda _path: None)
+    reveal = Mock()
+    monkeypatch.setattr("octop.api.routers.settings.reveal_download", reveal)
     srv = OctopServer(home=tmp_path)
     await srv.start()
     await ensure_control_plane_bound(srv)
@@ -68,5 +72,6 @@ async def test_save_local_download_rejects_public_host(
             )
             assert response.status_code == 403
             assert response.json()["error"]["code"] == "LOCAL_DOWNLOAD_UNAVAILABLE"
+            reveal.assert_not_called()
     finally:
         await srv.stop()
