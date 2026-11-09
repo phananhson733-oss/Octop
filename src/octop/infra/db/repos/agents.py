@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 from octop.infra.db.pool import DatabasePool
 from octop.infra.db.repos._base import UNSET, DbRow, bool_int, map_rows, now_ts, optional_updates
@@ -145,11 +147,13 @@ class AgentRepo:
         knowledge_base_ids: str | None = None,
         mcp_servers: str | None = None,
         kind: str = "expert",
+        conn: Any | None = None,
     ) -> str:
+        """Insert the row; with ``conn``, inside that caller's open transaction."""
         ts = now_ts()
         agent_kind = kind if kind in {"expert", "team"} else "expert"
-        with self._db.transaction() as conn:
-            conn.execute(
+        with nullcontext(conn) if conn is not None else self._db.transaction() as tx:
+            tx.execute(
                 "INSERT INTO agents(agent_id, user_id, name, description, "
                 "persona_mbti, default_model, system_prompt, enabled, config_json, icon, "
                 "template_name, color, icon_name, icon_url, skill_package_ids, "
@@ -195,6 +199,16 @@ class AgentRepo:
         with self._db.connect() as conn:
             rows = conn.execute(sql, (user_id,)).fetchall()
         return map_rows(rows, AgentRow)
+
+    def count_experts_in_transaction(self, conn: Any, user_id: int) -> int:
+        row = conn.execute(
+            "SELECT COUNT(*) AS c FROM agents WHERE user_id = ? AND kind = 'expert'", (user_id,)
+        ).fetchone()
+        return int(row["c"])
+
+    def exists_in_transaction(self, conn: Any, agent_id: str) -> bool:
+        row = conn.execute("SELECT 1 AS present FROM agents WHERE agent_id = ?", (agent_id,))
+        return row.fetchone() is not None
 
     def count_by_user(
         self,

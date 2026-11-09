@@ -14,6 +14,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Protocol
 
+from octop.i18n import error_message
+from octop.infra.errors import ErrorCode, OctopError
+
 
 class PermissionUser(Protocol):
     @property
@@ -318,3 +321,9 @@ def effective_permissions(user: PermissionUser) -> list[str]:
     if user.is_admin:
         return sorted(ALL_PERMISSION_KEYS)
     return list(user.permissions or [])
+
+
+def assert_can_manage_account(actor: PermissionUser, target_role: str) -> None:
+    """Delegated user management never grants control over administrator accounts."""
+    if target_role == "admin" and not actor.is_admin:
+        raise OctopError(ErrorCode.FORBIDDEN, error_message(ErrorCode.FORBIDDEN))

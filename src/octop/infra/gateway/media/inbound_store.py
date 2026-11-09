@@ -21,6 +21,7 @@ from octop.infra.agents.workspace.dir import (
 )
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.gateway.media.constants import INBOUND_DIR
+from octop.infra.utils.ulid import new_ulid
 
 if TYPE_CHECKING:
     from octop_harness.backends.workspace import BackendWorkspace
@@ -239,7 +240,7 @@ ALLOWED_INBOUND_MEDIA_TYPES = frozenset(
 # Display / on-disk names may be non-ASCII; strip path separators / controls only.
 _UNSAFE_FILENAME_CHARS = re.compile(r'[\x00-\x1f\x7f<>:"/\\|?*]')
 # ``1783510288_report.pdf`` / ``1783510288_report-2.pdf`` stored names.
-_STORED_TS_PREFIX = re.compile(r"^(\d{10,})_(.+)$")
+_STORED_TS_PREFIX = re.compile(r"^(\d{10,})(?:-[0-9A-HJKMNP-TV-Z]{26})?_(.+)$")
 
 
 @dataclass(frozen=True)
@@ -391,11 +392,29 @@ def display_name_from_stored(stored_name: str) -> str:
     return stored_name or "upload.bin"
 
 
-def build_timestamped_inbound_name(filename: str, *, now: int | None = None) -> str:
-    """Return ``{unix_ts}_{sanitized_original}`` (matches outbound naming style)."""
+def _fit_storage_name(prefix: str, display: str) -> str:
+    """Trim only the display part; never truncate the upload identity."""
+    budget = 255 - len(prefix.encode("utf-8"))
+    suffix = Path(display).suffix
+    suffix_bytes = len(suffix.encode("utf-8"))
+    if suffix_bytes < budget:
+        stem = (
+            Path(display)
+            .stem.encode("utf-8")[: budget - suffix_bytes]
+            .decode("utf-8", errors="ignore")
+        )
+        return prefix + stem + suffix
+    return prefix + display.encode("utf-8")[:budget].decode("utf-8", errors="ignore")
+
+
+def build_timestamped_inbound_name(
+    filename: str, *, now: int | None = None, upload_id: str | None = None
+) -> str:
+    """Return a timestamped name, optionally with a stable unique upload identity."""
     display = sanitize_inbound_filename(filename)
     ts = int(time.time()) if now is None else now
-    return f"{ts}_{display}"
+    prefix = f"{ts}{'-' + upload_id if upload_id else ''}_"
+    return _fit_storage_name(prefix, display)
 
 
 async def _unique_inbound_path(workspace: BackendWorkspace, stored_name: str) -> str:
@@ -423,7 +442,7 @@ async def write_inbound(
     """Persist bytes under ``inbound/{unix_ts}_{original}``."""
     validate_inbound_size(data, max_bytes=max_bytes)
     display_name, normalized_type = _inbound_target(filename, media_type)
-    stored_name = build_timestamped_inbound_name(display_name)
+    stored_name = build_timestamped_inbound_name(display_name, upload_id=new_ulid())
     path = await _unique_inbound_path(workspace, stored_name)
     await workspace.aupload_bytes(path, data)
     return InboundFile(
@@ -443,7 +462,9 @@ def _inbound_target(filename: str, media_type: str) -> tuple[str, str]:
     return display_name, normalized_type
 
 
-def _place_local_file(source: Path, workspace: BackendWorkspace, path: str) -> bool:
+def _place_local_file(
+    source: Path, workspace: BackendWorkspace, path: str, *, preserve_source: bool = False
+) -> bool:
     """Move *source* onto the on-disk file backing workspace *path*.
 
     *path* must already exist (an empty placeholder written through the
@@ -458,6 +479,9 @@ def _place_local_file(source: Path, workspace: BackendWorkspace, path: str) -> b
         # Download cache for remote backends, not the stored file.
         local.unlink(missing_ok=True)
         return False
+    if preserve_source:
+        shutil.copyfile(source, local)
+        return True
     try:
         os.replace(source, local)
     except OSError:  # different filesystem
@@ -472,6 +496,8 @@ async def write_inbound_file(
     filename: str,
     media_type: str,
     max_bytes: int | None = None,
+    stored_name: str | None = None,
+    preserve_source: bool = False,
 ) -> InboundFile:
     """Persist host file *source* under ``inbound/`` without reading it into memory.
 
@@ -489,11 +515,29 @@ async def write_inbound_file(
             details={"max_mb": max_mb},
         )
     display_name, normalized_type = _inbound_target(filename, media_type)
-    stored_name = build_timestamped_inbound_name(display_name)
-    path = await _unique_inbound_path(workspace, stored_name)
+    if stored_name is None:
+        stored_name = build_timestamped_inbound_name(display_name, upload_id=new_ulid())
+    elif (
+        stored_name in (".", "..")
+        or "/" in stored_name
+        or "\\" in stored_name
+        or any(ord(c) < 32 for c in stored_name)
+    ):
+        raise ValueError("stored name must be a filename")
+    if not Path(stored_name).suffix:
+        stored_name += Path(display_name).suffix
+    identity, separator, display = stored_name.partition("_")
+    stored_name = (
+        _fit_storage_name(identity + separator, display)
+        if separator
+        else _fit_storage_name("", stored_name)
+    )
+    path = f"{INBOUND_DIR}/{stored_name}"
     await workspace.aupload_bytes(path, b"")
     try:
-        if not await asyncio.to_thread(_place_local_file, source, workspace, path):
+        if not await asyncio.to_thread(
+            _place_local_file, source, workspace, path, preserve_source=preserve_source
+        ):
             logger.warning(
                 "inbound upload %s: workspace has no host file, buffering %d bytes in memory",
                 path,
@@ -501,7 +545,8 @@ async def write_inbound_file(
             )
             data = await asyncio.to_thread(source.read_bytes)
             await workspace.aupload_bytes(path, data)
-            source.unlink(missing_ok=True)
+            if not preserve_source:
+                await asyncio.to_thread(source.unlink, missing_ok=True)
     except BaseException:
         # Don't leave an empty placeholder the agent could pick up.
         with contextlib.suppress(Exception):

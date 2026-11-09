@@ -24,6 +24,7 @@ from octop.infra.agents.plugins.plugin_tool_defaults import (
 )
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.server import OctopServer
+from octop.infra.users.plugin_access import assert_plugin_ui_allowed, plugin_ui_grants
 
 router = APIRouter(prefix="/plugins", tags=["plugins"])
 
@@ -103,7 +104,15 @@ async def list_plugins(
     server: OctopServer = Depends(get_server),
     _user: Any = Depends(current_user),
 ) -> list[dict[str, Any]]:
-    return _plugin_manager(server).list_installed()
+    assert server.services is not None
+    grants = await asyncio.get_running_loop().run_in_executor(
+        None, plugin_ui_grants, server.services.db, _user
+    )
+    return [
+        item
+        for item in _plugin_manager(server).list_installed()
+        if grants is None or item.get("id") in grants
+    ]
 
 
 @router.post("/reload", summary="Reload plugins from disk (admin)")
@@ -212,7 +221,15 @@ async def list_market_plugins(
     _user: Any = Depends(current_user),
 ) -> list[dict[str, Any]]:
     """Return the in-tree marketplace catalog (future: remote index API)."""
-    return _plugin_manager(server).list_market()
+    assert server.services is not None
+    grants = await asyncio.get_running_loop().run_in_executor(
+        None, plugin_ui_grants, server.services.db, _user
+    )
+    return [
+        item
+        for item in _plugin_manager(server).list_market()
+        if grants is None or item.get("id") in grants
+    ]
 
 
 @router.post(
@@ -265,6 +282,10 @@ async def get_market_plugin_ui_asset(
     _user: Any = Depends(current_user),
 ) -> Response:
     """Static files from the in-tree catalog (icons before install)."""
+    assert server.services is not None
+    await asyncio.get_running_loop().run_in_executor(
+        None, assert_plugin_ui_allowed, server.services.db, _user, plugin_id
+    )
     target = _plugin_manager(server).resolve_market_ui_file(plugin_id, file_path)
     suffix = target.suffix.lower()
     media_type = _UI_CONTENT_TYPES.get(suffix) or mimetypes.guess_type(target.name)[0]
@@ -331,6 +352,10 @@ async def get_plugin_ui_asset(
     ``no-cache``: a reinstalled plugin keeps the same URLs, so the browser must
     revalidate (a 304 when its ETag still matches) instead of reusing a stale copy.
     """
+    assert server.services is not None
+    await asyncio.get_running_loop().run_in_executor(
+        None, assert_plugin_ui_allowed, server.services.db, _user, plugin_id
+    )
     target = _plugin_manager(server).resolve_ui_file(plugin_id, file_path)
     suffix = target.suffix.lower()
     media_type = _UI_CONTENT_TYPES.get(suffix) or mimetypes.guess_type(target.name)[0]

@@ -10,8 +10,14 @@ from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 from pydantic import BaseModel, Field
 
 from octop.api.common.client_ip import resolve_client_ip
-from octop.api.deps import current_user, get_server, sign_token
+from octop.api.deps import current_user, extract_raw_token, get_server, require_database, sign_token
 from octop.infra.auth.captcha import current_env, ensure_captcha, load_effective, public_config
+from octop.infra.auth.sessions import (
+    REVOCATION_RECEIPT_HEADER,
+    revoke_session,
+    revoke_signed_session,
+)
+from octop.infra.auth.tokens import InvalidToken
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.users.email import normalize_email
 from octop.infra.users.permissions import effective_permissions
@@ -218,10 +224,43 @@ async def login(
 
 
 @router.post("/logout", status_code=204, summary="Sign out")
-async def logout(user: Any = Depends(current_user), server: Any = Depends(get_server)) -> Response:
-    """Record an audit event for the current session. JWTs are stateless and not revoked server-side."""
+async def logout(
+    request: Request, user: Any = Depends(current_user), server: Any = Depends(get_server)
+) -> Response:
+    """Revoke this login session, including its sliding-renewal tokens."""
+    raw = extract_raw_token(
+        authorization=request.headers.get("authorization"),
+        access_token=request.query_params.get("access_token"),
+    )
+    assert raw is not None
+    try:
+        await asyncio.get_running_loop().run_in_executor(None, revoke_session, server.services, raw)
+    except InvalidToken as exc:
+        raise OctopError(ErrorCode.AUTH_FAILED, "invalid credentials") from exc
     server.services.audit_repo.write(actor=user.username, action="auth.logout")
     return Response(status_code=204)
+
+
+@router.post(
+    "/session/revoke",
+    status_code=204,
+    summary="Idempotently revoke a signed login session",
+    description="Accepts a valid server-signed Bearer token even if expired or already revoked. "
+    "Only revokes that session family; grants no access. A committed revocation returns "
+    "204 and X-Octop-Session-Revoked: 1. Query-string credentials are not accepted.",
+)
+async def revoke_session_receipt(request: Request, server: Any = Depends(get_server)) -> Response:
+    require_database(server)
+    raw = extract_raw_token(authorization=request.headers.get("authorization"))
+    if not raw:
+        raise OctopError(ErrorCode.AUTH_FAILED, "missing credentials")
+    try:
+        await asyncio.get_running_loop().run_in_executor(
+            None, revoke_signed_session, server.services, raw
+        )
+    except InvalidToken as exc:
+        raise OctopError(ErrorCode.AUTH_FAILED, "invalid credentials") from exc
+    return Response(status_code=204, headers={REVOCATION_RECEIPT_HEADER: "1"})
 
 
 @router.get("/me", summary="Current user profile")

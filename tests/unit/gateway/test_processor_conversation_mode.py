@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.messages import HumanMessage
@@ -15,6 +15,7 @@ from octop.infra.gateway.slash.dispatcher import SlashDispatcher
 
 def _processor(*, thread: SimpleNamespace | None) -> GlobalProcessor:
     agent_manager = MagicMock()
+    agent_manager.assert_user_can_invoke = AsyncMock()
     agent_manager.merge_turn_mcp_servers = MagicMock(return_value=None)
     agent_manager.get_row = MagicMock(return_value=None)
     agent_manager.default_mcp_servers = MagicMock(return_value=[])

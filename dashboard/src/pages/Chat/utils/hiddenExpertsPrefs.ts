@@ -2,7 +2,13 @@
 
 export const HIDDEN_SHARED_EXPERTS_STORAGE_KEY = "octop:hidden-shared-experts";
 
-export function hiddenExpertsStorageKey(userId?: number | null): string {
+export function hiddenExpertsStorageKey(
+  userId?: number | string | null,
+): string {
+  if (typeof userId === "string")
+    return `${HIDDEN_SHARED_EXPERTS_STORAGE_KEY}:identity:${encodeURIComponent(
+      userId,
+    )}`;
   return userId == null || userId <= 0
     ? HIDDEN_SHARED_EXPERTS_STORAGE_KEY
     : `${HIDDEN_SHARED_EXPERTS_STORAGE_KEY}:${userId}`;
@@ -21,7 +27,9 @@ function parseIdList(raw: string | null): string[] {
   }
 }
 
-export function readHiddenExpertIds(userId?: number | null): Set<string> {
+export function readHiddenExpertIds(
+  userId?: number | string | null,
+): Set<string> {
   try {
     return new Set(
       parseIdList(localStorage.getItem(hiddenExpertsStorageKey(userId))),
@@ -33,7 +41,7 @@ export function readHiddenExpertIds(userId?: number | null): Set<string> {
 
 export function writeHiddenExpertIds(
   ids: Iterable<string>,
-  userId?: number | null,
+  userId?: number | string | null,
 ): void {
   try {
     const unique = [...new Set([...ids].filter((id) => id.length > 0))];
@@ -50,7 +58,7 @@ export function writeHiddenExpertIds(
 
 export function hideExpertId(
   agentId: string,
-  userId?: number | null,
+  userId?: number | string | null,
 ): Set<string> {
   const next = readHiddenExpertIds(userId);
   if (!agentId) return next;
@@ -61,7 +69,7 @@ export function hideExpertId(
 
 export function unhideExpertId(
   agentId: string,
-  userId?: number | null,
+  userId?: number | string | null,
 ): Set<string> {
   const next = readHiddenExpertIds(userId);
   next.delete(agentId);

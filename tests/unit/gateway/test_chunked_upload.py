@@ -324,3 +324,103 @@ async def test_background_sweep_runs_at_start(
     with pytest.raises(asyncio.CancelledError):
         await task
     assert calls == [1]
+
+
+async def test_claim_recovers_assembled_file_after_restart(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    upload = _create(store)
+    for index in range(upload.chunk_count):
+        await _send(store, upload, index)
+    await store.claim(upload)
+    restarted = _store(tmp_path)
+    assert (await restarted.claim(upload)).read_bytes() == DATA
+
+
+async def test_concurrent_same_name_uploads_keep_both_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    workspace = BackendWorkspace(
+        LocalShellBackend(root_dir=str(tmp_path), virtual_mode=False), tmp_path
+    )
+    monkeypatch.setattr(inbound_store.time, "time", lambda: 1_800_000_000)
+    first, second = tmp_path / "one.bin", tmp_path / "two.bin"
+    first.write_bytes(b"AAAA")
+    second.write_bytes(b"BBBB")
+    results = await asyncio.gather(
+        write_inbound_file(workspace, first, filename="episode.mp4", media_type="video/mp4"),
+        write_inbound_file(workspace, second, filename="episode.mp4", media_type="video/mp4"),
+    )
+    assert len({r.path for r in results}) == 2
+    assert {await read_inbound_bytes(workspace, r.path) for r in results} == {b"AAAA", b"BBBB"}
+
+
+@pytest.mark.parametrize("filename", ["episode", "影" * 80])
+async def test_recoverable_upload_keeps_extension_and_original_name(
+    tmp_path: Path, filename: str
+) -> None:
+    from octop.infra.gateway.media.inbound_retention import _is_expired_media
+
+    workspace = BackendWorkspace(
+        LocalShellBackend(root_dir=str(tmp_path), virtual_mode=False), tmp_path
+    )
+    source = tmp_path / "assembled.bin"
+    source.write_bytes(DATA)
+    name = inbound_store.build_timestamped_inbound_name(
+        filename, now=1_700_000_000, upload_id="01ARZ3NDEKTSV4RRFFQ69G5FAV"
+    )
+    stored = await write_inbound_file(
+        workspace,
+        source,
+        filename=filename,
+        media_type="video/mp4",
+        stored_name=name,
+        preserve_source=True,
+    )
+    assert stored.filename == filename + ".mp4"
+    assert stored.path.endswith(".mp4")
+    assert len(Path(stored.path).name.encode("utf-8")) <= 255
+    assert inbound_store.display_name_from_stored(Path(stored.path).name).endswith(".mp4")
+    assert _is_expired_media(Path(stored.path).name, cutoff=1_800_000_000)
+    assert source.read_bytes() == DATA
+
+
+async def test_old_unrecoverable_session_is_gone_so_browser_starts_again(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    upload = _create(store)
+    for index in range(upload.chunk_count):
+        await _send(store, upload, index)
+    (await store.claim(upload)).unlink()  # old server moved it before crashing without a receipt
+    with pytest.raises(OctopError) as exc:
+        store.get(upload.upload_id, agent_id=upload.agent_id, owner_id=upload.owner_id)
+    assert exc.value.code == ErrorCode.UPLOAD_SESSION_NOT_FOUND
+
+
+async def test_long_unicode_suffix_never_truncates_upload_identity(tmp_path: Path) -> None:
+    workspace = BackendWorkspace(
+        LocalShellBackend(root_dir=str(tmp_path), virtual_mode=False), tmp_path
+    )
+    results = []
+    for identity, payload in [
+        ("01ARZ3NDEKTSV4RRFFQ69G5FAV", b"A"),
+        ("01ARZ3NDEKTSV4RRFFQ69G5FAW", b"B"),
+    ]:
+        name = "a." + "影" * 80
+        source = tmp_path / identity
+        source.write_bytes(payload)
+        stored_name = inbound_store.build_timestamped_inbound_name(
+            name, now=1_800_000_000, upload_id=identity
+        )
+        result = await write_inbound_file(
+            workspace,
+            source,
+            filename=name,
+            media_type="video/mp4",
+            stored_name=stored_name,
+            preserve_source=True,
+        )
+        assert identity in result.path
+        assert len(Path(result.path).name.encode("utf-8")) <= 255
+        results.append(result)
+    assert results[0].path != results[1].path
+    assert await read_inbound_bytes(workspace, results[0].path) == b"A"
+    assert await read_inbound_bytes(workspace, results[1].path) == b"B"

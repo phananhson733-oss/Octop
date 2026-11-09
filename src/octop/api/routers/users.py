@@ -2,16 +2,28 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, File, Request, UploadFile
 from pydantic import BaseModel, Field
 
-from octop.api.deps import current_user, get_server, require_permission
+from octop.api.deps import current_user, get_server, require_admin, require_permission
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.users.expert_assignment import (
+    AssignmentPlan,
+    DiscardReceipt,
+    ExpertAssignments,
+    assert_not_centrally_managed,
+    plan_expert_assignment,
+)
 from octop.infra.users.identity import Role, User
-from octop.infra.users.permissions import PERMISSIONS, effective_permissions
+from octop.infra.users.permissions import (
+    PERMISSIONS,
+    assert_can_manage_account,
+    effective_permissions,
+)
 from octop.infra.users.resource_policy import (
     normalize_max_agents,
     normalize_token_quota,
@@ -142,41 +154,15 @@ def _resolve_role_template(
     server: Any, role_id: str
 ) -> tuple[str, str, list[str], list[tuple[str, str]]]:
     """Return ``(role_id, role_name, permissions, policies)`` for a template id."""
-    from octop.infra.db.repos.user_roles import UserRoleRepo
-    from octop.infra.users.permissions import PERMISSIONS
+    from octop.infra.users.role_templates import resolve_role_template
 
-    cleaned = (role_id or "").strip()
-    if not cleaned:
-        raise OctopError(ErrorCode.FORBIDDEN, "role is required", status=400)
-    role = UserRoleRepo(server.services.db).get(cleaned)
-    if role is None:
-        raise OctopError(ErrorCode.NOT_FOUND, "role not found")
-    if role.is_admin:
-        return role.user_role_id, role.user_role_name, [], []
-    permissions = [key for key in role.permissions if key in PERMISSIONS]
-    return role.user_role_id, role.user_role_name, permissions, list(role.policies)
+    return resolve_role_template(server.services, role_id)
 
 
 def _policy_kwargs_replace_from_pairs(pairs: list[tuple[str, str]]) -> dict[str, Any]:
-    """Full replace: every known policy is set or cleared.
+    from octop.infra.users.role_templates import policy_kwargs_replace_from_pairs
 
-    Used when applying a role template so limits from a previous role cannot
-    linger after a switch (including to admin, which has no resource limits).
-    """
-    from octop.infra.users.resource_policy import (
-        POLICY_MAX_AGENTS,
-        POLICY_TOKEN_QUOTA,
-        POLICY_WORKSPACE_ROOT_DIR,
-        max_agents_of,
-        token_quota_of,
-    )
-
-    by_name = dict(pairs)
-    return {
-        "workspace_root_dir": by_name.get(POLICY_WORKSPACE_ROOT_DIR),
-        "token_quota": token_quota_of(by_name.get(POLICY_TOKEN_QUOTA)),
-        "max_agents": max_agents_of(by_name.get(POLICY_MAX_AGENTS)),
-    }
+    return policy_kwargs_replace_from_pairs(pairs)
 
 
 def _clean_role_name(raw: str | None) -> str | None:
@@ -357,6 +343,7 @@ async def _batch_apply_one(
             error="user not found",
         )
     try:
+        assert_can_manage_account(actor, str(row.role))
         if action == "enable":
             await server.user_manager.enable(row.username)
         elif action == "disable":
@@ -370,6 +357,7 @@ async def _batch_apply_one(
                 token_quota=token_quota,
             )
         elif action == "set_max_agents":
+            assert_not_centrally_managed(server.services, user_id)
             await server.user_manager.set_resource_policy(
                 row.username,
                 max_agents=max_agents,
@@ -461,6 +449,9 @@ async def patch_user(
     row = server.user_manager.get_row(user_id)
     if row is None:
         raise OctopError(ErrorCode.NOT_FOUND, "user not found")
+    assert_can_manage_account(actor, str(row.role))
+    if body.role is not None or "max_agents" in body.model_fields_set:
+        assert_not_centrally_managed(server.services, user_id)
     if body.permissions is not None:
         _assert_can_assign(actor, body.permissions)
         # An administrator account keeps full access. The form stores that as
@@ -482,6 +473,8 @@ async def patch_user(
         if user_id == actor.id and role_id != Role.ADMIN:
             raise OctopError(ErrorCode.FORBIDDEN, "cannot demote yourself")
         _require_admin_to_grant_admin(actor, role_id)
+        if body.permissions is None:
+            _assert_can_assign(actor, template_perms)
         await server.user_manager.set_role(row.username, role_id)
         if "role_name" not in body.model_fields_set:
             server.services.user_repo.set_role_name(user_id, template_name)
@@ -533,13 +526,14 @@ async def patch_user(
 @router.post("/{user_id}/unlock-login", status_code=204, summary="Clear login lockout")
 async def unlock_user_login(
     user_id: int,
-    _: Any = Depends(require_permission("users")),
+    actor: Any = Depends(require_permission("users")),
     server: Any = Depends(get_server),
 ) -> None:
     """Clear failed-login counter and temporary lock for a user."""
     row = server.user_manager.get_row(user_id)
     if row is None:
         raise OctopError(ErrorCode.NOT_FOUND, "user not found")
+    assert_can_manage_account(actor, str(row.role))
     await server.user_manager.unlock_login(row.username)
 
 
@@ -547,12 +541,13 @@ async def unlock_user_login(
 async def reset_password(
     user_id: int,
     body: ResetPasswordBody,
-    _: Any = Depends(require_permission("users")),
+    actor: Any = Depends(require_permission("users")),
     server: Any = Depends(get_server),
 ) -> None:
     row = server.user_manager.get_row(user_id)
     if row is None:
         raise OctopError(ErrorCode.NOT_FOUND, "user not found")
+    assert_can_manage_account(actor, str(row.role))
     await server.user_manager.reset_password(row.username, body.new_password)
 
 
@@ -567,6 +562,7 @@ async def delete_user(
     row = server.user_manager.get_row(user_id)
     if row is None:
         raise OctopError(ErrorCode.NOT_FOUND, "user not found")
+    assert_can_manage_account(actor, str(row.role))
     registry = getattr(getattr(server, "app_runtime", None), "agent_registry", None)
     await server.user_manager.remove(row.username, agent_manager=registry)
 
@@ -575,11 +571,13 @@ async def delete_user(
 async def upload_user_avatar(
     user_id: int,
     file: UploadFile = File(...),  # noqa: B008
-    _: Any = Depends(require_permission("users")),
+    actor: Any = Depends(require_permission("users")),
     server: Any = Depends(get_server),
 ) -> dict[str, str | None]:
-    if server.user_manager.get_row(user_id) is None:
+    row = server.user_manager.get_row(user_id)
+    if row is None:
         raise OctopError(ErrorCode.NOT_FOUND, "user not found")
+    assert_can_manage_account(actor, str(row.role))
     from octop.infra.users.profile_avatar import write_profile_avatar
 
     write_profile_avatar(
@@ -608,11 +606,87 @@ async def get_user_avatar(
 @router.delete("/{user_id}/avatar", status_code=204)
 async def delete_user_avatar(
     user_id: int,
-    _: Any = Depends(require_permission("users")),
+    actor: Any = Depends(require_permission("users")),
     server: Any = Depends(get_server),
 ) -> None:
-    if server.user_manager.get_row(user_id) is None:
+    row = server.user_manager.get_row(user_id)
+    if row is None:
         raise OctopError(ErrorCode.NOT_FOUND, "user not found")
+    assert_can_manage_account(actor, str(row.role))
     from octop.infra.users.profile_avatar import delete_profile_avatar
 
     delete_profile_avatar(server.services.paths.user_avatars_dir, str(user_id))
+
+
+class ExpertAssignmentSelection(BaseModel):
+    templates: list[str] = Field(description="Published template IDs in the desired display order.")
+
+
+@router.post(
+    "/{user_id}/expert-assignment/preview",
+    response_model=AssignmentPlan,
+    summary="Preview a user's curated expert assignment",
+    description="Admin only. Reports reusable instances, missing installations, conflicts and required capacity.",
+)
+async def preview_expert_assignment(
+    user_id: int,
+    body: ExpertAssignmentSelection,
+    _: Any = Depends(require_admin()),
+    server: Any = Depends(get_server),
+) -> AssignmentPlan:
+    return await asyncio.get_running_loop().run_in_executor(
+        None, plan_expert_assignment, server.services, user_id, body.templates
+    )
+
+
+class ExpertAssignmentApply(ExpertAssignmentSelection):
+    revision: str = Field(min_length=64, max_length=64, description="Revision returned by preview.")
+    raise_limit_to: int | None = Field(
+        default=None,
+        ge=1,
+        description="Explicitly increase this user's expert limit when required.",
+    )
+
+
+@router.put(
+    "/{user_id}/expert-assignment",
+    response_model=AssignmentPlan,
+    summary="Apply and verify one user's expert assignment",
+)
+async def apply_expert_assignment(
+    user_id: int,
+    body: ExpertAssignmentApply,
+    actor: Any = Depends(require_admin()),
+    server: Any = Depends(get_server),
+) -> AssignmentPlan:
+    assert_not_centrally_managed(server.services, user_id)
+    assignments: ExpertAssignments = server.expert_assignments
+    return await assignments.apply(
+        server, user_id, body.templates, body.revision, body.raise_limit_to, actor.id
+    )
+
+
+class ExpertInstallDiscard(BaseModel):
+    template: str = Field(description="Published template ID of the pending installation.")
+    agent_id: str = Field(description="Instance ID that preview reported under `pending`.")
+
+
+@router.post(
+    "/{user_id}/expert-assignment/discard",
+    response_model=DiscardReceipt,
+    summary="Discard an unconfirmed expert installation",
+    description=(
+        "Admin only. Deletes an instance installed for this account but never confirmed: an "
+        "interrupted install, or one left after an apply that ended in a conflict. It must "
+        "still be reserved under `agent_id`; one that never reported back is discardable only "
+        "after `pending.<template>.discardable_at`. Confirmed experts are never touched."
+    ),
+)
+async def discard_expert_installation(
+    user_id: int,
+    body: ExpertInstallDiscard,
+    actor: Any = Depends(require_admin()),
+    server: Any = Depends(get_server),
+) -> DiscardReceipt:
+    assignments: ExpertAssignments = server.expert_assignments
+    return await assignments.discard(server, user_id, body.template, body.agent_id, actor.id)

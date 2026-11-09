@@ -6,6 +6,120 @@ const AUTH_TOKEN_KEY = "auth_token";
 /** sessionStorage handoff for SSO redirects / popups (default = remember). */
 const AUTH_REMEMBER_PREF_KEY = "auth_remember_pref";
 
+/** UI-only continuity check, never a substitute for server token validation. */
+export function sameAuthSession(left: string, right: string): boolean {
+  if (left === right) return true;
+  const claims = (token: string): { sub: string; sid?: string } | null => {
+    try {
+      const parts = token.split(".");
+      if (parts.length !== 3) return null;
+      const value = JSON.parse(
+        atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")),
+      );
+      if (typeof value.sub !== "string" && typeof value.sub !== "number")
+        return null;
+      return {
+        sub: String(value.sub),
+        sid: typeof value.sid === "string" ? value.sid : undefined,
+      };
+    } catch {
+      return null;
+    }
+  };
+  const a = claims(left),
+    b = claims(right);
+  if (!a || !b || a.sub !== b.sub) return false;
+  return a.sid && b.sid ? a.sid === b.sid : true; // Pre-SID native tokens keep legacy continuity.
+}
+
+let authStorageIdentity: string | null = null;
+export function setAuthStorageIdentity(identity: string | null): void {
+  authStorageIdentity = identity;
+}
+export function getAuthStorageIdentity(): string | null {
+  return authStorageIdentity;
+}
+
+let authWatch: { token: string; invalid: boolean; changed: () => void } | null =
+  null;
+
+function assertAuthSnapshot(token: string): void {
+  const current = getAuthToken();
+  if (
+    authWatch &&
+    (authWatch.invalid || !sameAuthSession(authWatch.token, current))
+  ) {
+    if (!authWatch.invalid) {
+      authWatch.invalid = true;
+      // Drop only this tab's shadow credential; never clear another tab's new token or preferences.
+      sessionStorage.removeItem(AUTH_TOKEN_KEY);
+      authWatch.changed();
+    }
+    throw new DOMException("Account changed", "AbortError");
+  }
+  if (!sameAuthSession(token, current))
+    throw new DOMException("Account changed", "AbortError");
+}
+
+export function watchAuthSession(changed: () => void): () => void {
+  const watch = { token: getAuthToken(), invalid: false, changed };
+  authWatch = watch;
+  const listener = (event: StorageEvent) => {
+    if (event.key !== null && event.key !== AUTH_TOKEN_KEY) return;
+    if (event.storageArea && event.storageArea !== localStorage) return;
+    try {
+      assertAuthSnapshot(watch.token);
+    } catch {
+      /* Guard is already invalidated. */
+    }
+  };
+  window.addEventListener("storage", listener);
+  return () => {
+    window.removeEventListener("storage", listener);
+    if (authWatch === watch) authWatch = null;
+  };
+}
+
+async function checkResponseIdentity(
+  token: string,
+  response: Response,
+): Promise<void> {
+  try {
+    assertAuthSnapshot(token);
+  } catch (error) {
+    await response.body?.cancel().catch(() => undefined);
+    throw error;
+  }
+}
+
+function identityBoundBody(
+  body: ReadableStream<Uint8Array>,
+  token: string,
+): ReadableStream<Uint8Array> {
+  const reader = body.getReader();
+  return new ReadableStream<Uint8Array>(
+    {
+      async pull(controller) {
+        try {
+          const next = await reader.read();
+          assertAuthSnapshot(token);
+          if (next.done) {
+            reader.releaseLock();
+            controller.close();
+          } else controller.enqueue(next.value);
+        } catch (error) {
+          await reader.cancel(error).catch(() => undefined);
+          controller.error(error);
+        }
+      },
+      async cancel(reason) {
+        await reader.cancel(reason).catch(() => undefined);
+      },
+    },
+    { highWaterMark: 0 },
+  );
+}
+
 /**
  * Fired when the session is no longer valid. Cancelable: a listener inside the
  * React tree calls ``preventDefault()`` to route to /login itself, which keeps
@@ -93,15 +207,21 @@ export function getAuthToken(): string {
 
 /** Remove JWT token from both storages. */
 export function clearAuthToken() {
+  const unified = authStorageIdentity !== null;
+  authStorageIdentity = null;
   localStorage.removeItem(AUTH_TOKEN_KEY);
   sessionStorage.removeItem(AUTH_TOKEN_KEY);
   sessionStorage.removeItem(AUTH_REMEMBER_PREF_KEY);
-  localStorage.removeItem("octop:active-agent");
+  if (!unified) localStorage.removeItem("octop:active-agent");
   setActiveAgentId(null);
 }
 
 /** Persist a sliding-renewed access token from an API response, if present. */
-export function applyRenewedAccessToken(response: Response): void {
+export function applyRenewedAccessToken(
+  response: Response,
+  requestToken: string = getAuthToken(),
+): void {
+  assertAuthSnapshot(requestToken);
   const renewed = response.headers.get(ACCESS_TOKEN_RESPONSE_HEADER);
   if (renewed) {
     setAuthToken(renewed, !isSessionOnlyAuth());
@@ -142,6 +262,7 @@ function isSetupApiPath(path: string): boolean {
  * Avoids stampeding ``/api/agents`` etc. after the first 503 / status probe.
  */
 function assertNotSetupLocked(path: string): void {
+  assertAuthSnapshot(getAuthToken());
   if (_setupRequiredKnown && !isSetupApiPath(path)) {
     handleSetupRequired();
     throw new SetupRequiredError();
@@ -159,6 +280,7 @@ function assertNotSetupLocked(path: string): void {
 async function check503ForSetupRequired(
   path: string,
   response: Response,
+  authSnapshot: string,
 ): Promise<boolean> {
   if (response.status !== 503) return false;
   let body: unknown = null;
@@ -173,6 +295,7 @@ async function check503ForSetupRequired(
     typeof body === "object" &&
     (body as Record<string, unknown>).setup_required === true
   ) {
+    assertAuthSnapshot(authSnapshot);
     markSetupRequired();
     clearAuthToken();
     if (!isSetupApiPath(path)) {
@@ -348,6 +471,7 @@ async function errorCodeOf(response: Response): Promise<string | undefined> {
 async function throwIfUnauthorized(
   path: string,
   response: Response,
+  authSnapshot: string,
 ): Promise<void> {
   if (response.status !== 401 || path.startsWith("/auth/")) {
     return;
@@ -361,6 +485,7 @@ async function throwIfUnauthorized(
   ) {
     return;
   }
+  assertAuthSnapshot(authSnapshot);
   clearAuthToken();
   handleUnauthorized();
   let message = "Unauthorized";
@@ -384,6 +509,7 @@ export async function request<T = unknown>(
   options: RequestInit = {},
 ): Promise<T> {
   assertNotSetupLocked(path);
+  let authSnapshot = getAuthToken();
 
   const url = getApiUrl(path);
 
@@ -394,12 +520,14 @@ export async function request<T = unknown>(
     headers,
   });
 
-  if (await check503ForSetupRequired(path, response)) {
+  await checkResponseIdentity(authSnapshot, response);
+  if (await check503ForSetupRequired(path, response, authSnapshot)) {
     throw new SetupRequiredError();
   }
 
-  await throwIfUnauthorized(path, response);
-  applyRenewedAccessToken(response);
+  await throwIfUnauthorized(path, response, authSnapshot);
+  applyRenewedAccessToken(response, authSnapshot);
+  authSnapshot = getAuthToken();
 
   if (!response.ok) {
     if (response.status === 403 && isAgentScopedPath(path)) {
@@ -408,6 +536,7 @@ export async function request<T = unknown>(
       );
     }
     const text = await response.text().catch(() => "");
+    assertAuthSnapshot(authSnapshot);
     throw new Error(
       `Request failed: ${response.status} ${response.statusText}${
         text ? ` - ${text}` : ""
@@ -421,10 +550,14 @@ export async function request<T = unknown>(
 
   const contentType = response.headers.get("content-type") || "";
   if (!contentType.includes("application/json")) {
-    return (await response.text()) as unknown as T;
+    const result = await response.text();
+    assertAuthSnapshot(authSnapshot);
+    return result as unknown as T;
   }
 
-  return (await response.json()) as T;
+  const result = await response.json();
+  assertAuthSnapshot(authSnapshot);
+  return result as T;
 }
 
 /**
@@ -440,6 +573,7 @@ export async function requestBlob(
   onProgress?: (loaded: number, total: number) => void,
 ): Promise<Blob> {
   assertNotSetupLocked(path);
+  let authSnapshot = getAuthToken();
 
   const url = getApiUrl(path);
   const headers = buildAuthHeaders(path);
@@ -448,15 +582,18 @@ export async function requestBlob(
     headers: { ...headers, ...(options.headers as Record<string, string>) },
   });
 
-  if (await check503ForSetupRequired(path, response)) {
+  await checkResponseIdentity(authSnapshot, response);
+  if (await check503ForSetupRequired(path, response, authSnapshot)) {
     throw new SetupRequiredError();
   }
 
-  await throwIfUnauthorized(path, response);
-  applyRenewedAccessToken(response);
+  await throwIfUnauthorized(path, response, authSnapshot);
+  applyRenewedAccessToken(response, authSnapshot);
+  authSnapshot = getAuthToken();
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
+    assertAuthSnapshot(authSnapshot);
     throw new Error(
       `Request failed: ${response.status} ${response.statusText}${
         text ? ` - ${text}` : ""
@@ -466,7 +603,7 @@ export async function requestBlob(
 
   const total = Number(response.headers.get("content-length")) || 0;
   if (onProgress && total > 0 && response.body) {
-    const reader = response.body.getReader();
+    const reader = identityBoundBody(response.body, authSnapshot).getReader();
     const chunks: BlobPart[] = [];
     let loaded = 0;
     for (;;) {
@@ -481,7 +618,14 @@ export async function requestBlob(
     return new Blob(chunks);
   }
 
-  return response.blob();
+  const guarded = response.body
+    ? identityBoundBody(response.body, authSnapshot)
+    : null;
+  const result = await new Response(guarded, {
+    headers: response.headers,
+  }).blob();
+  assertAuthSnapshot(authSnapshot);
+  return result;
 }
 
 /**
@@ -493,6 +637,7 @@ export async function probeAuthResource(
   options: RequestInit = {},
 ): Promise<void> {
   assertNotSetupLocked(path);
+  let authSnapshot = getAuthToken();
 
   const url = getApiUrl(path);
   const headers = buildAuthHeaders(path);
@@ -501,15 +646,18 @@ export async function probeAuthResource(
     headers: { ...headers, ...(options.headers as Record<string, string>) },
   });
 
-  if (await check503ForSetupRequired(path, response)) {
+  await checkResponseIdentity(authSnapshot, response);
+  if (await check503ForSetupRequired(path, response, authSnapshot)) {
     throw new SetupRequiredError();
   }
 
-  await throwIfUnauthorized(path, response);
-  applyRenewedAccessToken(response);
+  await throwIfUnauthorized(path, response, authSnapshot);
+  applyRenewedAccessToken(response, authSnapshot);
+  authSnapshot = getAuthToken();
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
+    assertAuthSnapshot(authSnapshot);
     throw new Error(
       `Request failed: ${response.status} ${response.statusText}${
         text ? ` - ${text}` : ""
@@ -533,6 +681,7 @@ export async function requestStream(
   options: RequestInit = {},
 ): Promise<{ contentType: string; body: ReadableStream<Uint8Array> }> {
   assertNotSetupLocked(path);
+  let authSnapshot = getAuthToken();
 
   const url = getApiUrl(path);
   const headers = buildAuthHeaders(path);
@@ -541,15 +690,18 @@ export async function requestStream(
     headers: { ...headers, ...(options.headers as Record<string, string>) },
   });
 
-  if (await check503ForSetupRequired(path, response)) {
+  await checkResponseIdentity(authSnapshot, response);
+  if (await check503ForSetupRequired(path, response, authSnapshot)) {
     throw new SetupRequiredError();
   }
 
-  await throwIfUnauthorized(path, response);
-  applyRenewedAccessToken(response);
+  await throwIfUnauthorized(path, response, authSnapshot);
+  applyRenewedAccessToken(response, authSnapshot);
+  authSnapshot = getAuthToken();
 
   if (!response.ok) {
     const text = await response.text().catch(() => "");
+    assertAuthSnapshot(authSnapshot);
     throw new Error(
       `Request failed: ${response.status} ${response.statusText}${
         text ? ` - ${text}` : ""
@@ -563,7 +715,7 @@ export async function requestStream(
 
   return {
     contentType: response.headers.get("content-type") || "",
-    body: response.body,
+    body: identityBoundBody(response.body, authSnapshot),
   };
 }
 
@@ -580,6 +732,7 @@ export async function requestUpload<T = unknown>(
   onProgress?: UploadProgressHandler,
 ): Promise<T> {
   assertNotSetupLocked(path);
+  let authSnapshot = getAuthToken();
 
   const url = getApiUrl(path);
   const headers = buildAuthHeaders(path);
@@ -604,13 +757,17 @@ export async function requestUpload<T = unknown>(
       }
     }
 
-    if (onProgress) {
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable && event.total > 0) {
-          onProgress(Math.round((event.loaded / event.total) * 100));
-        }
-      };
-    }
+    xhr.upload.onprogress = (event) => {
+      try {
+        assertAuthSnapshot(authSnapshot);
+      } catch {
+        xhr.abort();
+        return;
+      }
+      if (onProgress && event.lengthComputable && event.total > 0) {
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      }
+    };
 
     if (options.signal) {
       if (options.signal.aborted) {
@@ -628,6 +785,7 @@ export async function requestUpload<T = unknown>(
 
     xhr.onload = () => {
       void (async () => {
+        assertAuthSnapshot(authSnapshot);
         const status = xhr.status;
         const responseText = xhr.responseText;
         const responseHeaders = new Headers();
@@ -640,19 +798,21 @@ export async function requestUpload<T = unknown>(
           headers: responseHeaders,
         });
 
-        if (await check503ForSetupRequired(path, response)) {
+        await checkResponseIdentity(authSnapshot, response);
+        if (await check503ForSetupRequired(path, response, authSnapshot)) {
           reject(new SetupRequiredError());
           return;
         }
 
         try {
-          await throwIfUnauthorized(path, response);
+          await throwIfUnauthorized(path, response, authSnapshot);
         } catch (err) {
           reject(err);
           return;
         }
 
-        applyRenewedAccessToken(response);
+        applyRenewedAccessToken(response, authSnapshot);
+        authSnapshot = getAuthToken();
 
         if (!response.ok) {
           // Same shape as request() so parseApiError() can read the error envelope.
@@ -666,12 +826,16 @@ export async function requestUpload<T = unknown>(
           return;
         }
 
+        let result: unknown;
         try {
-          resolve((await response.json()) as T);
+          result = await response.json();
         } catch {
           reject(new Error("Upload failed: invalid JSON response"));
+          return;
         }
-      })();
+        assertAuthSnapshot(authSnapshot);
+        resolve(result as T);
+      })().catch(reject);
     };
 
     xhr.onerror = () => reject(new Error("Network error"));

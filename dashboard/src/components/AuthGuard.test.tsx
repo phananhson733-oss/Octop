@@ -15,6 +15,8 @@ vi.mock("../api/modules/auth", () => ({
 vi.mock("../api/request", () => ({
   getAuthToken: vi.fn(() => null),
   clearAuthToken: vi.fn(),
+  watchAuthSession: vi.fn(() => () => {}),
+  setAuthStorageIdentity: vi.fn(),
 }));
 
 vi.mock("../utils/locale", () => ({

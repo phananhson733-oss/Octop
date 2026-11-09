@@ -21,8 +21,11 @@ from octop.infra.db.repos.user_roles import (
     UserRoleRow,
 )
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.users.expert_access import POLICY_ALLOWED_EXPERT_TEMPLATES
 from octop.infra.users.identity import User
 from octop.infra.users.permissions import ALL_PERMISSION_KEYS, validate_permission_keys
+from octop.infra.users.plugin_access import POLICY_ALLOWED_PLUGIN_UI, normalize_plugin_ui_grants
+from octop.infra.users.resource_grants import normalize_resource_grants
 from octop.infra.users.resource_policy import (
     POLICY_DEFAULT_KNOWLEDGE_BASES,
     POLICY_DEFAULT_PUBLISHED_EXPERT,
@@ -50,6 +53,8 @@ from octop.infra.users.resource_policy import (
 router = APIRouter()
 
 _KNOWN_POLICIES = {
+    POLICY_ALLOWED_EXPERT_TEMPLATES,
+    POLICY_ALLOWED_PLUGIN_UI,
     POLICY_WORKSPACE_ROOT_DIR,
     POLICY_TOKEN_QUOTA,
     POLICY_MAX_AGENTS,
@@ -186,7 +191,7 @@ def _policies_from_items(items: list[PolicyItem]) -> list[tuple[str, str]]:
             status=400,
         )
     by_name = {item.name: item.value for item in items}
-    return _policies_from_fields(
+    normalized = _policies_from_fields(
         workspace_root_dir=by_name.get(POLICY_WORKSPACE_ROOT_DIR),
         token_quota=token_quota_of(by_name.get(POLICY_TOKEN_QUOTA)),
         max_agents=max_agents_of(by_name.get(POLICY_MAX_AGENTS)),
@@ -195,6 +200,22 @@ def _policies_from_items(items: list[PolicyItem]) -> list[tuple[str, str]]:
         hidden_expert_tabs=by_name.get(POLICY_HIDDEN_EXPERT_TABS),
         default_published_expert=by_name.get(POLICY_DEFAULT_PUBLISHED_EXPERT),
     )
+
+    if POLICY_ALLOWED_PLUGIN_UI in by_name:
+        normalized.append(
+            (
+                POLICY_ALLOWED_PLUGIN_UI,
+                normalize_plugin_ui_grants(by_name[POLICY_ALLOWED_PLUGIN_UI]),
+            )
+        )
+    if POLICY_ALLOWED_EXPERT_TEMPLATES in by_name:
+        normalized.append(
+            (
+                POLICY_ALLOWED_EXPERT_TEMPLATES,
+                normalize_resource_grants(by_name[POLICY_ALLOWED_EXPERT_TEMPLATES]),
+            )
+        )
+    return normalized
 
 
 def _policies_for_write(body: UserRoleBody | UserRolePatchBody) -> list[tuple[str, str]] | None:
@@ -364,13 +385,21 @@ async def patch_user_role(
         except ValueError as exc:
             raise OctopError(ErrorCode.FORBIDDEN, str(exc), status=400) from exc
         _assert_can_assign(actor, permissions)
+    policies = _policies_for_write(body)
+    # Older dashboards rebuild the policy array without this security boundary.
+    # Omission must not silently restore unrestricted UI access.
+    if policies is not None:
+        for key in (POLICY_ALLOWED_PLUGIN_UI, POLICY_ALLOWED_EXPERT_TEMPLATES):
+            previous = current.policy_value(key)
+            if previous is not None and not any(name == key for name, _ in policies):
+                policies.append((key, previous))
     try:
         updated = _repo(server).update(
             user_role_id,
             user_role_name=name,
             description=description,
             permissions=permissions,
-            policies=_policies_for_write(body),
+            policies=policies,
             avatar_icon=avatar_icon,
         )
     except ValueError as exc:

@@ -11,6 +11,7 @@ from fastapi.responses import Response
 
 from octop.api.common.agent import assert_agent_access_row, assert_agent_owner
 from octop.api.common.agent_runtime import AgentRuntimeFields, runtime_field_updates
+from octop.api.common.expert_management import require_expert_management
 from octop.api.common.validators import assert_user_backend_root_dirs
 from octop.api.common.workspace import require_agent_workspace
 from octop.api.deps import current_user, get_server
@@ -278,7 +279,9 @@ async def list_agents(
     )
 
 
-@router.post("", status_code=201, summary="Create agent")
+@router.post(
+    "", status_code=201, summary="Create agent", dependencies=[Depends(require_expert_management)]
+)
 async def create_agent(
     body: AgentCreateBody,
     user: Any = Depends(current_user),
@@ -375,7 +378,9 @@ async def get_agent(
 _assert_agent_owner = assert_agent_owner
 
 
-@router.patch("/{agent_id}", summary="Update agent")
+@router.patch(
+    "/{agent_id}", summary="Update agent", dependencies=[Depends(require_expert_management)]
+)
 async def patch_agent(
     agent_id: str,
     body: AgentPatchBody,
@@ -443,7 +448,12 @@ async def patch_agent(
     )
 
 
-@router.delete("/{agent_id}", status_code=204, summary="Delete agent")
+@router.delete(
+    "/{agent_id}",
+    status_code=204,
+    summary="Delete agent",
+    dependencies=[Depends(require_expert_management)],
+)
 async def delete_agent(
     agent_id: str,
     user: Any = Depends(current_user),
@@ -458,7 +468,12 @@ async def delete_agent(
     await server.app_runtime.agent_registry.delete(agent_id)
 
 
-@router.post("/{agent_id}/avatar", status_code=201, summary="Upload expert avatar")
+@router.post(
+    "/{agent_id}/avatar",
+    status_code=201,
+    summary="Upload expert avatar",
+    dependencies=[Depends(require_expert_management)],
+)
 async def upload_agent_avatar(
     agent_id: str,
     file: UploadFile = File(...),  # noqa: B008
@@ -501,7 +516,12 @@ async def get_agent_avatar(
     )
 
 
-@router.delete("/{agent_id}/avatar", status_code=204, summary="Delete expert avatar")
+@router.delete(
+    "/{agent_id}/avatar",
+    status_code=204,
+    summary="Delete expert avatar",
+    dependencies=[Depends(require_expert_management)],
+)
 async def delete_agent_avatar(
     agent_id: str,
     user: Any = Depends(current_user),

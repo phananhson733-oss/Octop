@@ -6,6 +6,7 @@ import builtins
 import json
 import sqlite3
 from dataclasses import dataclass
+from typing import Any
 
 try:
     from psycopg import errors as pg_errors
@@ -141,6 +142,13 @@ class UserRoleRepo:
                 "SELECT * FROM user_role WHERE user_role_id = ?",
                 (user_role_id,),
             ).fetchone()
+        return UserRoleRow.from_row(row) if row else None
+
+    def lock_for_assignment(self, conn: Any, role_id: str) -> UserRoleRow | None:
+        sql = "SELECT * FROM user_role WHERE user_role_id = ?"
+        if self._db.dialect == "postgresql":
+            sql += " FOR UPDATE"
+        row = conn.execute(sql, (role_id,)).fetchone()
         return UserRoleRow.from_row(row) if row else None
 
     def get_by_name(self, user_role_name: str) -> UserRoleRow | None:

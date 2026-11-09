@@ -18,7 +18,8 @@ type ExpertLike = {
  * Owned experts are never treated as hideable via this hook.
  */
 export function useHiddenSharedExperts() {
-  const userId = useCurrentUser()?.id ?? null;
+  const user = useCurrentUser();
+  const userId = user?.identity_scope ?? user?.identity_id ?? user?.id ?? null;
   const [hiddenIds, setHiddenIds] = useState(() => readHiddenExpertIds(userId));
 
   useEffect(() => {

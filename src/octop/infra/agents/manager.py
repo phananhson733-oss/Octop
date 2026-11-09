@@ -11,12 +11,12 @@ import shutil
 import threading
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
-from contextlib import asynccontextmanager, suppress
+from contextlib import aclosing, asynccontextmanager, suppress
 from dataclasses import dataclass, field, fields, replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from octop_harness import HarnessAgent, HarnessAgentConfig, HarnessAgentManager
+from octop_harness import HarnessAgent, HarnessAgentConfig
 from octop_harness.registry import AgentEntry
 from octop_harness.security.models import SecurityPolicy
 
@@ -25,6 +25,7 @@ from octop.i18n.domains.agents import (
     NO_MODELS_CONFIGURED,
     format_agent_start_error,
 )
+from octop.infra.agents.harness_manager import ClosingHarnessAgentManager as HarnessAgentManager
 from octop.infra.agents.memory.backend import memory_backend_from_agent_config
 from octop.infra.agents.memory.slim import MemorySlimCoordinator
 from octop.infra.agents.providers import ProviderStore, sync_providers_to_harness
@@ -752,6 +753,8 @@ class AgentManager:
         spec: AgentCreateSpec,
         *,
         defer_bootstrap: bool = False,
+        assignment_limit: int | None = None,
+        reservation: tuple[str, str] | None = None,
         workspace_initializer: Callable[[AgentRow, Any], Awaitable[None]] | None = None,
     ) -> AgentRow:
         """Create a new agent, persist to DB, and register with harness."""
@@ -784,6 +787,7 @@ class AgentManager:
             )
             from octop.infra.users.resource_policy import (
                 assert_agent_quota_available,
+                create_expert_within_quota,
                 raise_if_backend_outside_user_root,
             )
 
@@ -794,6 +798,7 @@ class AgentManager:
                         self._repos.user_policy_repo,
                         self._repos.agent_repo,
                         spec.user_id,
+                        assignment_limit=assignment_limit,
                     )
                 raise_if_backend_outside_user_root(
                     self._repos.user_policy_repo,
@@ -832,31 +837,51 @@ class AgentManager:
             else:
                 raw_mcp = profile.get("mcp_servers")
                 mcp_servers_json = raw_mcp if isinstance(raw_mcp, str) else None
-            self._repos.agent_repo.create(
-                agent_id=agent_id,
-                user_id=spec.user_id,
-                name=spec.name,
-                description=spec.description,
-                persona_mbti=spec.persona_mbti,
-                default_model=spec.default_model,
-                system_prompt=spec.system_prompt,
-                config_json=json.dumps(config) if config else None,
-                icon=spec.icon,
-                template_name=spec.template_name or profile.get("template_name"),
-                color=spec.color or profile.get("color"),
-                icon_name=spec.icon_name or profile.get("icon_name"),
-                icon_url=spec.icon_url or profile.get("icon_url"),
-                skill_package_ids=package_ids_json,
-                published_expert_id=spec.published_expert_id or profile.get("published_expert_id"),
-                welcome_message=(
-                    spec.welcome_message
-                    if spec.welcome_message is not None
-                    else profile.get("welcome_message")
-                ),
-                knowledge_base_ids=knowledge_ids_json,
-                mcp_servers=mcp_servers_json,
-                kind=spec.kind if spec.kind in {"expert", "team"} else "expert",
-            )
+            kind = spec.kind if spec.kind in {"expert", "team"} else "expert"
+
+            def insert_row(conn: Any = None) -> None:
+                self._repos.agent_repo.create(
+                    agent_id=agent_id,
+                    user_id=spec.user_id,
+                    name=spec.name,
+                    description=spec.description,
+                    persona_mbti=spec.persona_mbti,
+                    default_model=spec.default_model,
+                    system_prompt=spec.system_prompt,
+                    config_json=json.dumps(config) if config else None,
+                    icon=spec.icon,
+                    template_name=spec.template_name or profile.get("template_name"),
+                    color=spec.color or profile.get("color"),
+                    icon_name=spec.icon_name or profile.get("icon_name"),
+                    icon_url=spec.icon_url or profile.get("icon_url"),
+                    skill_package_ids=package_ids_json,
+                    published_expert_id=spec.published_expert_id
+                    or profile.get("published_expert_id"),
+                    welcome_message=(
+                        spec.welcome_message
+                        if spec.welcome_message is not None
+                        else profile.get("welcome_message")
+                    ),
+                    knowledge_base_ids=knowledge_ids_json,
+                    mcp_servers=mcp_servers_json,
+                    kind=kind,
+                    conn=conn,
+                )
+
+            if spec.user_id is not None and kind == "expert":
+                # Counted again in the insert's transaction: the pre-check above lets
+                # another process insert between its count and this row. The transaction
+                # can wait on another process's lock, so it runs off the event loop.
+                await asyncio.to_thread(
+                    create_expert_within_quota,
+                    self._repos,
+                    spec.user_id,
+                    insert_row,
+                    assignment_limit=assignment_limit,
+                    reservation=reservation,
+                )
+            else:
+                insert_row()
             row = self._repos.agent_repo.get(agent_id)
             assert row is not None
             if spec.is_shared:
@@ -1874,24 +1899,53 @@ class AgentManager:
         finally:
             self._end_invocation(agent_id)
 
+    async def assert_user_can_invoke(self, agent_id: str, user_id: int) -> None:
+        from octop.infra.users.expert_access import assert_expert_invocation
+
+        await asyncio.get_running_loop().run_in_executor(
+            None, assert_expert_invocation, self._repos, agent_id, user_id
+        )
+
+    async def _authorize_execution(self, agent_id: str, request: dict[str, Any]) -> None:
+        from octop.infra.users.expert_access import assert_execution_access
+
+        await asyncio.get_running_loop().run_in_executor(
+            None,
+            assert_execution_access,
+            self._repos,
+            agent_id,
+            request.get("user"),
+            str(thread_id_from_request(request) or ""),
+        )
+
     async def stream(self, agent_id: str, request: dict[str, Any]) -> AsyncIterator[Any]:
         """Stream harness chunks (Langfuse tracing handled inside octop-harness)."""
         if self._harness_manager is None:
             raise self._unavailable_error(agent_id)
 
-        thread_id = str(request.get("thread_id") or "")
+        thread_id = str(thread_id_from_request(request) or "")
         async with (
             self._thread_execution_lock(agent_id, thread_id),
             self._track_invocation(agent_id),
         ):
+            await self._authorize_execution(agent_id, request)
             self._apply_pending_bootstrap_graph_refresh(agent_id)
             req = self._prepare_stream_request(agent_id, request)
             with (
                 hitl_thread_scope(thread_id_from_request(req)),
                 turn_model_scope(self._stream_model_label(agent_id, req, thread_id)),
             ):
-                async for chunk in self._harness_manager.stream(agent_id, cast(Any, req)):
-                    yield chunk
+                async with aclosing(
+                    self._harness_manager.stream(agent_id, cast(Any, req))
+                ) as chunks:
+                    async for chunk in chunks:
+                        try:
+                            await self._authorize_execution(agent_id, request)
+                        except OctopError:
+                            self.cancel_stream(agent_id, thread_id)
+                            raise
+                        yield chunk
+            await self._authorize_execution(agent_id, request)
             self._apply_pending_bootstrap_graph_refresh(agent_id)
 
     async def call(self, agent_id: str, request: dict[str, Any]) -> dict[str, Any]:
@@ -1899,6 +1953,7 @@ class AgentManager:
         if self._harness_manager is None:
             raise self._unavailable_error(agent_id)
         async with self._track_invocation(agent_id):
+            await self._authorize_execution(agent_id, request)
             self._apply_pending_bootstrap_graph_refresh(agent_id)
             req = self._prepare_stream_request(agent_id, request)
             thread_id = str(req.get("thread_id") or thread_id_from_request(req) or "")
@@ -1907,6 +1962,7 @@ class AgentManager:
                 turn_model_scope(self._stream_model_label(agent_id, req, thread_id)),
             ):
                 result = await self._harness_manager.call(agent_id, cast(Any, req))
+            await self._authorize_execution(agent_id, request)
             self._apply_pending_bootstrap_graph_refresh(agent_id)
         if not isinstance(result, dict):
             return {"result": result}
@@ -1925,15 +1981,23 @@ class AgentManager:
             self._thread_execution_lock(agent_id, thread_id),
             self._track_invocation(agent_id),
         ):
+            await self._authorize_execution(agent_id, {"thread_id": thread_id})
             self._apply_pending_bootstrap_graph_refresh(agent_id)
             with (
                 hitl_thread_scope(thread_id),
                 turn_model_scope(self._stream_model_label(agent_id, {}, thread_id)),
             ):
-                async for chunk in self._harness_manager.resume_hitl(
-                    agent_id, thread_id, decisions
-                ):
-                    yield chunk
+                async with aclosing(
+                    self._harness_manager.resume_hitl(agent_id, thread_id, decisions)
+                ) as chunks:
+                    async for chunk in chunks:
+                        try:
+                            await self._authorize_execution(agent_id, {"thread_id": thread_id})
+                        except OctopError:
+                            self.cancel_stream(agent_id, thread_id)
+                            raise
+                        yield chunk
+            await self._authorize_execution(agent_id, {"thread_id": thread_id})
             self._apply_pending_bootstrap_graph_refresh(agent_id)
 
     def cancel_stream(self, agent_id: str, thread_id: str) -> None:

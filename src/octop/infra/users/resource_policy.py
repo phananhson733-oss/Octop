@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 from octop.infra.errors import ErrorCode, OctopError
@@ -331,12 +331,62 @@ def assert_token_quota_available(policy_repo: Any, usage_repo: Any, user_id: int
         )
 
 
-def assert_agent_quota_available(policy_repo: Any, agent_repo: Any, user_id: int) -> None:
-    """Raise when the user already owns ``max_agents`` expert agents."""
+def assert_agent_quota_available(
+    policy_repo: Any, agent_repo: Any, user_id: int, *, assignment_limit: int | None = None
+) -> None:
+    """Raise when the user already owns ``max_agents`` expert agents.
+
+    A fail-fast check before any side effect; ``create_expert_within_quota`` decides.
+    """
     limit = max_agents_of(policy_repo.get(user_id, POLICY_MAX_AGENTS))
+    if assignment_limit is not None:
+        limit = assignment_limit
     if limit is None:
         return
-    owned = int(agent_repo.count_by_user(user_id, kind="expert"))
+    _raise_if_at_agent_quota(int(agent_repo.count_by_user(user_id, kind="expert")), limit)
+
+
+def create_expert_within_quota(
+    repos: Any,
+    user_id: int,
+    insert: Callable[[Any], object],
+    *,
+    assignment_limit: int | None = None,
+    reservation: tuple[str, str] | None = None,
+) -> None:
+    """Run ``insert(conn)`` only while the user owns fewer than ``max_agents`` experts.
+
+    The count and the insert share one transaction that first locks the user row
+    (``FOR UPDATE`` on PostgreSQL; SQLite transactions are ``BEGIN IMMEDIATE``). Expert
+    assignment commits take the same row first, so a create and an assignment in different
+    server processes queue instead of both passing a count taken before the other's write.
+
+    ``reservation`` is ``(policy name, value)`` an assignment install must still hold; once
+    an admin has discarded or replaced it, the insert is refused instead of leaving an
+    instance no reservation guards.
+    """
+    names = (POLICY_MAX_AGENTS,) if reservation is None else (POLICY_MAX_AGENTS, reservation[0])
+    with repos.db.transaction() as conn:
+        repos.user_repo.assignment_principal(conn, user_id)
+        locked = repos.user_policy_repo.lock_for_assignment(conn, user_id, names)
+        if reservation is not None:
+            held = locked.get(reservation[0])
+            if held is None or not held.enabled or held.value != reservation[1]:
+                raise OctopError(
+                    ErrorCode.EXPERT_ASSIGNMENT_CONFLICT,
+                    "installation reservation changed",
+                    status=409,
+                )
+        limit = max_agents_of(locked.get(POLICY_MAX_AGENTS))
+        if assignment_limit is not None:
+            limit = assignment_limit
+        if limit is not None:
+            owned = repos.agent_repo.count_experts_in_transaction(conn, user_id)
+            _raise_if_at_agent_quota(owned, limit)
+        insert(conn)
+
+
+def _raise_if_at_agent_quota(owned: int, limit: int) -> None:
     if owned >= limit:
         raise OctopError(
             ErrorCode.AGENT_QUOTA_EXCEEDED,

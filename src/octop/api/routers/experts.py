@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from octop.api.common.agent import require_agent_owner_row, user_owns_agent
 from octop.api.common.agent_runtime import AgentRuntimeFields, runtime_field_updates
+from octop.api.common.expert_management import require_expert_management
 from octop.api.common.validators import assert_user_backend_root_dirs
 from octop.api.deps import current_user, get_server
 from octop.infra.agents.experts.avatar import (
@@ -539,6 +540,7 @@ async def get_published_expert(
 
 @router.post(
     "/agents/{agent_id}/publish-expert",
+    dependencies=[Depends(require_expert_management)],
     status_code=201,
     summary="Publish an agent workspace as an expert template",
 )
@@ -576,6 +578,7 @@ async def publish_agent_expert(
 
 @router.post(
     "/experts/published/{expert_id}/refresh",
+    dependencies=[Depends(require_expert_management)],
     summary="Refresh a published expert snapshot",
 )
 async def refresh_published_expert(
@@ -620,6 +623,7 @@ async def refresh_published_expert(
 
 @router.delete(
     "/experts/published/{expert_id}",
+    dependencies=[Depends(require_expert_management)],
     status_code=204,
     summary="Unpublish an expert template",
 )
@@ -636,6 +640,7 @@ async def unpublish_expert(
 
 @router.post(
     "/experts/published/{expert_id}/install",
+    dependencies=[Depends(require_expert_management)],
     status_code=201,
     summary="Install a private agent from a published expert",
 )
@@ -741,6 +746,7 @@ async def get_expert_hub_item(
 
 @router.post(
     "/experts/hub/{slug}/install",
+    dependencies=[Depends(require_expert_management)],
     status_code=201,
     response_model=MarketCreateResponse,
     summary="Create an agent from a SkillHub expert market card",
@@ -838,7 +844,11 @@ async def get_expert(
     return _expert_dict(expert, catalog, include_file_contents=True)
 
 
-@router.post("/agents/from-expert/{expert_id}", status_code=201)
+@router.post(
+    "/agents/from-expert/{expert_id}",
+    dependencies=[Depends(require_expert_management)],
+    status_code=201,
+)
 async def create_agent_from_expert(
     expert_id: str,
     body: FromExpertBody,

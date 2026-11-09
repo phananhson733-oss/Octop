@@ -71,6 +71,11 @@ OPENAPI_TAGS: list[dict[str, str]] = [
     {"name": "health", "description": "Liveness probe for load balancers and monitoring."},
     {"name": "users", "description": "Admin user management (create, disable, reset passwords)."},
     {
+        "name": "control",
+        "description": "Signed calls from the unified entry that manage one account's role, "
+        "experts and expert limit. 404 unless the instance has a control-plane key.",
+    },
+    {
         "name": "agents",
         "description": "Create and configure AI agents; start, stop, and inspect runtime status.",
     },

@@ -7,6 +7,7 @@ import json
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 from octop_gateway.models import ChannelSubject, ImageContent, InboundMessage, TextContent
@@ -559,7 +560,7 @@ def test_enrich_media_block_preview_file_url() -> None:
 
 @pytest.mark.asyncio
 async def test_global_processor_iter_turn_chunks_registers_hitl() -> None:
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import MagicMock
 
     from octop.infra.gateway.hitl.coordinator import HitlChannelCoordinator
     from octop.infra.gateway.process.processor import GlobalProcessor
@@ -574,6 +575,7 @@ async def test_global_processor_iter_turn_chunks_registers_hitl() -> None:
         }
 
     agent_manager = MagicMock()
+    agent_manager.assert_user_can_invoke = AsyncMock()
     agent_manager.stream = _stream
     agent_manager.merge_turn_mcp_servers = MagicMock(return_value=None)
     agent_manager.prepare_chat_mcp = AsyncMock(return_value=[])
@@ -617,7 +619,7 @@ async def test_global_processor_iter_turn_chunks_registers_hitl() -> None:
 
 @pytest.mark.asyncio
 async def test_global_processor_iter_turn_chunks_expires_stale_hitl() -> None:
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import MagicMock
 
     from octop.infra.gateway.hitl.coordinator import HitlChannelCoordinator
     from octop.infra.gateway.process.processor import GlobalProcessor
@@ -627,6 +629,7 @@ async def test_global_processor_iter_turn_chunks_expires_stale_hitl() -> None:
         yield {"type": "token", "content": "ok"}
 
     agent_manager = MagicMock()
+    agent_manager.assert_user_can_invoke = AsyncMock()
     agent_manager.stream = _stream
     agent_manager.merge_turn_mcp_servers = MagicMock(return_value=None)
     agent_manager.prepare_chat_mcp = AsyncMock(return_value=[])
@@ -683,7 +686,7 @@ async def test_global_processor_iter_turn_chunks_expires_stale_hitl() -> None:
 
 @pytest.mark.asyncio
 async def test_global_processor_iter_turn_chunks_slash(tmp_path: Path) -> None:
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import MagicMock
 
     from langchain_core.messages import AIMessage, HumanMessage
 
@@ -716,6 +719,7 @@ async def test_global_processor_iter_turn_chunks_slash(tmp_path: Path) -> None:
     harness = MagicMock()
     harness.aappend_messages = AsyncMock(return_value=[human, ai])
     agent_manager = MagicMock()
+    agent_manager.assert_user_can_invoke = AsyncMock()
     agent_manager.get_agent.return_value = harness
 
     dispatcher = build_default_dispatcher()

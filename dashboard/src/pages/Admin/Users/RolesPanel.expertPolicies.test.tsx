@@ -39,6 +39,8 @@ const pickRole: UserRole = {
   system_role: "user",
   permissions: ["knowledge_bases"],
   policies: [
+    { name: "allowed_plugin_ui", value: '["sab-tools"]' },
+    { name: "allowed_expert_templates", value: '["01TEMPLATE"]' },
     { name: "visible_nav", value: "chat,experts" },
     { name: "hidden_expert_tabs", value: "library,market" },
     { name: "default_published_expert", value: "01TEMPLATE,01SEO" },
@@ -61,6 +63,7 @@ describe("<RolesPanel /> expert policies", () => {
     vi.clearAllMocks();
     stable.request.mockReset();
     stable.request.mockImplementation(async (path: string) => {
+      if (path === "/plugins") return [{ id: "sab-tools", name: "客户选剧" }];
       if (path === "/users/roles") return [pickRole];
       if (path === "/experts/published") {
         return [
@@ -109,6 +112,7 @@ describe("<RolesPanel /> expert policies", () => {
       within(template as HTMLElement).getByText("SEO 专家模板"),
     ).toBeInTheDocument();
 
+    expect(screen.getByText("客户选剧 (sab-tools)")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "common.save" }));
 
     await waitFor(() =>
@@ -125,6 +129,8 @@ describe("<RolesPanel /> expert policies", () => {
       { name: "hidden_expert_tabs", value: "library,market" },
       // In the order chosen: the first one is the expert chat opens on.
       { name: "default_published_expert", value: "01TEMPLATE,01SEO" },
+      { name: "allowed_plugin_ui", value: '["sab-tools"]' },
+      { name: "allowed_expert_templates", value: '["01TEMPLATE"]' },
     ]);
     // The toast says how many existing accounts just got the expert.
     await waitFor(() =>
@@ -132,5 +138,35 @@ describe("<RolesPanel /> expert policies", () => {
         "adminUsers.roleDefaultExpertInstalled",
       ),
     );
+  });
+  it("saves an explicit deny-all policy when the last plugin is removed", async () => {
+    const user = userEvent.setup();
+    render(<RolesPanel />);
+    const row = (await screen.findByText("选剧角色")).closest("tr");
+    await user.click(
+      within(row as HTMLElement).getByRole("button", { name: "common.edit" }),
+    );
+    const field = (await screen.findByText("adminUsers.rolePluginUi")).closest(
+      ".ant-form-item",
+    );
+    const remove = (field as HTMLElement).querySelector(
+      ".ant-select-selection-item-remove",
+    );
+    expect(remove).not.toBeNull();
+    await user.click(remove as HTMLElement);
+    await user.click(screen.getByRole("button", { name: "common.save" }));
+    await waitFor(() =>
+      expect(stable.request).toHaveBeenCalledWith(
+        "/users/roles/01ROLE",
+        expect.objectContaining({ method: "PATCH" }),
+      ),
+    );
+    const patch = stable.request.mock.calls.find(
+      ([path]) => path === "/users/roles/01ROLE",
+    );
+    expect(JSON.parse(patch?.[1].body).policies).toContainEqual({
+      name: "allowed_plugin_ui",
+      value: "[]",
+    });
   });
 });

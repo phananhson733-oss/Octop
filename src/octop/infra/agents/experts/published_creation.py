@@ -344,6 +344,10 @@ async def install_published_expert(
     user: User,
     expert_id: str,
     options: PublishedExpertInstallOptions,
+    prepared: tuple[PublishedExpertRow, Path] | None = None,
+    defer_bootstrap: bool = True,
+    assignment_limit: int | None = None,
+    reservation: tuple[str, str] | None = None,
 ) -> dict[str, Any]:
     """Create a private agent and seed it from the immutable published snapshot.
 
@@ -351,8 +355,13 @@ async def install_published_expert(
     snapshot does not copy them from the publisher's source agent. The installer
     may pass their own lists on this request.
     """
-    row = require_published_expert(services, expert_id)
-    snapshot_dir = _snapshot_dir(services, row.id)
+    row, snapshot_dir = (
+        prepared
+        if prepared is not None
+        else (require_published_expert(services, expert_id), _snapshot_dir(services, expert_id))
+    )
+    if row.id != expert_id:
+        raise ValueError("prepared template does not match requested expert")
     if not snapshot_dir.is_dir():
         raise OctopError(ErrorCode.NOT_FOUND, f"published expert {expert_id!r} snapshot not found")
 
@@ -411,7 +420,9 @@ async def install_published_expert(
             published_expert_id=row.id,
             welcome_message=options.welcome_message,
         ),
-        defer_bootstrap=True,
+        defer_bootstrap=defer_bootstrap,
+        **({"assignment_limit": assignment_limit} if assignment_limit is not None else {}),
+        **({"reservation": reservation} if reservation is not None else {}),
         workspace_initializer=seed_snapshot,
     )
     return {

@@ -363,6 +363,7 @@ def test_serialize_history_exposes_inbound_attachments() -> None:
 @pytest.mark.asyncio
 async def test_weixin_pdf_history_is_downloadable_attachment() -> None:
     manager = MagicMock()
+    manager.assert_user_can_invoke = AsyncMock()
     manager.get_row.return_value = None
     manager.get_thread_model.return_value = None
     manager.resolve_fallback_model_ref.return_value = None

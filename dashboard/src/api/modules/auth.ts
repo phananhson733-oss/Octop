@@ -49,6 +49,10 @@ export interface SsoIdentity {
 
 export interface OctopUser {
   id: number;
+  /** Stable cross-instance identity supplied by the unified entry. */
+  identity_id?: string;
+  /** Verified instance + account namespace; distinct even for one linked identity. */
+  identity_scope?: string;
   username: string;
   /** Role-template public id: admin | user | custom ULID. */
   role: string;

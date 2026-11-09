@@ -427,21 +427,29 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   const [activeAgentId, setActiveAgentIdState] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const defaultTemplateId = useCurrentUser()?.default_published_expert ?? null;
+  const currentUser = useCurrentUser();
+  const defaultTemplateId = currentUser?.default_published_expert ?? null;
+  const identityScope = currentUser?.identity_scope ?? currentUser?.identity_id;
+  const storageKey = identityScope
+    ? `${STORAGE_KEY}:identity:${encodeURIComponent(identityScope)}`
+    : STORAGE_KEY;
 
-  const persistAndApply = useCallback((id: string | null) => {
-    setActiveAgentIdState((prev) => {
-      // Skip the re-render when the id hasn't changed.
-      if (prev === id) return prev;
-      if (id) {
-        localStorage.setItem(STORAGE_KEY, id);
-      } else {
-        localStorage.removeItem(STORAGE_KEY);
-      }
-      setActiveAgentId(id); // populates request.ts module-level cache
-      return id;
-    });
-  }, []);
+  const persistAndApply = useCallback(
+    (id: string | null) => {
+      setActiveAgentIdState((prev) => {
+        // Skip the re-render when the id hasn't changed.
+        if (prev === id) return prev;
+        if (id) {
+          localStorage.setItem(storageKey, id);
+        } else {
+          localStorage.removeItem(storageKey);
+        }
+        setActiveAgentId(id); // populates request.ts module-level cache
+        return id;
+      });
+    },
+    [storageKey],
+  );
 
   const refresh = useCallback(
     async (options?: { silent?: boolean; force?: boolean }): Promise<void> => {
@@ -470,7 +478,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
 
         // Reconcile selection with what the server reports. Keep a
         // disconnected remote pin instead of jumping to the first local expert.
-        const stored = localStorage.getItem(STORAGE_KEY);
+        const stored = localStorage.getItem(storageKey);
         const haveStored = stored && merged.some((a) => a.agent_id === stored);
         if (haveStored) {
           persistAndApply(stored);
@@ -489,7 +497,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
         }
       }
     },
-    [persistAndApply, defaultTemplateId],
+    [persistAndApply, defaultTemplateId, storageKey],
   );
 
   // Initial fetch — fire once on mount. Login flow lives elsewhere; this

@@ -40,6 +40,7 @@ import {
   userRoleLabel,
   type UserRole,
 } from "../../../api/modules/userRoles";
+import { pluginsApi, type InstalledPlugin } from "../../../api/modules/plugins";
 import type { OctopUser } from "../../../api/modules/auth";
 import {
   knowledgeBasesApi,
@@ -67,6 +68,8 @@ import {
 
 interface RoleFormValues extends PolicyFormValues {
   name: string;
+  allowed_plugin_ui?: string[];
+  allowed_expert_templates?: string[];
   user_role_id?: string;
   description?: string;
   permissions?: string[];
@@ -124,7 +127,41 @@ function rolePolicies(
       value: values.default_published_experts.join(","),
     });
   }
+  if (values.allowed_plugin_ui !== undefined) {
+    policies.push({
+      name: "allowed_plugin_ui",
+      value: JSON.stringify(values.allowed_plugin_ui),
+    });
+  }
+  if (values.allowed_expert_templates !== undefined) {
+    policies.push({
+      name: "allowed_expert_templates",
+      value: JSON.stringify(values.allowed_expert_templates),
+    });
+  }
   return policies;
+}
+
+function roleResourceGrants(
+  role: UserRole,
+  name: string,
+): string[] | undefined {
+  const policy = role.policies.find((item) => item.name === name);
+  if (!policy) return undefined;
+  try {
+    const values: unknown = JSON.parse(policy.value);
+    return Array.isArray(values) &&
+      values.every(
+        (value) =>
+          typeof value === "string" &&
+          value.trim() !== "" &&
+          value.trim() === value,
+      )
+      ? values
+      : [];
+  } catch {
+    return [];
+  }
 }
 
 const ROLE_ID_MAX = 64;
@@ -146,6 +183,9 @@ export default function RolesPanel() {
   const [permCatalog, setPermCatalog] = useState<PermissionCatalogItem[]>([]);
   const [fsTreeRoots, setFsTreeRoots] = useState<string[]>([HOST_FS_ROOT]);
   const [workspaceRootAllowed, setWorkspaceRootAllowed] = useState(true);
+  const [installedPlugins, setInstalledPlugins] = useState<InstalledPlugin[]>(
+    [],
+  );
   const [sharedBases, setSharedBases] = useState<KnowledgeBase[]>([]);
   const [publishedExperts, setPublishedExperts] = useState<PublishedExpert[]>(
     [],
@@ -183,6 +223,10 @@ export default function RolesPanel() {
     request<PermissionCatalogItem[]>("/users/permissions")
       .then(setPermCatalog)
       .catch(() => setPermCatalog([]));
+    pluginsApi
+      .list()
+      .then(setInstalledPlugins)
+      .catch(() => setInstalledPlugins([]));
     knowledgeBasesApi
       .list()
       .then((bases) => setSharedBases(bases.filter((base) => base.shared)))
@@ -234,6 +278,8 @@ export default function RolesPanel() {
     !editor || editor === "new"
       ? {
           name: "",
+          allowed_plugin_ui: [],
+          allowed_expert_templates: [],
           user_role_id: "",
           description: "",
           permissions: [...baselinePermissions],
@@ -248,6 +294,11 @@ export default function RolesPanel() {
         }
       : {
           name: editor.user_role_name,
+          allowed_plugin_ui: roleResourceGrants(editor, "allowed_plugin_ui"),
+          allowed_expert_templates: roleResourceGrants(
+            editor,
+            "allowed_expert_templates",
+          ),
           description: descriptionForForm(editor),
           permissions:
             editor.system_role === "admin" ? [] : [...editor.permissions],
@@ -843,6 +894,21 @@ export default function RolesPanel() {
                   }
                 </Form.Item>
                 <Form.Item
+                  label={t("adminUsers.rolePluginUi")}
+                  name="allowed_plugin_ui"
+                  extra={t("adminUsers.rolePluginUiHint")}
+                >
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    placeholder={t("adminUsers.rolePluginUiPlaceholder")}
+                    options={installedPlugins.map((plugin) => ({
+                      value: plugin.id,
+                      label: `${plugin.name || plugin.id} (${plugin.id})`,
+                    }))}
+                  />
+                </Form.Item>
+                <Form.Item
                   label={t("adminUsers.roleHiddenExpertTabs")}
                   name="hidden_expert_tabs"
                   extra={t("adminUsers.roleHiddenExpertTabsHint")}
@@ -856,6 +922,20 @@ export default function RolesPanel() {
                     options={EXPERT_TAB_CHOICES.map((item) => ({
                       value: item.value,
                       label: t(item.labelKey),
+                    }))}
+                  />
+                </Form.Item>
+                <Form.Item
+                  label={t("adminUsers.roleAllowedExperts")}
+                  name="allowed_expert_templates"
+                  extra={t("adminUsers.roleAllowedExpertsHint")}
+                >
+                  <Select
+                    mode="multiple"
+                    allowClear
+                    options={publishedExperts.map((expert) => ({
+                      value: expert.id,
+                      label: expert.name,
                     }))}
                   />
                 </Form.Item>

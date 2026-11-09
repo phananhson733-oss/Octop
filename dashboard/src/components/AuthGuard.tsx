@@ -1,7 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Spin } from "antd";
-import { clearAuthToken, getAuthToken } from "../api/request";
+import {
+  clearAuthToken,
+  getAuthToken,
+  watchAuthSession,
+  setAuthStorageIdentity,
+} from "../api/request";
 import { authApi, type OctopUser } from "../api/modules/auth";
 import { applyUserLocale } from "../utils/locale";
 import { isNetworkFetchError } from "../utils/networkError";
@@ -45,6 +50,18 @@ export default function AuthGuard({ children }: AuthGuardProps) {
   const [offline, setOffline] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
 
+  useEffect(
+    () =>
+      watchAuthSession(() => {
+        setChecking(true);
+        setAuthed(false);
+        setUser(null);
+        // Reload discards old identity's module caches, open streams and pending React state.
+        window.location.replace("/chat");
+      }),
+    [],
+  );
+
   useEffect(() => {
     let cancelled = false;
 
@@ -80,6 +97,7 @@ export default function AuthGuard({ children }: AuthGuardProps) {
           const me = await authApi.me();
           await applyUserLocale(me.locale);
           if (!cancelled) {
+            setAuthStorageIdentity(me.identity_scope ?? me.identity_id ?? null);
             setUser(me);
             setAuthed(true);
             setChecking(false);

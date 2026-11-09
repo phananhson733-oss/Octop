@@ -1,4 +1,4 @@
-import { request, requestUpload } from "../request";
+import { request, requestUpload, getAuthStorageIdentity } from "../request";
 
 export interface UploadResponse {
   path: string;
@@ -70,15 +70,22 @@ function isGone(err: unknown): boolean {
 }
 
 function resumeKey(agentId: string, file: File): string {
-  return `${RESUME_PREFIX}${agentId}|${file.name}|${file.size}|${file.lastModified}`;
+  const identity = getAuthStorageIdentity();
+  const scope = identity ? `identity:${encodeURIComponent(identity)}|` : "";
+  return `${RESUME_PREFIX}${scope}${agentId}|${file.name}|${file.size}|${file.lastModified}`;
 }
 
 /** Drop remembered sessions the server has already expired. */
 function pruneResumeIds(now: number): void {
+  const identity = getAuthStorageIdentity();
+  const prefix = identity
+    ? `${RESUME_PREFIX}identity:${encodeURIComponent(identity)}|`
+    : RESUME_PREFIX;
   try {
     for (let i = localStorage.length - 1; i >= 0; i--) {
       const key = localStorage.key(i);
-      if (!key?.startsWith(RESUME_PREFIX)) continue;
+      if (!key?.startsWith(prefix)) continue;
+      if (!identity && key.startsWith(`${RESUME_PREFIX}identity:`)) continue;
       const at = Number(JSON.parse(localStorage.getItem(key) ?? "{}").at);
       if (!(now - at < RESUME_TTL_MS)) localStorage.removeItem(key);
     }

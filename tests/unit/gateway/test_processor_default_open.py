@@ -22,6 +22,7 @@ async def test_im_call_merges_default_open_mcp_servers() -> None:
         yield MagicMock()
 
     agent_manager = MagicMock()
+    agent_manager.assert_user_can_invoke = AsyncMock()
     agent_manager.merge_turn_mcp_servers = MagicMock(return_value=["docs__1"])
     agent_manager.default_mcp_servers = MagicMock(return_value=[])
     agent_manager.default_knowledge_base_ids = MagicMock(return_value=[])
@@ -86,6 +87,7 @@ async def test_im_call_skips_default_open_mcp_for_team_host() -> None:
         yield MagicMock()
 
     agent_manager = MagicMock()
+    agent_manager.assert_user_can_invoke = AsyncMock()
     agent_manager.merge_turn_mcp_servers = MagicMock(return_value=None)
     agent_manager.default_mcp_servers = MagicMock(return_value=["docs__1"])
     agent_manager.default_knowledge_base_ids = MagicMock(return_value=[])
@@ -140,6 +142,7 @@ async def test_im_call_skips_default_open_mcp_for_team_host() -> None:
 async def test_dashboard_request_ignores_explicit_mcp_for_team_host() -> None:
     """Team hosts never attach connectors, even when the client sends picks."""
     agent_manager = MagicMock()
+    agent_manager.assert_user_can_invoke = AsyncMock()
     agent_manager.merge_turn_mcp_servers = MagicMock(return_value=["docs__1"])
     agent_manager.prepare_chat_mcp = AsyncMock(return_value=[])
     agent_manager.get_row = MagicMock(return_value=MagicMock(kind="team"))
@@ -190,6 +193,7 @@ async def test_dashboard_request_ignores_explicit_mcp_for_team_host() -> None:
 async def test_dashboard_request_trusts_explicit_opt_out() -> None:
     """Dashboard mcp_servers=[] must not re-inject default_open connectors."""
     agent_manager = MagicMock()
+    agent_manager.assert_user_can_invoke = AsyncMock()
     agent_manager.merge_turn_mcp_servers = MagicMock(return_value=None)
     agent_manager.prepare_chat_mcp = AsyncMock(return_value=[])
     agent_manager.get_row = MagicMock(return_value=None)
@@ -240,6 +244,7 @@ async def test_dashboard_request_trusts_explicit_opt_out() -> None:
 @pytest.mark.asyncio
 async def test_dashboard_request_attaches_knowledge_base_ids_without_prepending() -> None:
     agent_manager = MagicMock()
+    agent_manager.assert_user_can_invoke = AsyncMock()
     agent_manager.merge_turn_mcp_servers = MagicMock(return_value=None)
     agent_manager.get_row = MagicMock(return_value=None)
     agent_manager.default_mcp_servers = MagicMock(return_value=[])
@@ -309,6 +314,7 @@ async def test_dashboard_request_attaches_knowledge_base_ids_without_prepending(
 @pytest.mark.asyncio
 async def test_resolve_turn_mcp_servers_raises_when_prepare_fails() -> None:
     agent_manager = MagicMock()
+    agent_manager.assert_user_can_invoke = AsyncMock()
     agent_manager.merge_turn_mcp_servers = MagicMock(return_value=["bad__1"])
     agent_manager.prepare_chat_mcp = AsyncMock(return_value=["bad__1"])
     agent_manager.default_mcp_servers = MagicMock(return_value=[])

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 from typing import Any
 
@@ -58,7 +59,7 @@ async def test_chunked_upload_matches_single_upload(env_with_agent: Any) -> None
     body = r.json()
     assert set(body) == {"path", "workspace_path", "url", "access_url", "filename", "media_type"}
     assert body["path"] == body["workspace_path"]
-    assert re.search(r"^inbound/\d{10,}_第1集\.mp4$", body["path"])
+    assert re.search(r"^inbound/\d{10,}-[0-9A-HJKMNP-TV-Z]{26}_第1集\.mp4$", body["path"])
     assert body["filename"] == "第1集.mp4"
     assert body["media_type"] == "video/mp4"
 
@@ -166,3 +167,36 @@ async def test_single_upload_leaves_no_spool_files(env_with_agent: Any) -> None:
     assert r.status_code == 200, r.text
     staging = PathLayout.from_env().chunked_uploads_dir
     assert not staging.exists() or list(staging.iterdir()) == []
+
+
+async def test_complete_recovers_after_receipt_write_failure(env_with_agent, monkeypatch):
+    client, srv, auth, aid = env_with_agent
+    filename = "a" * 150 + ".mp4"
+    session = (await _start(client, aid, auth, filename=filename)).json()
+    for index in range(session["chunk_count"]):
+        assert (await _put(client, aid, auth, session["upload_id"], index)).status_code == 200
+    original = chunked_upload.ChunkedUploadStore.finish
+    calls = 0
+
+    def fail_once(self, upload, payload):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise OSError("receipt disk temporarily unavailable")
+        return original(self, upload, payload)
+
+    monkeypatch.setattr(chunked_upload.ChunkedUploadStore, "finish", fail_once)
+    url = f"{_base(aid)}/{session['upload_id']}/complete"
+    try:
+        first = await client.post(url, headers=auth)
+        assert first.status_code == 500
+    except OSError:
+        pass  # ASGI test clients may propagate the application exception.
+    results = await asyncio.gather(client.post(url, headers=auth), client.post(url, headers=auth))
+    assert all(r.status_code == 200 for r in results)
+    assert results[0].json() == results[1].json()
+    assert calls == 2
+    workspace = srv.app_runtime.agent_registry.get_agent(aid).workspace
+    entries = await workspace.als("inbound")
+    assert len(entries.entries) == 1
+    assert await workspace.adownload_bytes(results[0].json()["path"]) == DATA

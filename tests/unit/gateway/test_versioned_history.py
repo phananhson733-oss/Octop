@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from unittest.mock import AsyncMock
 
 import pytest
 from langchain_core.messages import (
@@ -509,7 +510,7 @@ async def test_state_update_does_not_replace_stream_error(archive):
 
 @pytest.mark.asyncio
 async def test_dashboard_processor_writes_only_new_archive(archive):
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import MagicMock
 
     from octop_gateway.models import ChannelSubject, InboundMessage, TextContent
 
@@ -522,6 +523,7 @@ async def test_dashboard_processor_writes_only_new_archive(archive):
         yield {"type": "token", "message_id": "answer", "content": "answer"}
 
     manager = MagicMock()
+    manager.assert_user_can_invoke = AsyncMock()
     manager.stream = stream
     manager.merge_turn_mcp_servers.return_value = None
     manager.prepare_chat_mcp = AsyncMock(return_value=[])
@@ -605,7 +607,7 @@ async def test_cursor_issued_before_first_switch_survives_new_turns(archive):
 @pytest.mark.asyncio
 async def test_checkpoint_cursor_pins_old_snapshot_without_copying(archive):
     from types import SimpleNamespace
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import MagicMock
 
     from octop.infra.history.reader import read_page
 
@@ -673,7 +675,7 @@ def _committed_messages(archive):
 
 
 def _dashboard_with_chunks(archive, chunks):
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import MagicMock
 
     from octop_gateway.models import ChannelSubject, InboundMessage, TextContent
 
@@ -686,6 +688,7 @@ def _dashboard_with_chunks(archive, chunks):
             yield chunk
 
     manager = MagicMock()
+    manager.assert_user_can_invoke = AsyncMock()
     manager.stream = stream
     manager.merge_turn_mcp_servers.return_value = None
     manager.prepare_chat_mcp = AsyncMock(return_value=[])
@@ -782,7 +785,7 @@ async def test_write_failure_does_not_deliver_or_retry_uncommitted_content(archi
 
 @pytest.mark.asyncio
 async def test_dashboard_error_keeps_partial_tokens_and_error(archive):
-    from unittest.mock import AsyncMock, MagicMock
+    from unittest.mock import MagicMock
 
     from octop_gateway.models import ChannelSubject, InboundMessage, TextContent
 
@@ -795,6 +798,7 @@ async def test_dashboard_error_keeps_partial_tokens_and_error(archive):
         raise RuntimeError("Error code: 402 insufficient balance")
 
     manager = MagicMock()
+    manager.assert_user_can_invoke = AsyncMock()
     manager.stream = stream
     manager.merge_turn_mcp_servers.return_value = None
     manager.prepare_chat_mcp = AsyncMock(return_value=[])

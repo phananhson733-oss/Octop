@@ -14,6 +14,8 @@ from octop.infra.db.repos.care_push import CarePushRepo
 from octop.infra.db.repos.channels import ChannelRepo
 from octop.infra.db.repos.connectors import ConnectorRepo
 from octop.infra.db.repos.cron import CronJobRepo
+from octop.infra.db.repos.entry_admin_operations import EntryAdminOperationRepo
+from octop.infra.db.repos.entry_sessions import EntrySessionRepo
 from octop.infra.db.repos.invites import InviteRepo
 from octop.infra.db.repos.knowledge import KnowledgeRepo
 from octop.infra.db.repos.proactive_care_config import ProactiveCareConfigRepo
@@ -51,6 +53,8 @@ class RepoBundle:
     channel_repo: ChannelRepo
     cron_repo: CronJobRepo
     session_repo: SessionRepo
+    entry_session_repo: EntrySessionRepo
+    entry_admin_operation_repo: EntryAdminOperationRepo
     thread_repo: ThreadRepo
     thread_message_repo: ThreadMessageRepo
     trajectory_event_repo: TrajectoryEventRepo
@@ -86,6 +90,8 @@ class RepoBundle:
             channel_repo=ChannelRepo(db),
             cron_repo=CronJobRepo(db),
             session_repo=SessionRepo(db),
+            entry_session_repo=EntrySessionRepo(db),
+            entry_admin_operation_repo=EntryAdminOperationRepo(db),
             thread_repo=ThreadRepo(db),
             thread_message_repo=ThreadMessageRepo(db),
             trajectory_event_repo=TrajectoryEventRepo(db),

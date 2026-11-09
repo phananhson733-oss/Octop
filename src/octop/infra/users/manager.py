@@ -18,6 +18,7 @@ try:
 except ImportError:  # pragma: no cover - optional PostgreSQL driver
     pg_errors = None  # type: ignore[assignment]
 
+from octop.i18n import error_message
 from octop.infra.db.repos._base import UNSET
 from octop.infra.db.repos.audit import ACTOR_ADMIN
 from octop.infra.db.repos.users import UserRepo
@@ -251,6 +252,8 @@ class UserManager:
             display_name = _claim_display_name(claims)
 
             if row is None:
+                if not self._services.config.sso_auto_provision:
+                    raise OctopError(ErrorCode.FORBIDDEN, error_message(ErrorCode.FORBIDDEN))
                 from octop.infra.db.repos.user_roles import seeded_user_role_assignment
 
                 assignment = seeded_user_role_assignment(self._services.db)
@@ -617,7 +620,11 @@ class UserManager:
             updates[POLICY_MAX_AGENTS] = None if max_agents_arg is None else str(max_agents_arg)
         if not updates:
             return
-        self._services.user_policy_repo.merge(row.id, updates)
+        with self._services.db.transaction() as conn:
+            # Lock the user row first, as the control and assignment writes do: inserting a
+            # missing policy row checks that row's key and would otherwise wait on them.
+            self._services.user_repo.assignment_principal(conn, row.id)
+            self._services.user_policy_repo.merge_in_transaction(conn, row.id, updates)
         if workspace_root_dir is not UNSET:
             self._services.audit_repo.write(
                 actor=ACTOR_ADMIN,

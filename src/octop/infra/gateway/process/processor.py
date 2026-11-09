@@ -666,6 +666,12 @@ class GlobalProcessor:
             channel_type=channel_type,
             metadata=msg.metadata,
         )
+        try:
+            await self._agent_manager.assert_user_can_invoke(agent_id, user_id)
+        except OctopError as exc:
+            yield MessageEvent.error_event(exc.to_envelope(locale=locale)["error"]["message"])
+            yield MessageEvent.completed()
+            return
         if cmd is not None and cmd.name in HITL_APPROVAL_COMMANDS:
             usage_tracker = UsageTracker()
             slash_outcome = HitlSlashOutcome()
@@ -980,6 +986,12 @@ class GlobalProcessor:
             channel_type=channel_type,
             metadata=meta,
         )
+        try:
+            await self._agent_manager.assert_user_can_invoke(agent_id, user_id)
+        except OctopError as exc:
+            yield {"type": "error", "message": exc.to_envelope(locale=locale)["error"]["message"]}
+            yield {"type": "done"}
+            return
         cmd = parse_slash(msg.text)
         if cmd is not None and cmd.name in HITL_APPROVAL_COMMANDS:
             usage_tracker = UsageTracker()

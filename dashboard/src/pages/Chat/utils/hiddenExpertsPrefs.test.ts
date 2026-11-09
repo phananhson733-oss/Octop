@@ -38,3 +38,11 @@ describe("hiddenExpertsPrefs", () => {
     expect(localStorage.getItem(HIDDEN_SHARED_EXPERTS_STORAGE_KEY)).toBeNull();
   });
 });
+
+it("separates entry identities even when their native user ids collide", () => {
+  writeHiddenExpertIds(["legacy"], 7);
+  writeHiddenExpertIds(["same-agent"], "customer-7");
+  expect([...readHiddenExpertIds("internal-7")]).toEqual([]);
+  expect([...readHiddenExpertIds("customer-7")]).toEqual(["same-agent"]);
+  expect([...readHiddenExpertIds(7)]).toEqual(["legacy"]);
+});

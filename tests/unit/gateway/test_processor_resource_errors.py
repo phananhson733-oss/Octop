@@ -78,6 +78,7 @@ def _processor_with_stream(
     appended: list[list[Any]] = []
 
     agent_manager = MagicMock()
+    agent_manager.assert_user_can_invoke = AsyncMock()
     agent_manager.stream = stream
     agent_manager.merge_turn_mcp_servers = MagicMock(return_value=None)
     agent_manager.prepare_chat_mcp = AsyncMock(return_value=[])

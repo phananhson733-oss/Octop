@@ -23,6 +23,7 @@ from octop.infra.gateway.media.attachment_hints import sniff_image_media_type
 from octop.infra.gateway.media.chunked_upload import ChunkedUpload, chunked_upload_store
 from octop.infra.gateway.media.inbound_store import (
     INBOUND_EXTENSION_MEDIA_TYPES,
+    build_timestamped_inbound_name,
     validate_inbound_media_type,
 )
 
@@ -86,6 +87,8 @@ async def _store_file(
     filename: str,
     content_type: str | None,
     max_bytes: int,
+    stored_name: str | None = None,
+    preserve_source: bool = False,
 ) -> dict[str, str]:
     head = await asyncio.to_thread(_read_head, source)
     media_type = _resolve_media_type(filename, content_type, head)
@@ -96,6 +99,8 @@ async def _store_file(
         filename=filename,
         media_type=media_type,
         max_bytes=max_bytes,
+        stored_name=stored_name,
+        preserve_source=preserve_source,
     )
     return _attachment_payload(agent_id, stored)
 
@@ -281,12 +286,9 @@ async def complete_chunked_upload(
 ) -> dict[str, str]:
     ws, upload = await _load_session(agent_id, upload_id, user=user, as_user=as_user, server=server)
     store = chunked_upload_store()
-    done = await asyncio.to_thread(store.receipt, upload)
-    if done is not None:
-        return done
-    assembled = await store.claim(upload)
-    try:
-        payload = await _store_file(
+
+    async def persist(assembled: Path) -> dict[str, str]:
+        return await _store_file(
             ws,
             agent_id,
             assembled,
@@ -294,12 +296,13 @@ async def complete_chunked_upload(
             filename=upload.filename,
             content_type=upload.media_type,
             max_bytes=_max_upload_bytes(server),
+            stored_name=build_timestamped_inbound_name(
+                upload.filename, now=int(upload.created_at), upload_id=upload.upload_id
+            ),
+            preserve_source=True,
         )
-    except BaseException:
-        await asyncio.to_thread(store.release, upload, assembled)
-        raise
-    await asyncio.to_thread(store.finish, upload, payload)
-    return payload
+
+    return await asyncio.shield(store.complete(upload, persist))
 
 
 @router.delete(

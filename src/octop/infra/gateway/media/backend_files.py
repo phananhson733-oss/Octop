@@ -417,6 +417,31 @@ async def _read_host_file_bytes(abs_path: str) -> bytes | None:
         return None
 
 
+async def resolve_preview_file(
+    *, source: str, workspace: BackendWorkspace, mime_hint: str = ""
+) -> tuple[Path, str] | None:
+    """Resolve a permitted preview to a file for bounded-memory HTTP range delivery."""
+    path = backend_workspace_path(source)
+    if path is None:
+        return None
+    rel = extract_workspace_rel(source)
+    for candidate in dict.fromkeys(p for p in (rel, path) if p):
+        if _is_host_absolute(candidate) and not _abs_path_allowed(
+            candidate, workspace=workspace.workspace_dir
+        ):
+            continue
+        mime = _guess_mime(candidate, mime_hint)
+        if not is_previewable_mime(mime):
+            continue
+        try:
+            local = await asyncio.to_thread(workspace.materialize_local, candidate)
+        except PermissionError:
+            continue
+        if local is not None and _abs_path_allowed(str(local), workspace=workspace.workspace_dir):
+            return local, mime
+    return None
+
+
 async def resolve_preview_payload(
     *,
     source: str,

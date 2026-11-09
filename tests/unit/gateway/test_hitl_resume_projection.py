@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
@@ -40,6 +40,7 @@ async def test_hitl_resume_records_final_answer_in_thread_history() -> None:
         }
 
     agent_manager = MagicMock()
+    agent_manager.assert_user_can_invoke = AsyncMock()
     agent_manager.resume_hitl = _resume
     thread_registry = MagicMock()
     history_repo = MagicMock()

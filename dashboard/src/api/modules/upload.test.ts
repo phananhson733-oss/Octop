@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { request, requestUpload } from "../request";
+import { request, requestUpload, getAuthStorageIdentity } from "../request";
 import { CHUNKED_UPLOAD_THRESHOLD, uploadFile } from "./upload";
 
 vi.mock("../request", () => ({
   request: vi.fn(),
   requestUpload: vi.fn(),
+  getAuthStorageIdentity: vi.fn(() => null),
 }));
 
 const DONE = {
@@ -43,6 +44,7 @@ function status(id: string, size: number, chunk: number, received: number[]) {
 describe("uploadFile", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.mocked(getAuthStorageIdentity).mockReturnValue(null);
     vi.mocked(request).mockReset();
     vi.mocked(requestUpload).mockReset();
     localStorage.clear();
@@ -192,7 +194,7 @@ describe("uploadFile", () => {
     const size = CHUNKED_UPLOAD_THRESHOLD + 1;
     localStorage.setItem(
       RESUME_KEY(size),
-      JSON.stringify({ id: "OLD", at: Date.now() }),
+      JSON.stringify({ id: "OLD", at: Date.now() - 25 * 3600 * 1000 }),
     );
     vi.mocked(request).mockImplementation(async (path) => {
       if (path === "/agents/ag/upload/chunked/OLD") {
@@ -346,5 +348,31 @@ describe("uploadFile", () => {
     expect(
       localStorage.getItem("octop.chunkedUpload:ag|old.mp4|1|1"),
     ).toBeNull();
+  });
+  it("does not resume another entry identity's upload even with the same agent and file", async () => {
+    const size = CHUNKED_UPLOAD_THRESHOLD + 1;
+    const previous = `octop.chunkedUpload:identity:customer|ag|big.mp4|${size}|1700000000000`;
+    localStorage.setItem(
+      previous,
+      JSON.stringify({ id: "OLD", at: Date.now() - 25 * 3600 * 1000 }),
+    );
+    const legacy = RESUME_KEY(size);
+    localStorage.setItem(
+      legacy,
+      JSON.stringify({ id: "OLD_NATIVE", at: Date.now() - 25 * 3600 * 1000 }),
+    );
+    vi.mocked(getAuthStorageIdentity).mockReturnValue("internal");
+    vi.mocked(request).mockImplementation(async (path) => {
+      if (path === "/agents/ag/upload/chunked")
+        return status("NEW", size, size, []);
+      return DONE;
+    });
+    vi.mocked(requestUpload).mockResolvedValue({});
+    await expect(uploadFile("ag", bigFile(size))).resolves.toEqual(DONE);
+    expect(
+      vi.mocked(request).mock.calls.some(([path]) => path.includes("OLD")),
+    ).toBe(false);
+    expect(localStorage.getItem(previous)).not.toBeNull();
+    expect(localStorage.getItem(legacy)).not.toBeNull();
   });
 });

@@ -147,7 +147,7 @@ def test_store_set_persists_once() -> None:
 
 
 @pytest.mark.asyncio
-async def test_resume_hitl_binds_thread_scope() -> None:
+async def test_resume_hitl_binds_thread_scope(manager: AgentManager) -> None:
     seen: list[str | None] = []
 
     async def fake_resume(agent_id: str, thread_id: str, decisions: list[dict[str, Any]]) -> Any:
@@ -155,7 +155,7 @@ async def test_resume_hitl_binds_thread_scope() -> None:
         if False:
             yield {}
 
-    manager = AgentManager.__new__(AgentManager)
+    manager._repos.agent_repo.create(agent_id="agt", user_id=None, name="HITL fixture")
     manager._harness_manager = SimpleNamespace(resume_hitl=fake_resume)
     manager._history_backfills = {}
     manager._reclaim_pending = set()

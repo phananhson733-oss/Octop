@@ -137,6 +137,12 @@ class OctopConfig:
     enable_api_docs: bool = False
     history_v2_enabled: bool = False
     require_setup_password: bool = True
+    # Disable for pre-linked SSO migrations; unknown subjects must not create users.
+    sso_auto_provision: bool = True
+    # Unified entry control plane. Both set, or ``/api/control/*`` answers 404. The key is a
+    # shared HMAC secret for this instance only; ``control_plane_instance`` is the audience.
+    control_plane_instance: str = ""
+    control_plane_key: str = field(default="", repr=False)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     # False when config.json omits ``database`` (use PathLayout.db unless env overrides).
     database_in_file: bool = False
@@ -158,6 +164,9 @@ class OctopConfig:
 def _defaults_for_file() -> dict[str, Any]:
     data = asdict(OctopConfig())
     data.pop("database_in_file", None)
+    # The control-plane pair is opt-in; never seed even an empty key into config.json.
+    data.pop("control_plane_instance", None)
+    data.pop("control_plane_key", None)
     db = dict(data["database"])
     db.pop("password", None)
     db.pop("url", None)
@@ -501,6 +510,25 @@ def load_config(path: Path) -> OctopConfig:
         merged["require_setup_password"] = _coerce_bool(
             "OCTOP_REQUIRE_SETUP_PASSWORD", v, bool(merged["require_setup_password"])
         )
+    sso_auto_provision = merged["sso_auto_provision"]
+    if not isinstance(sso_auto_provision, bool):
+        raise ValueError("config.sso_auto_provision must be a boolean")
+    if "OCTOP_SSO_AUTO_PROVISION" in os.environ:
+        value = os.environ["OCTOP_SSO_AUTO_PROVISION"].strip().lower()
+        if value not in {"1", "true", "yes", "on", "0", "false", "no", "off"}:
+            raise ValueError("OCTOP_SSO_AUTO_PROVISION must be a boolean")
+        sso_auto_provision = value in {"1", "true", "yes", "on"}
+    merged["sso_auto_provision"] = sso_auto_provision
+    control_instance = str(
+        os.environ.get("OCTOP_CONTROL_PLANE_INSTANCE") or raw.get("control_plane_instance") or ""
+    ).strip()
+    control_key = str(
+        os.environ.get("OCTOP_CONTROL_PLANE_KEY") or raw.get("control_plane_key") or ""
+    )
+    if bool(control_instance) != bool(control_key):
+        raise ValueError("control_plane_instance and control_plane_key must be set together")
+    if control_key and len(control_key) < 32:
+        raise ValueError("control_plane_key must be at least 32 characters")
     if v := os.environ.get("OCTOP_MAX_UPLOAD_MB"):
         merged["max_upload_mb"] = parse_max_upload_mb(
             v, default=int(merged.get("max_upload_mb", DEFAULT_MAX_UPLOAD_MB))
@@ -634,6 +662,9 @@ def load_config(path: Path) -> OctopConfig:
             False,
         ),
         require_setup_password=bool(merged["require_setup_password"]),
+        sso_auto_provision=merged["sso_auto_provision"],
+        control_plane_instance=control_instance,
+        control_plane_key=control_key,
         database=parse_database_config(merged_db),
         database_in_file=database_in_file,
         tls=_parse_tls_section(raw.get("tls")),

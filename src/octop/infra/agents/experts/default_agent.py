@@ -133,7 +133,16 @@ async def try_bootstrap_default_agent(
         logger.warning("could not auto-create default agent for user %s: %s", user_id, exc)
 
 
-async def install_role_published_expert(server: Any, *, user_id: int, expert_id: str) -> Any | None:
+async def install_role_published_expert(
+    server: Any,
+    *,
+    user_id: int,
+    expert_id: str,
+    agent_id: str | None = None,
+    prepared: tuple[Any, Path] | None = None,
+    assignment_limit: int | None = None,
+    reservation: tuple[str, str] | None = None,
+) -> Any | None:
     """Give *user_id* an expert from the published template *expert_id*, once.
 
     Installs it the way the account would from the Experts page with the
@@ -146,10 +155,17 @@ async def install_role_published_expert(server: Any, *, user_id: int, expert_id:
     registry = server.app_runtime.agent_registry
     if any(row.published_expert_id == expert_id for row in registry.list_agents(user_id)):
         return None
-    template = require_published_expert(server.services, expert_id)
+    template, snapshot_dir = (
+        prepared
+        if prepared is not None
+        else (
+            require_published_expert(server.services, expert_id),
+            Path(server.services.paths.published_experts_dir) / expert_id,
+        )
+    )
     welcome_zh, welcome_en = await asyncio.to_thread(
         snapshot_welcome_message,
-        Path(server.services.paths.published_experts_dir) / template.id,
+        snapshot_dir,
     )
     welcome = (welcome_zh or welcome_en) if normalize_locale(user.locale) == "zh" else welcome_en
     return await install_published_expert(
@@ -157,7 +173,12 @@ async def install_role_published_expert(server: Any, *, user_id: int, expert_id:
         registry=registry,
         user=user,
         expert_id=expert_id,
+        prepared=prepared,
+        assignment_limit=assignment_limit,
+        reservation=reservation,
+        defer_bootstrap=prepared is None,
         options=PublishedExpertInstallOptions(
+            agent_id=agent_id,
             name=template.name,
             backend=default_home_local_backend(
                 root_dir=user_policy_workspace_root(server, user_id)

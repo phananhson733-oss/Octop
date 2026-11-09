@@ -41,6 +41,7 @@ def processor_env(tmp_path: Path) -> dict[str, object]:
     repos.connector_repo = MagicMock()
 
     agent_manager = MagicMock()
+    agent_manager.assert_user_can_invoke = AsyncMock()
     agent_manager.get_row.side_effect = lambda aid: AgentRepo(db).get(aid)
 
     from octop.infra.gateway.gateway import Gateway

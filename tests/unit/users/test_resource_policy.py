@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -20,6 +22,7 @@ from octop.infra.users.resource_policy import (
     assert_agent_quota_available,
     assert_backend_within_user_root,
     assert_token_quota_available,
+    create_expert_within_quota,
     normalize_workspace_root_dir,
     public_policy_fields,
 )
@@ -137,6 +140,38 @@ def test_assert_agent_quota_available(db: SqlitePool) -> None:
 
     policies.set(uid, POLICY_MAX_AGENTS, "2")
     assert_agent_quota_available(policies, agents, uid)
+
+
+def test_create_expert_within_quota(db: SqlitePool) -> None:
+    users = UserRepo(db)
+    policies = UserPolicyRepo(db)
+    agents = AgentRepo(db)
+    repos = SimpleNamespace(db=db, user_repo=users, user_policy_repo=policies, agent_repo=agents)
+    uid = users.create(username="alice", password_hash="h", role="user")
+
+    def insert(agent_id: str) -> Any:
+        return lambda conn: agents.create(agent_id=agent_id, user_id=uid, name=agent_id, conn=conn)
+
+    create_expert_within_quota(repos, uid, insert("a1"))
+
+    policies.set(uid, POLICY_MAX_AGENTS, "1")
+    with pytest.raises(OctopError) as exc:
+        create_expert_within_quota(repos, uid, insert("a2"))
+    assert exc.value.code is ErrorCode.AGENT_QUOTA_EXCEEDED
+    assert exc.value.details == {"used": 1, "quota": 1}
+    assert agents.get("a2") is None
+
+    # Teams do not count toward the expert quota.
+    agents.create(agent_id="t1", user_id=uid, name="team", kind="team")
+    with pytest.raises(OctopError) as exc2:
+        create_expert_within_quota(repos, uid, insert("a2"))
+    assert exc2.value.details["used"] == 1
+
+    # An assignment's explicit increase applies before its new limit is committed.
+    create_expert_within_quota(repos, uid, insert("a2"), assignment_limit=2)
+    policies.set(uid, POLICY_MAX_AGENTS, "3")
+    create_expert_within_quota(repos, uid, insert("a3"))
+    assert agents.count_by_user(uid, kind="expert") == 3
 
 
 def test_user_policy_repo_named_rows(db: SqlitePool, tmp_path: Path) -> None:

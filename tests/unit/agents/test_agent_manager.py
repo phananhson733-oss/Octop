@@ -1232,6 +1232,7 @@ async def test_delete_thread_checkpoint_propagates_unexpected_errors(
 @pytest.mark.asyncio
 async def test_stream_applies_bootstrap_refresh_after_turn(manager: AgentManager) -> None:
     agent_id = "AGT_STREAM"
+    manager._repos.agent_repo.create(agent_id=agent_id, user_id=None, name=agent_id)
     agent = MagicMock()
     harness_manager = MagicMock()
 
@@ -1255,6 +1256,7 @@ async def test_history_backfill_refuses_while_agent_stream_is_active(
     manager: AgentManager,
 ) -> None:
     agent_id = "AGT_BUSY"
+    manager._repos.agent_repo.create(agent_id=agent_id, user_id=None, name=agent_id)
     started = asyncio.Event()
     release = asyncio.Event()
     harness_manager = MagicMock()
@@ -1283,6 +1285,7 @@ async def test_waiting_agent_stream_prevents_next_history_backfill(
     manager: AgentManager,
 ) -> None:
     agent_id = "AGT_PRIORITY"
+    manager._repos.agent_repo.create(agent_id=agent_id, user_id=None, name=agent_id)
     stream_started = asyncio.Event()
     stream_release = asyncio.Event()
     harness_manager = MagicMock()
@@ -2764,6 +2767,7 @@ async def test_stream_and_resume_hitl_serialize_per_thread(
         inside -= 1
         yield {"type": "token", "content": "resumed"}
 
+    manager._repos.agent_repo.create(agent_id="01AGENT", user_id=None, name="Serial")
     manager._harness_manager = SimpleNamespace(stream=_stream, resume_hitl=_resume)
 
     turn = asyncio.create_task(_collect_async(manager.stream("01AGENT", {"thread_id": "thr-1"})))

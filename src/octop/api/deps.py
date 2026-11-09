@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any, cast
 
 from fastapi import Depends, Header, Query, Request
 
+from octop.infra.auth.sessions import assert_session_active, session_id
 from octop.infra.auth.tokens import InvalidToken as InvalidToken
 from octop.infra.auth.tokens import TokenExpired as TokenExpired
 from octop.infra.auth.tokens import decode_token as decode_token
@@ -37,10 +39,13 @@ _JWT_EXEMPT_PREFIXES = (
     "/api/internal/mcp/",
     # Short-lived download links: the unguessable token is the credential.
     "/api/downloads/link/",
+    # Unified entry calls: the HMAC signature checked by the router is the credential.
+    "/api/control/",
 )
 _JWT_EXEMPT_EXACT = (
     "/api/health",
     "/api/auth/login",
+    "/api/auth/session/revoke",
     "/api/auth/captcha",
     "/api/auth/oidc/status",
     "/api/auth/oidc/start",
@@ -103,7 +108,9 @@ def _decode(server: OctopServer, token: str) -> dict[str, Any]:
     if secret is None:
         raise OctopError(ErrorCode.INTERNAL_ERROR, "jwt secret missing")
     try:
-        return decode_token(secret, token)
+        payload = decode_token(secret, token)
+        assert_session_active(server.services, payload, token)
+        return payload
     except TokenExpired as exc:
         raise OctopError(ErrorCode.TOKEN_EXPIRED, "token expired") from exc
     except InvalidToken as exc:
@@ -112,11 +119,21 @@ def _decode(server: OctopServer, token: str) -> dict[str, Any]:
 
 def resolve_user_from_token(server: OctopServer, token: str) -> User:
     payload = _decode(server, token)
+    return _user_from_payload(server, payload)
+
+
+def _user_from_payload(server: OctopServer, payload: dict[str, Any]) -> User:
     assert server.user_manager is not None
     user = server.user_manager.get_by_id(int(payload["sub"]))
     if user is None:
         raise OctopError(ErrorCode.USER_DISABLED, "user not active")
     return user
+
+
+async def resolve_user_from_token_async(server: OctopServer, token: str) -> User:
+    # DB verification runs off-loop; the mutable UserManager cache stays on-loop.
+    payload = await asyncio.get_running_loop().run_in_executor(None, _decode, server, token)
+    return _user_from_payload(server, payload)
 
 
 def maybe_sliding_renew_token(server: OctopServer, token: str, user: User) -> str | None:
@@ -141,6 +158,7 @@ def maybe_sliding_renew_token(server: OctopServer, token: str, user: User) -> st
         uname=user.username,
         role=user.role,
         ttl_seconds=ttl,
+        session_id=session_id(payload, token),
     )
 
 
@@ -166,7 +184,7 @@ async def current_user(
     raw = extract_raw_token(authorization=authorization, access_token=access_token)
     if not raw:
         raise OctopError(ErrorCode.AUTH_FAILED, "missing credentials")
-    return resolve_user_from_token(server, raw)
+    return await resolve_user_from_token_async(server, raw)
 
 
 def require_permission(key: str) -> Callable[..., Awaitable[User]]:

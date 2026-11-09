@@ -99,7 +99,8 @@ does not set these headers itself.
 | `GET`    | `/auth/ldap/config` | admin | Directory settings; `bind_password` is never returned (`has_bind_password` instead) |
 | `PUT`    | `/auth/ldap/config` | admin | Upsert directory settings; `bind_password` is write-only (omit to keep the stored one) |
 | `POST`   | `/auth/ldap/config/test` | admin | Service bind + probe of `user_base_dn` → `{ok, detail}` |
-| `POST`   | `/auth/logout` | user | `204` |
+| `POST`   | `/auth/logout` | user | Revoke the presented login session and its renewed tokens; `204` |
+| `POST` | `/auth/session/revoke` | signed Bearer (expired/revoked allowed only here) | Idempotently revoke its session family; committed receipt `204` with `X-Octop-Session-Revoked: 1`. No query-string token, no user access granted. |
 | `GET`    | `/auth/me` | user | `{id, username, role, display_name, locale, ...}` |
 | `PATCH`  | `/auth/me` | user | body `{display_name?, locale?, ...}` |
 | `POST`   | `/auth/change-password` | user | body `{old_password, new_password}` → `204`. Accounts without a local password (directory/SSO-provisioned) get `PASSWORD_NOT_SET` |
@@ -790,3 +791,43 @@ dashboard mirrors every code under `apiErrors.*` in
 | `STORAGE_BACKEND_UNREACHABLE` | 502 | Remote backend connect / list failed |
 | `CONNECTOR_OAUTH_FAILED` | 400 | OAuth flow could not complete |
 | `INTERNAL_ERROR` | 500 | Unhandled exception (logged with traceback) |
+
+
+### Pre-linked SSO accounts
+
+For a deployment migrating existing accounts to a shared identity provider, set
+`OCTOP_SSO_AUTO_PROVISION=false` (or JSON boolean `sso_auto_provision: false` in
+`config.json`). Unknown SSO subjects then receive `FORBIDDEN` instead of creating
+users. Link each identity explicitly through the existing authenticated binding
+flow first. Existing linked identities retain their local account ID and role;
+disabled local accounts remain denied. The default is `true` for compatibility.
+Invalid values fail configuration loading rather than silently enabling signup.
+This setting does not disable password login or provide cross-instance logout,
+tenant routing, authorization synchronization, or token revocation.
+
+
+### Login session revocation
+
+New login tokens include a random session ID; sliding renewal retains it. Logout
+persists a hashed session revocation in the existing settings store before
+returning 204. Other independent logins remain active. Workers using the same
+database check the record on authentication; no raw token is stored. Revocation
+records are retained without expiry because a sliding session can outlive an
+individual token. Backups and rollback must preserve these records; deleting
+one can reactivate a still-valid token. Retention/compaction needs an absolute
+session lifetime design before it can safely remove records.
+
+Older tokens without a session ID receive a deterministic family ID on renewal
+by this version. This cannot retroactively link different tokens renewed by an
+older version. Fully enforcing the boundary requires all serving workers to use
+the new checks. Already-open streams and other instances with separate databases
+still need the unified admission/revocation integration; this feature alone is
+not global logout.
+
+
+The revoke-only endpoint validates the server signature and required subject/time
+claims even when expiration has passed. It is excluded from normal active-session
+middleware solely to allow retry after a committed revocation or expired original
+token. Normal authentication still rejects expired and revoked tokens. Retrying a
+lost receipt does not touch another login session. A database/audit write failure
+must not return a successful receipt. Do not infer success from a plain 401.

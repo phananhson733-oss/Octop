@@ -5,6 +5,7 @@ from __future__ import annotations
 import builtins
 import json
 from dataclasses import dataclass, field
+from typing import Any
 
 from octop.infra.db.pool import DatabasePool
 from octop.infra.db.repos._base import DbRow, bool_int, insert_returning_id, map_rows, now_ts
@@ -133,6 +134,13 @@ class UserRepo:
                     role_name,
                 ),
             )
+
+    def assignment_principal(self, conn: Any, user_id: int) -> tuple[str, str, bool] | None:
+        sql = "SELECT username, role, disabled FROM users WHERE id = ?"
+        if self._db.dialect == "postgresql":
+            sql += " FOR UPDATE"
+        row = conn.execute(sql, (user_id,)).fetchone()
+        return (str(row["username"]), str(row["role"]), bool(row["disabled"])) if row else None
 
     def get(self, user_id: int) -> UserRow | None:
         with self._db.connect() as conn:

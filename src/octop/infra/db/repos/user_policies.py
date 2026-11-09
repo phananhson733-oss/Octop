@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from octop.infra.db.pool import DatabasePool
 from octop.infra.db.repos._base import DbRow, now_ts, sql_in_placeholders
@@ -47,6 +48,15 @@ class UserPolicyRepo:
             ).fetchone()
         return UserPolicyRow.from_row(row) if row is not None else None
 
+    def lock_for_assignment(
+        self, conn: Any, user_id: int, names: tuple[str, ...]
+    ) -> dict[str, UserPolicyRow]:
+        sql = f"SELECT * FROM user_policies WHERE user_id = ? AND name IN ({sql_in_placeholders(len(names))}) ORDER BY name"
+        if self._db.dialect == "postgresql":
+            sql += " FOR UPDATE"
+        rows = conn.execute(sql, (user_id, *names)).fetchall()
+        return {row["name"]: UserPolicyRow.from_row(row) for row in rows}
+
     def list_for_user(self, user_id: int) -> list[UserPolicyRow]:
         with self._db.connect() as conn:
             rows = conn.execute(
@@ -84,32 +94,41 @@ class UserPolicyRepo:
     def merge(self, user_id: int, updates: Mapping[str, str | None]) -> None:
         if not updates:
             return
-        ts = now_ts()
         with self._db.transaction() as conn:
-            for name, value in updates.items():
-                if value is None:
-                    conn.execute(
-                        """
-                        UPDATE user_policies
-                        SET enabled = 0, updated_at = ?
-                        WHERE user_id = ? AND name = ?
-                        """,
-                        (ts, user_id, name),
-                    )
-                    continue
+            # Lock the user row first, as every other policy write does: inserting a missing
+            # policy row checks that row's key and would otherwise wait on them (PostgreSQL).
+            if self._db.dialect == "postgresql":
+                conn.execute("SELECT id FROM users WHERE id = ? FOR UPDATE", (user_id,))
+            self.merge_in_transaction(conn, user_id, updates)
+
+    def merge_in_transaction(
+        self, conn: Any, user_id: int, updates: Mapping[str, str | None]
+    ) -> None:
+        ts = now_ts()
+        for name, value in updates.items():
+            if value is None:
                 conn.execute(
                     """
-                    INSERT INTO user_policies(
-                      policy_id, user_id, name, enabled, value, created_at, updated_at
-                    )
-                    VALUES (?, ?, ?, 1, ?, ?, ?)
-                    ON CONFLICT(user_id, name) DO UPDATE SET
-                      enabled = 1,
-                      value = excluded.value,
-                      updated_at = excluded.updated_at
+                    UPDATE user_policies
+                    SET enabled = 0, updated_at = ?
+                    WHERE user_id = ? AND name = ?
                     """,
-                    (new_ulid(), user_id, name, value, ts, ts),
+                    (ts, user_id, name),
                 )
+                continue
+            conn.execute(
+                """
+                INSERT INTO user_policies(
+                  policy_id, user_id, name, enabled, value, created_at, updated_at
+                )
+                VALUES (?, ?, ?, 1, ?, ?, ?)
+                ON CONFLICT(user_id, name) DO UPDATE SET
+                  enabled = 1,
+                  value = excluded.value,
+                  updated_at = excluded.updated_at
+                """,
+                (new_ulid(), user_id, name, value, ts, ts),
+            )
 
 
 def _enabled_values(rows: list[UserPolicyRow]) -> dict[str, str]:

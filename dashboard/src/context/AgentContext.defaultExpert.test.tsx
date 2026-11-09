@@ -56,4 +56,22 @@ describe("AgentProvider default expert", () => {
     renderAs({ default_published_expert: null });
     expect(await screen.findByText("active:A")).toBeInTheDocument();
   });
+  it("does not reuse another entry identity's expert selection", async () => {
+    localStorage.setItem("octop:active-agent", "A");
+    localStorage.setItem("octop:active-agent:identity:customer", "A");
+    renderAs({
+      id: 7,
+      identity_id: "same-person",
+      identity_scope: "internal",
+      default_published_expert: "T1",
+    });
+    expect(await screen.findByText("active:P")).toBeInTheDocument();
+    expect(localStorage.getItem("octop:active-agent:identity:internal")).toBe(
+      "P",
+    );
+    expect(localStorage.getItem("octop:active-agent:identity:customer")).toBe(
+      "A",
+    );
+    expect(localStorage.getItem("octop:active-agent")).toBe("A");
+  });
 });
