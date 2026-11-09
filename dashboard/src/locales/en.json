@@ -1419,6 +1419,7 @@
     "imageLoadFailed": "Image failed to load",
     "mediaLoadFailed": "Unable to load media",
     "downloadFailed": "Download failed, please try again",
+    "downloadingProgress": "Downloading {{progress}}",
     "hideThinking": "Hide thinking",
     "showThinking": "Show thinking",
     "collapseThinking": "Collapse thinking by default",

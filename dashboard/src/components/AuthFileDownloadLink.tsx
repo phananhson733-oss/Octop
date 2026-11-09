@@ -63,14 +63,18 @@ export function isAuthDownloadHref(href: string | undefined | null): boolean {
 
 export async function downloadAuthFile(
   url: string,
-  options?: { filename?: string },
+  options?: {
+    filename?: string;
+    /** Bytes received so far; ``total`` is 0 when the size is unknown. */
+    onProgress?: (loaded: number, total: number) => void;
+  },
 ): Promise<void> {
   let blob: Blob;
   if (isDataUrl(url)) {
     const res = await fetch(url);
     blob = await res.blob();
   } else {
-    blob = await requestBlob(apiPathForBlobFetch(url));
+    blob = await requestBlob(apiPathForBlobFetch(url), {}, options?.onProgress);
   }
 
   await saveBlobAsFile(

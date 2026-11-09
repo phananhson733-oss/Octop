@@ -563,9 +563,9 @@ export async function request<T = unknown>(
 /**
  * Download a binary resource as a Blob.
  *
- * ``onProgress`` (when the server sends ``Content-Length``) streams the body
- * and reports ``(loaded, total)`` in bytes — used by the PDF preview's
- * download progress bar.
+ * ``onProgress`` streams the body and reports ``(loaded, total)`` in bytes —
+ * used by the PDF preview's progress bar and chat file downloads. ``total`` is
+ * 0 when the response has no ``Content-Length`` (e.g. compressed by a proxy).
  */
 export async function requestBlob(
   path: string,
@@ -602,7 +602,7 @@ export async function requestBlob(
   }
 
   const total = Number(response.headers.get("content-length")) || 0;
-  if (onProgress && total > 0 && response.body) {
+  if (onProgress && response.body) {
     const reader = identityBoundBody(response.body, authSnapshot).getReader();
     const chunks: BlobPart[] = [];
     let loaded = 0;

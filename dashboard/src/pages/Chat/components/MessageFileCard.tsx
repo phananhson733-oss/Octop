@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { downloadAuthFile } from "../../../components/AuthFileDownloadLink";
 import { saveBlobAsFile } from "../../../utils/saveBlobAsFile";
 import { isDesktopShell } from "../../../utils/desktopChrome";
+import { formatBytes } from "../../../utils/embeddingDownload";
 import {
   isDataUrl,
   needsAuthBlobFetch,
@@ -41,6 +42,10 @@ export function MessageFileCard({
   const { t } = useTranslation();
   const filePreview = useChatFilePreview();
   const [loading, setLoading] = useState(false);
+  const [progress, setProgress] = useState<{
+    loaded: number;
+    total: number;
+  } | null>(null);
   const needsAuth = needsAuthBlobFetch(url) || isDataUrl(url);
   const label = filename || url;
 
@@ -76,14 +81,35 @@ export function MessageFileCard({
       return;
     }
     setLoading(true);
+    setProgress(null);
     try {
-      await downloadAuthFile(url, { filename });
+      await downloadAuthFile(url, {
+        filename,
+        onProgress: (loaded, total) => setProgress({ loaded, total }),
+      });
     } catch {
       antMessage.error(t("chat.downloadFailed", "下载失败，请重试"));
     } finally {
       setLoading(false);
+      setProgress(null);
     }
   }, [url, filename, needsAuth, t]);
+
+  // Percent when the size is known, otherwise bytes received so far.
+  const progressText =
+    loading && progress
+      ? progress.total > 0
+        ? `${Math.min(
+            100,
+            Math.floor((progress.loaded / progress.total) * 100),
+          )}%`
+        : formatBytes(progress.loaded)
+      : null;
+  const downloadTitle = progressText
+    ? t("chat.downloadingProgress", "下载中 {{progress}}", {
+        progress: progressText,
+      })
+    : t("common.download");
 
   const openPreview = useCallback(() => {
     if (previewable && resolvedPath && filePreview) {
@@ -117,16 +143,20 @@ export function MessageFileCard({
       )}
       <button
         type="button"
-        className={styles.messageFileActionBtn}
+        className={
+          progressText
+            ? `${styles.messageFileActionBtn} ${styles.messageFileActionBtnProgress}`
+            : styles.messageFileActionBtn
+        }
         onClick={(e) => {
           e.stopPropagation();
           void handleDownload();
         }}
         disabled={loading}
-        title={t("common.download")}
-        aria-label={t("common.download")}
+        title={downloadTitle}
+        aria-label={downloadTitle}
       >
-        <Download size={15} strokeWidth={2} />
+        {progressText ?? <Download size={15} strokeWidth={2} />}
       </button>
     </div>
   );

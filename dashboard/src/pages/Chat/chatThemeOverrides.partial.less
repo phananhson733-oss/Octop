@@ -1047,6 +1047,21 @@
   }
 }
 
+/* Download button while a file streams in: shows "42%" / "3.1 MB". */
+.messageFileActionBtnProgress {
+  width: auto;
+  min-width: 28px;
+  padding: 0 6px;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--fn-color-brand);
+
+  &:disabled {
+    opacity: 1;
+  }
+}
+
 .messageImage {
   border-radius: var(--fn-radius-md);
   cursor: pointer;

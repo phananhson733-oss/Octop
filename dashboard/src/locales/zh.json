@@ -1419,6 +1419,7 @@
     "imageLoadFailed": "图片加载失败",
     "mediaLoadFailed": "无法加载媒体",
     "downloadFailed": "下载失败，请重试",
+    "downloadingProgress": "下载中 {{progress}}",
     "hideThinking": "隐藏思维过程",
     "showThinking": "查看思维过程",
     "collapseThinking": "默认折叠思考过程",
