@@ -325,11 +325,9 @@ class AppRuntime:
 
 class OctopServer:
     def __init__(self, home: Path | None = None) -> None:
-        from octop.infra.users.control_grants import ControlGrants
         from octop.infra.users.expert_assignment import ExpertAssignments
 
         self.expert_assignments = ExpertAssignments()
-        self.control_grants = ControlGrants(self.expert_assignments)
         self._home = home or PathLayout.from_env().root
         self.paths = PathLayout(self._home)
         self.config: OctopConfig | None = None

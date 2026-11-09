@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 from octop.infra.db.pool import DatabasePool
 
 
@@ -25,17 +23,6 @@ class SettingsRepo:
                 " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (key, value),
             )
-
-    def get_many(self, keys: Sequence[str]) -> dict[str, str]:
-        names = tuple(dict.fromkeys(keys))
-        if not names:
-            return {}
-        placeholders = ",".join("?" for _ in names)
-        with self._db.connect() as conn:
-            rows = conn.execute(
-                f"SELECT key, value FROM settings WHERE key IN ({placeholders})", names
-            ).fetchall()
-        return {str(row["key"]): str(row["value"]) for row in rows}
 
     def set_if_absent(self, key: str, value: str) -> str:
         """Atomically retain the first value; callers can detect conflicting seeds."""

@@ -15,7 +15,6 @@ from octop.infra.users.expert_assignment import (
     AssignmentPlan,
     DiscardReceipt,
     ExpertAssignments,
-    assert_not_centrally_managed,
     plan_expert_assignment,
 )
 from octop.infra.users.identity import Role, User
@@ -357,7 +356,6 @@ async def _batch_apply_one(
                 token_quota=token_quota,
             )
         elif action == "set_max_agents":
-            assert_not_centrally_managed(server.services, user_id)
             await server.user_manager.set_resource_policy(
                 row.username,
                 max_agents=max_agents,
@@ -450,8 +448,6 @@ async def patch_user(
     if row is None:
         raise OctopError(ErrorCode.NOT_FOUND, "user not found")
     assert_can_manage_account(actor, str(row.role))
-    if body.role is not None or "max_agents" in body.model_fields_set:
-        assert_not_centrally_managed(server.services, user_id)
     if body.permissions is not None:
         _assert_can_assign(actor, body.permissions)
         # An administrator account keeps full access. The form stores that as
@@ -659,7 +655,6 @@ async def apply_expert_assignment(
     actor: Any = Depends(require_admin()),
     server: Any = Depends(get_server),
 ) -> AssignmentPlan:
-    assert_not_centrally_managed(server.services, user_id)
     assignments: ExpertAssignments = server.expert_assignments
     return await assignments.apply(
         server, user_id, body.templates, body.revision, body.raise_limit_to, actor.id

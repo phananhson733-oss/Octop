@@ -793,19 +793,6 @@ dashboard mirrors every code under `apiErrors.*` in
 | `INTERNAL_ERROR` | 500 | Unhandled exception (logged with traceback) |
 
 
-### Pre-linked SSO accounts
-
-For a deployment migrating existing accounts to a shared identity provider, set
-`OCTOP_SSO_AUTO_PROVISION=false` (or JSON boolean `sso_auto_provision: false` in
-`config.json`). Unknown SSO subjects then receive `FORBIDDEN` instead of creating
-users. Link each identity explicitly through the existing authenticated binding
-flow first. Existing linked identities retain their local account ID and role;
-disabled local accounts remain denied. The default is `true` for compatibility.
-Invalid values fail configuration loading rather than silently enabling signup.
-This setting does not disable password login or provide cross-instance logout,
-tenant routing, authorization synchronization, or token revocation.
-
-
 ### Login session revocation
 
 New login tokens include a random session ID; sliding renewal retains it. Logout
@@ -820,9 +807,8 @@ session lifetime design before it can safely remove records.
 Older tokens without a session ID receive a deterministic family ID on renewal
 by this version. This cannot retroactively link different tokens renewed by an
 older version. Fully enforcing the boundary requires all serving workers to use
-the new checks. Already-open streams and other instances with separate databases
-still need the unified admission/revocation integration; this feature alone is
-not global logout.
+the new checks. This feature alone does not end already-open streams and is not
+global logout.
 
 
 The revoke-only endpoint validates the server signature and required subject/time

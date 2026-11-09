@@ -41,62 +41,6 @@ INSTALL_LEASE_SECONDS = 15 * 60
 
 _STATE_PREFIX = {"installing": "", "ready": READY_PREFIX, "discarding": DISCARDING_PREFIX}
 
-# The unified entry's applied record for this account (JSON). Once it exists the entry is the
-# only write source for the role, expert limit and expert list (plan §3.2.5).
-POLICY_CONTROL_RECORD = "control_plane_record"
-
-
-@dataclass(frozen=True)
-class ControlActor:
-    """The unified entry, acting through a verified signature for one operation.
-
-    Every write it makes re-checks, under the same locks, that the account's control record
-    still names ``operation_id``, so a superseded operation can no longer change the account.
-    """
-
-    label: str
-    operation_id: str
-
-
-def control_operation_of(value: str | None) -> str | None:
-    if not value:
-        return None
-    try:
-        return str(json.loads(value)["operation_id"])
-    except (ValueError, KeyError, TypeError):
-        return None
-
-
-def _grants_write(updates: Mapping[str, str | None]) -> bool:
-    """True when ``updates`` would change what the account may use.
-
-    Recording an installation's outcome (``ready:``), marking or clearing a discard grants
-    nothing and stays open to native admins; a new claim, the expert list or the limit do not.
-    """
-    return (
-        POLICY_ASSIGNED_EXPERTS in updates
-        or POLICY_MAX_AGENTS in updates
-        or any(
-            key.startswith(INSTALLING_EXPERT_PREFIX)
-            and value is not None
-            and parse_reservation(value)[0] == "installing"
-            for key, value in updates.items()
-        )
-    )
-
-
-def assert_not_centrally_managed(services: SharedServices, user_id: int) -> None:
-    """Refuse a native role, limit or expert-list change on an entry-managed account.
-
-    Fails before a multi-step native edit starts. The expert list is also re-checked under
-    lock in ``_record_change``; a native role or limit write is not, see the status doc.
-    """
-    row = services.user_policy_repo.get(user_id, POLICY_CONTROL_RECORD)
-    if row is not None and row.enabled:
-        raise OctopError(
-            ErrorCode.ACCOUNT_CENTRALLY_MANAGED, "account is managed by the unified entry"
-        )
-
 
 @dataclass(frozen=True)
 class PendingInstall:
@@ -314,7 +258,7 @@ def plan_expert_assignment(
 
 def _record_change(
     services: SharedServices,
-    actor_id: int | ControlActor,
+    actor_id: int,
     user_id: int,
     updates: dict[str, str | None],
     action: str,
@@ -335,22 +279,19 @@ def _record_change(
     ``absent`` lists agent IDs that must not exist, checked under the same user-row lock an
     install insert takes: replacing a reservation whose instance was missing at preview
     fails if that installer inserted it since.
-
-    A ``ControlActor`` is authorized by its signature, not an account: it must still own the
-    control record. A native admin may not grant anything once that record exists.
     """
     expected = dict(expect or {})
-    control = actor_id if isinstance(actor_id, ControlActor) else None
-    admin_id = None if isinstance(actor_id, ControlActor) else actor_id
     with services.db.transaction() as conn:
-        ids = {user_id} if admin_id is None else {admin_id, user_id}
         principals = {
-            key: services.user_repo.assignment_principal(conn, key) for key in sorted(ids)
+            key: services.user_repo.assignment_principal(conn, key)
+            for key in sorted({actor_id, user_id})
         }
         target = principals[user_id]
-        actor = principals[admin_id] if admin_id is not None else None
+        actor = principals[actor_id]
         if (
-            (admin_id is not None and (not actor or actor[2] or actor[1] != "admin"))
+            not actor
+            or actor[2]
+            or actor[1] != "admin"
             or not target
             or target[2]
             or target[1] == "admin"
@@ -361,21 +302,8 @@ def _record_change(
         locked = services.user_policy_repo.lock_for_assignment(
             conn,
             user_id,
-            (POLICY_CONTROL_RECORD, POLICY_MAX_AGENTS, POLICY_ASSIGNED_EXPERTS, *sorted(expected)),
+            (POLICY_MAX_AGENTS, POLICY_ASSIGNED_EXPERTS, *sorted(expected)),
         )
-        record = locked.get(POLICY_CONTROL_RECORD)
-        managed = record is not None and record.enabled
-        owner = control_operation_of(record.value) if record is not None and managed else None
-        if control is not None and owner != control.operation_id:
-            raise OctopError(
-                ErrorCode.CONTROL_OPERATION_CONFLICT,
-                "control operation superseded",
-                details={"reason": "superseded"},
-            )
-        if control is None and managed and _grants_write(updates):
-            raise OctopError(
-                ErrorCode.ACCOUNT_CENTRALLY_MANAGED, "account is managed by the unified entry"
-            )
         if authority_revision is not None and authority_revision != _authority_revision(
             target[1], ceiling, locked
         ):
@@ -412,7 +340,7 @@ def _record_change(
         services.user_policy_repo.merge_in_transaction(conn, user_id, updates)
         services.audit_repo.write_in_transaction(
             conn,
-            actor=control.label if control is not None else actor[0] if actor else None,
+            actor=actor[0],
             action=action,
             target=str(user_id),
             payload=json.dumps(updates),
@@ -430,7 +358,7 @@ class ExpertAssignments:
         templates: list[str],
         revision: str,
         raise_limit_to: int | None,
-        actor_id: int | ControlActor,
+        actor_id: int,
     ) -> AssignmentPlan:
         from octop.infra.agents.experts.default_agent import install_role_published_expert
 
@@ -442,10 +370,9 @@ class ExpertAssignments:
                 return await asyncio.to_thread(plan_expert_assignment, services, user_id, templates)
 
             plan = await read()
-            if not isinstance(actor_id, ControlActor):
-                actor = await asyncio.to_thread(services.user_repo.get, actor_id)
-                if actor is None or actor.disabled or actor.role != "admin":
-                    raise OctopError(ErrorCode.FORBIDDEN, "assignment authority changed")
+            actor = await asyncio.to_thread(services.user_repo.get, actor_id)
+            if actor is None or actor.disabled or actor.role != "admin":
+                raise OctopError(ErrorCode.FORBIDDEN, "assignment authority changed")
             desired = json.dumps(plan.templates, ensure_ascii=False)
             policies = services.user_policy_repo
             existing = await asyncio.to_thread(policies.get, user_id, POLICY_ASSIGNED_EXPERTS)
