@@ -887,14 +887,27 @@ export function collectToolMediaFromToolData(
     }
   }
 
+  const canonicalImages = withCanonicalUrls(dedupeByUrl(images), agentId);
+  const canonicalVideos = withCanonicalUrls(dedupeByUrl(videos), agentId);
+  // A live send_file also streams an ``attachment`` frame for the same file,
+  // stored as kind "file" next to the video block: drop that second copy.
+  const media = [...canonicalImages, ...canonicalVideos];
+  const mediaUrls = new Set(media.map((item) => item.url));
+  const mediaNames = new Set(
+    media.map((item) => item.filename).filter(Boolean),
+  );
   return {
-    images: withCanonicalUrls(dedupeByUrl(images), agentId),
-    videos: withCanonicalUrls(dedupeByUrl(videos), agentId),
+    images: canonicalImages,
+    videos: canonicalVideos,
     files: dedupeByUrl(
       files.map((file) => ({
         ...file,
         url: agentId ? canonicalizeMediaApiUrl(file.url, agentId) : file.url,
       })),
+    ).filter(
+      (file) =>
+        !mediaUrls.has(file.url) &&
+        !(file.filename && mediaNames.has(file.filename)),
     ),
   };
 }

@@ -243,3 +243,44 @@ describe("collectToolMediaFromToolData", () => {
     );
   });
 });
+
+// Live chats showed every clip twice (2026-11-10): send_file_to_user returns a
+// video block and also streams an attachment frame the store keeps as "file".
+describe("collectToolMediaFromToolData send_file duplicates", () => {
+  const preview =
+    "/api/agents/71WF98/media/preview?source=file%3A%2F%2F%2Fdata%2F.octop%2Fagents%2F71WF98%2Fout%2Fclip_1.mp4&mime_type=video%2Fmp4";
+  const output = JSON.stringify({
+    type: "video",
+    source: { type: "url", url: preview, media_type: "video/mp4" },
+    filename: "clip_1.mp4",
+    preview_url: preview,
+  });
+
+  it("keeps the video and drops the streamed file copy", () => {
+    const media = collectToolMediaFromToolData(
+      { name: "send_file_to_user", output },
+      "71WF98",
+      [{ url: preview, kind: "file", filename: "clip_1.mp4" }],
+    );
+
+    expect(media.videos).toHaveLength(1);
+    expect(media.files).toHaveLength(0);
+  });
+
+  it("keeps attachment files that are not the same media", () => {
+    const media = collectToolMediaFromToolData(
+      { name: "send_file_to_user", output },
+      "71WF98",
+      [
+        {
+          url: "/api/agents/71WF98/workspace/download?path=out%2Fnotes.txt",
+          kind: "file",
+          filename: "notes.txt",
+        },
+      ],
+    );
+
+    expect(media.videos).toHaveLength(1);
+    expect(media.files.map((f) => f.filename)).toEqual(["notes.txt"]);
+  });
+});
