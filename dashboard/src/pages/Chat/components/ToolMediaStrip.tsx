@@ -44,7 +44,17 @@ function RefreshableImage({
   );
 }
 
-function RefreshableVideo({ item }: { item: ToolMediaItem }) {
+/**
+ * Player plus a download card. The preview pulls the whole file first, so on
+ * a slow link (or if that fetch fails) the card is the only way to save it.
+ */
+function RefreshableVideo({
+  item,
+  agentId,
+}: {
+  item: ToolMediaItem;
+  agentId?: string | null;
+}) {
   const [src, setSrc] = useState<string>("");
 
   useLayoutEffect(() => {
@@ -85,22 +95,23 @@ function RefreshableVideo({ item }: { item: ToolMediaItem }) {
     };
   }, [item.url]);
 
-  if (!src) {
-    return (
-      <span className={styles.toolMediaFallback}>
-        {item.filename || "video"}
-      </span>
-    );
-  }
-
   return (
-    <video
-      className={styles.toolMediaVideo}
-      src={src}
-      controls
-      preload="metadata"
-      playsInline
-    />
+    <div className={styles.toolMediaVideoItem}>
+      {src && (
+        <video
+          className={styles.toolMediaVideo}
+          src={src}
+          controls
+          preload="metadata"
+          playsInline
+        />
+      )}
+      <MessageFileCard
+        url={item.url}
+        filename={item.filename || "video"}
+        agentId={agentId}
+      />
+    </div>
   );
 }
 
@@ -136,7 +147,11 @@ export function ToolMediaStrip({
         </div>
       )}
       {videos.map((video, idx) => (
-        <RefreshableVideo key={`${video.url}-${idx}`} item={video} />
+        <RefreshableVideo
+          key={`${video.url}-${idx}`}
+          item={video}
+          agentId={agentId}
+        />
       ))}
       {files.length > 0 && (
         <div className={styles.messageFiles}>
