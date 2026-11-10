@@ -167,6 +167,16 @@ def test_browser_idle_timeout_defaults_and_can_be_disabled(tmp_path: Path):
     assert load_config(cfg_path).browser_idle_timeout_minutes == 0
 
 
+def test_channel_workers_default_env_and_floor(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    assert load_config(tmp_path / "config.json").channel_workers == 4
+
+    monkeypatch.setenv("OCTOP_CHANNEL_WORKERS", "16")
+    assert load_config(tmp_path / "config.json").channel_workers == 16
+
+    monkeypatch.setenv("OCTOP_CHANNEL_WORKERS", "0")
+    assert load_config(tmp_path / "config.json").channel_workers == 1
+
+
 def test_database_env_sqlite_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("OCTOP_DATABASE_SQLITE_PATH", "/tmp/octop-test.db")
     cfg = load_config(tmp_path / "config.json")

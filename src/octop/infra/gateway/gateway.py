@@ -107,8 +107,10 @@ class Gateway:
         repos: RepoBundle,
         trajectory_service: Any | None = None,
         history_archive: Any | None = None,
+        channel_workers: int = 4,
     ) -> None:
         self._agent_manager = agent_manager
+        self._channel_workers = channel_workers
         self._repos = repos
         self._trajectory_service = trajectory_service
         self._history_archive = history_archive
@@ -248,7 +250,9 @@ class Gateway:
             history_archive=self._history_archive,
         )
 
-        self._channel_manager = ChannelManager(channels={})
+        self._channel_manager = ChannelManager(
+            channels={}, workers_per_channel=self._channel_workers
+        )
         self._channel_manager.set_pre_lock_handler(self._preempt_cancel_on_stop)
         await self._channel_manager.start()
 

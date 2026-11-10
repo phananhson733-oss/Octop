@@ -16,6 +16,8 @@ DEFAULT_MAX_UPLOAD_MB = 100
 MIN_MAX_UPLOAD_MB = 1
 MAX_MAX_UPLOAD_MB = 4096
 DEFAULT_BROWSER_IDLE_TIMEOUT_MINUTES = 30
+# Turns one channel (e.g. all dashboard chats) runs at once; each worker holds a whole turn.
+DEFAULT_CHANNEL_WORKERS = 4
 # Days an uploaded audio/video chat attachment stays in ``inbound/``; 0 keeps them.
 DEFAULT_INBOUND_MEDIA_RETENTION_DAYS = 7
 
@@ -149,6 +151,7 @@ class OctopConfig:
     # ``provider/model`` that answers while the ChatGPT login's Codex allowance is used up;
     # empty keeps Codex agents failing with the provider's 429.
     codex_fallback_model: str = ""
+    channel_workers: int = DEFAULT_CHANNEL_WORKERS
 
     @property
     def max_upload_bytes(self) -> int:
@@ -511,6 +514,12 @@ def load_config(path: Path) -> OctopConfig:
         )
     if v := os.environ.get("OCTOP_CODEX_FALLBACK_MODEL"):
         merged["codex_fallback_model"] = v.strip()
+    if v := os.environ.get("OCTOP_CHANNEL_WORKERS"):
+        merged["channel_workers"] = _coerce_int(
+            "OCTOP_CHANNEL_WORKERS",
+            v,
+            int(merged.get("channel_workers", DEFAULT_CHANNEL_WORKERS)),
+        )
     if v := os.environ.get("OCTOP_BROWSER_IDLE_TIMEOUT_MINUTES"):
         merged["browser_idle_timeout_minutes"] = _coerce_int(
             "OCTOP_BROWSER_IDLE_TIMEOUT_MINUTES",
@@ -641,6 +650,7 @@ def load_config(path: Path) -> OctopConfig:
         capabilities=capabilities,
         max_upload_mb=int(merged.get("max_upload_mb", DEFAULT_MAX_UPLOAD_MB)),
         codex_fallback_model=str(merged.get("codex_fallback_model") or "").strip(),
+        channel_workers=max(1, int(merged.get("channel_workers", DEFAULT_CHANNEL_WORKERS))),
         browser_idle_timeout_minutes=max(
             0,
             int(

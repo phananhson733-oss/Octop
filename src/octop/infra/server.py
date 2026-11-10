@@ -552,6 +552,7 @@ class OctopServer:
             repos=self.services.repos,
             trajectory_service=trajectory_service,
             history_archive=history_archive,
+            channel_workers=config.channel_workers,
         )
         await gateway.boot()
 
