@@ -12,7 +12,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
-from octop.api.deps import current_user
+from octop.api.deps import current_user, require_admin
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.utils.browser_media import user_browser_profile
 
@@ -343,7 +343,7 @@ async def handoff(
     "/browser/shutdown",
     summary="Stop the local Chrome process for an octop-browser profile",
 )
-async def shutdown_browser(user: Any = Depends(current_user)) -> dict[str, Any]:
+async def shutdown_browser(user: Any = Depends(require_admin())) -> dict[str, Any]:
     """Terminate the current user's Octop-managed Chrome. Cookies stay on disk."""
     try:
         from octop_browser.tool_interface import browser_tool

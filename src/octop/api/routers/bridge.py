@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel, Field
 from starlette.websockets import WebSocketState
 
-from octop.api.deps import current_user, get_server, resolve_user_from_token
+from octop.api.deps import current_user, get_server, require_admin, resolve_user_from_token
 from octop.infra.errors import ErrorCode, OctopError
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ def _bridge(server: Any) -> Any:
 @router.post("/bridge/probe", summary="Probe a remote GGwork (login + list experts)")
 async def probe_peer(
     body: BridgeProbeBody,
-    user: Any = Depends(current_user),
+    user: Any = Depends(require_admin()),
     server: Any = Depends(get_server),
 ) -> dict[str, Any]:
     """Validate remote credentials and return that account's expert list.
@@ -92,7 +92,7 @@ async def probe_peer(
 async def probe_connection(
     connection_id: str,
     body: BridgeConnectionProbeBody,
-    user: Any = Depends(current_user),
+    user: Any = Depends(require_admin()),
     server: Any = Depends(get_server),
 ) -> dict[str, Any]:
     """Login with the form URL/user; reuse the stored password when the field is blank."""
@@ -122,7 +122,7 @@ async def list_connections(
 @router.post("/bridge/connections", status_code=201, summary="Add a bridge connection")
 async def create_connection(
     body: BridgeCreateBody,
-    user: Any = Depends(current_user),
+    user: Any = Depends(require_admin()),
     server: Any = Depends(get_server),
 ) -> dict[str, Any]:
     mgr = _bridge(server)
@@ -229,6 +229,17 @@ async def patch_connection(
 ) -> dict[str, Any]:
     mgr = _bridge(server)
     fields_set = body.model_fields_set
+    if not user.is_admin:
+        # The edit form resends the address and account unchanged; only a real change needs admin.
+        cur = mgr.get_owned(connection_id, user.id)
+        url = body.peer_base_url if "peer_base_url" in fields_set else None
+        name = body.peer_username if "peer_username" in fields_set else None
+        if (
+            (url is not None and url.strip().rstrip("/") != cur.peer_base_url.rstrip("/"))
+            or (name is not None and name.strip() != cur.peer_username)
+            or ("password" in fields_set and (body.password or "").strip())
+        ):
+            raise OctopError(ErrorCode.FORBIDDEN, "admin required")
     row = None
     meta_keys = {
         "display_name",

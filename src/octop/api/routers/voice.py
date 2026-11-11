@@ -23,6 +23,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from starlette.websockets import WebSocketState
 
+from octop.api.common.secret_mask import mask_secret, mask_secret_fields
 from octop.api.deps import (
     current_user,
     get_server,
@@ -31,6 +32,7 @@ from octop.api.deps import (
 )
 from octop.i18n.domains.voice import realtime_error_message
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.users.permissions import user_has_permission
 from octop.infra.utils.locale import Locale, normalize_locale, resolve_request_locale
 from octop.infra.voice import realtime
 from octop.infra.voice.manager import VoiceManager
@@ -119,10 +121,17 @@ async def list_voice_presets(_: Any = Depends(current_user)) -> list[dict[str, A
 
 @router.get("/providers")
 async def list_voice_providers(
-    _: Any = Depends(current_user),
+    user: Any = Depends(current_user),
     server: Any = Depends(get_server),
 ) -> list[dict[str, Any]]:
-    return [_row_to_dict(r) for r in server.services.voice_provider_repo.list_all()]
+    """Voice providers. Keys and secret fields in ``extra`` come back masked unless the
+    caller holds the ``voice`` permission."""
+    rows = [_row_to_dict(r) for r in server.services.voice_provider_repo.list_all()]
+    if not user_has_permission(user, "voice"):
+        for row in rows:
+            row["api_key"] = mask_secret(row["api_key"])
+            row["extra"] = mask_secret_fields(row["extra"])
+    return rows
 
 
 @router.get("/active")

@@ -396,6 +396,82 @@ def is_host_absolute_path(path: str) -> bool:
     return raw.startswith("/")
 
 
+# OS roots only admins may open through the workspace HTTP routes (POSIX).
+_ADMIN_ONLY_SYSTEM_ROOTS = ("/etc", "/proc", "/sys", "/dev", "/root", "/private/etc")
+
+
+def host_path_forms(raw: str) -> list[str]:
+    """Every host path ``BackendWorkspace`` may open for *raw*.
+
+    Its read path normalizes in several passes (whitespace dropped, ``\\`` read as
+    ``/``, a leading ``./`` dropped, leading slashes dropped, ``~`` expanded), so
+    each form those steps reach is collected: ``./ /etc/hosts`` and ``././~/x`` both
+    end up as host paths. ``file://`` URLs count as their host path. Empty when *raw*
+    only ever stays workspace-relative.
+    """
+    seen: set[str] = set()
+    hosts: list[str] = []
+    todo = [str(raw)]
+    while todo:
+        s = todo.pop()
+        if s in seen:
+            continue
+        seen.add(s)
+        if s.startswith("file://"):
+            local = file_url_to_abs_path(s)
+            if local:
+                hosts.append(local)
+            continue
+        if s.startswith("~"):
+            hosts.append(os.path.expanduser(s))
+        elif s.startswith("/") or (len(s) >= 2 and s[1] == ":"):
+            hosts.append(s)
+        todo.append(s.strip().replace("\\", "/"))
+        if s.startswith("./"):
+            todo.append(s[2:])
+        todo.append(s.lstrip("/"))
+    return hosts
+
+
+def _is_under(path: Path, root: Path) -> bool:
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return False
+    return True
+
+
+def is_admin_only_host_path(path: str, *, workspace: Path) -> bool:
+    """True when only admins may open host *path* through the workspace routes.
+
+    Covers Octop's data directory (config, env, database, other agents'
+    workspaces) except this agent's own workspace and installed plugin files,
+    browser profiles, and OS system roots. Links are resolved first, so a link
+    inside the workspace that points elsewhere is judged by its target.
+    """
+    from octop.infra.utils.paths import PathLayout
+
+    raw = path.strip()
+    if raw.startswith("file://"):
+        raw = file_url_to_abs_path(raw) or ""
+    if not raw:
+        return False
+    try:
+        resolved = Path(os.path.expanduser(raw)).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return True
+    if _is_under(resolved, workspace.resolve()):
+        return False
+    if _contains_denied_browser_home(resolved.as_posix()):
+        return True
+    if os.name == "posix" and any(
+        _is_under(resolved, Path(root)) for root in _ADMIN_ONLY_SYSTEM_ROOTS
+    ):
+        return True
+    home = PathLayout.from_env().root.expanduser().resolve()
+    return _is_under(resolved, home) and not _is_under(resolved, home / "plugins")
+
+
 def _is_host_absolute(path: str) -> bool:
     return is_host_absolute_path(path)
 

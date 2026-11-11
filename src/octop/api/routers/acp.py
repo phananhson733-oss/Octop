@@ -136,6 +136,12 @@ def _schedule_reload_user_agents(server: Any, user_id: int) -> None:
     asyncio.get_running_loop().create_task(_reload())
 
 
+def _require_admin(user: Any) -> None:
+    """Runner definitions are commands the server runs; editing them needs the admin role."""
+    if not user.is_admin:
+        raise OctopError(ErrorCode.FORBIDDEN, "admin required")
+
+
 def _agent_row(server: Any, agent_id: str, user: Any) -> Any:
     registry = _registry(server)
     row = registry.get_row(agent_id)
@@ -238,10 +244,11 @@ async def put_acp_config(
     user: Any = Depends(current_user),
     server: Any = Depends(get_server),
 ) -> dict[str, Any]:
-    """Update per-agent tool toggle; optional ``runners`` updates global definitions."""
+    """Update per-agent tool toggle; optional ``runners`` (admin only) updates global definitions."""
     _agent_row(server, agent_id, user)
     registry = _registry(server)
     if body.runners is not None:
+        _require_admin(user)
         runners = _runners_payload(ACPRunnersBody(runners=body.runners))
         registry.acp_settings.save_runners(user.id, runners)
         _schedule_reload_user_agents(server, user.id)
@@ -285,6 +292,7 @@ async def put_acp_runner(
     server: Any = Depends(get_server),
 ) -> dict[str, Any]:
     _agent_row(server, agent_id, user)
+    _require_admin(user)
     return await put_global_acp_runner(runner_name, body=body, user=user, server=server)
 
 
@@ -300,4 +308,5 @@ async def delete_acp_runner(
     server: Any = Depends(get_server),
 ) -> None:
     _agent_row(server, agent_id, user)
+    _require_admin(user)
     await delete_global_acp_runner(runner_name, user=user, server=server)

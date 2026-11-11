@@ -178,6 +178,18 @@ class CustomMcpTestBody(BaseModel):
     server: dict[str, Any] | None = None
 
 
+def _require_admin_for_custom_mcp(user: Any, specs: Any) -> None:
+    """stdio servers run a command on the server and shared ones load into every
+    user's agents, so only admins may save, share or probe those."""
+    if user.is_admin:
+        return
+    for spec in specs:
+        if isinstance(spec, dict) and (
+            str(spec.get("transport") or "").strip() == "stdio" or spec.get("shared") is True
+        ):
+            raise OctopError(ErrorCode.FORBIDDEN, "admin required")
+
+
 def _oauth_callback_html(
     request: Request,
     message_key: str,
@@ -585,7 +597,11 @@ async def put_custom_mcp(
     user: Any = Depends(current_user),
     server: Any = Depends(get_server),
 ) -> dict[str, Any]:
-    """Replace the user's custom MCP servers document and reload agents."""
+    """Replace the user's custom MCP servers document and reload agents.
+
+    stdio and shared servers need the admin role.
+    """
+    _require_admin_for_custom_mcp(user, body.servers.values())
     svc = _connector_service(server)
     try:
         servers = svc.put_custom_servers(user.id, body.servers)
@@ -619,7 +635,12 @@ async def patch_custom_mcp_server(
     user: Any = Depends(current_user),
     server: Any = Depends(get_server),
 ) -> dict[str, Any]:
-    """Update ``enabled`` and/or ``default_open`` for one custom MCP server."""
+    """Update ``enabled`` and/or ``default_open`` for one custom MCP server.
+
+    Sharing a server with every user needs the admin role.
+    """
+    if body.shared is True:
+        _require_admin_for_custom_mcp(user, [{"shared": True}])
     svc = _connector_service(server)
     try:
         servers = svc.patch_custom_server(
@@ -663,6 +684,7 @@ async def test_custom_mcp(
             ErrorCode.CONNECTOR_INVALID_CREDENTIALS,
             "provide name or server spec to probe",
         )
+    _require_admin_for_custom_mcp(user, [spec])
     result = await probe_custom_mcp_server(spec)
     if body.name:
         try:

@@ -7,7 +7,9 @@ Security notes:
   A denylist further blocks sensitive mounts (``/proc``, ``/sys``, ``/dev``,
   ``/etc``, ``/root`` on POSIX). The process home is never denied (so uid 0
   with home ``/root`` can use the default picker path).
-- All authenticated users may browse from host root ``/`` (denylist still applies).
+- Listing, probing, creating and renaming host directories and installing host
+  packages (bubblewrap, Docker) need the admin role; the defaults, roots and
+  Docker status stay readable for every signed-in user.
   The UI default ``root_dir`` is host filesystem root (POSIX ``/``), unless the
   user has a ``workspace_root_dir`` policy jail.
 - Directory listing is capped and skips unreadable entries.
@@ -23,7 +25,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
-from octop.api.deps import current_user, get_server
+from octop.api.deps import current_user, get_server, require_admin
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.users.identity import User
 from octop.infra.users.resource_policy import (
@@ -131,7 +133,7 @@ async def filesystem_roots(
 @router.get("/dirs")
 async def list_host_dirs(
     path: str = Query("/", description="Absolute host directory to list"),
-    user: User = Depends(current_user),
+    user: User = Depends(require_admin()),
     server: Any = Depends(get_server),
 ) -> dict[str, Any]:
     """Single-level directory listing for lazy folder pickers."""
@@ -152,7 +154,7 @@ async def list_host_dirs(
 @router.post("/probe")
 async def probe_host_dir(
     body: ProbeBody,
-    user: User = Depends(current_user),
+    user: User = Depends(require_admin()),
     server: Any = Depends(get_server),
 ) -> dict[str, Any]:
     """Check whether Octop can use *path* as a local backend root_dir."""
@@ -170,7 +172,7 @@ async def probe_host_dir(
     summary="Best-effort ensure bubblewrap for scoped root_dir",
 )
 async def ensure_bwrap(
-    _: Any = Depends(current_user),
+    _: Any = Depends(require_admin()),
 ) -> dict[str, Any]:
     """Ensure ``bwrap`` is available when saving a non-host-root backend.
 
@@ -200,7 +202,7 @@ async def get_docker_status(
     summary="Best-effort ensure Docker Engine for sandbox backends",
 )
 async def post_ensure_docker(
-    _: Any = Depends(current_user),
+    _: Any = Depends(require_admin()),
 ) -> dict[str, Any]:
     """Detect Docker; on Linux with passwordless sudo, try package install.
 
@@ -213,7 +215,7 @@ async def post_ensure_docker(
 @router.post("/mkdir")
 async def mkdir_host_dir(
     body: MkdirBody,
-    user: User = Depends(current_user),
+    user: User = Depends(require_admin()),
     server: Any = Depends(get_server),
 ) -> dict[str, Any]:
     """Create a child directory under *path* for root_dir pickers."""
@@ -233,7 +235,7 @@ async def mkdir_host_dir(
 @router.post("/rename")
 async def rename_host_directory(
     body: RenameBody,
-    user: User = Depends(current_user),
+    user: User = Depends(require_admin()),
     server: Any = Depends(get_server),
 ) -> dict[str, Any]:
     """Rename a host directory (basename only) for root_dir pickers."""

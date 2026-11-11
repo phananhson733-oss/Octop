@@ -11,6 +11,7 @@ from typing import Any, cast
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
+from octop.api.common.secret_mask import mask_secret
 from octop.api.deps import current_user, get_server, require_permission
 from octop.infra.agents.providers.codex_apply import (
     CODEX_PROVIDER_NAME,
@@ -43,6 +44,7 @@ from octop.infra.agents.providers.store import (
     resolve_provider_stream_usage,
 )
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.users.permissions import user_has_permission
 from octop.infra.utils.locale import resolve_request_locale
 from octop.infra.utils.ulid import new_ulid
 
@@ -243,11 +245,18 @@ async def set_active_model(
 
 @router.get("")
 async def list_providers(
-    _: Any = Depends(current_user),
+    user: Any = Depends(current_user),
     server: Any = Depends(get_server),
 ) -> list[dict[str, Any]]:
-    """Return all providers. Read-only for regular users."""
-    return [_row_to_dict(r) for r in server.services.provider_repo.list_all()]
+    """Return all providers. Read-only for regular users.
+
+    API keys come back masked unless the caller holds the ``providers`` permission.
+    """
+    rows = [_row_to_dict(r) for r in server.services.provider_repo.list_all()]
+    if not user_has_permission(user, "providers"):
+        for row in rows:
+            row["api_key"] = mask_secret(row["api_key"])
+    return rows
 
 
 # ── Admin endpoints ─────────────────────────────────────────────────────────

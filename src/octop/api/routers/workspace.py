@@ -30,6 +30,8 @@ from octop.infra.backup.workspace_archive import export_workspace_zip, import_wo
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.gateway.media.backend_files import (
     backend_workspace_path,
+    host_path_forms,
+    is_admin_only_host_path,
     is_allowed_host_download_abs_path,
     is_host_absolute_path,
     resolve_preview_file,
@@ -113,6 +115,35 @@ def _workspace_io_path(path: str, *, from_workspace: bool = False) -> str:
     return workspace_api_path(raw)
 
 
+def _guard_host_path(io_path: str, ws: Any, user: Any) -> str:
+    """Refuse a non-admin any host path only admins may open.
+
+    Agents' files may sit anywhere on the host, so these routes take host paths;
+    Octop's own data (config, env, other agents' workspaces) and OS system roots
+    stay admin-only. See ``is_admin_only_host_path``.
+    """
+    if not user.is_admin and any(
+        is_admin_only_host_path(host, workspace=ws.workspace_dir)
+        for host in host_path_forms(io_path)
+    ):
+        raise OctopError(ErrorCode.FORBIDDEN, f"path not allowed: {io_path!r}")
+    return io_path
+
+
+def _drop_admin_only_rows(rows: list[dict[str, Any]], ws: Any, user: Any) -> list[dict[str, Any]]:
+    """Listing and search results without the host paths a non-admin may not open."""
+    if user.is_admin:
+        return rows
+    return [
+        row
+        for row in rows
+        if not any(
+            is_admin_only_host_path(host, workspace=ws.workspace_dir)
+            for host in host_path_forms(str(row.get("path") or ""))
+        )
+    ]
+
+
 _FROM_WORKSPACE_DESC = (
     "When true, leading '/' paths are workspace-relative (workspace UI). "
     "When false (default), leading '/' is host-absolute."
@@ -135,12 +166,12 @@ async def list_tree(
     ws = await require_running_workspace(
         agent_id, user=user, as_user=as_user, server=server, owner_only=True
     )
-    io_path = _workspace_io_path(path, from_workspace=from_workspace)
+    io_path = _guard_host_path(_workspace_io_path(path, from_workspace=from_workspace), ws, user)
     result = await ws.als(io_path)
     if result is None:
         raise OctopError(ErrorCode.NOT_FOUND, f"cannot list {path!r}")
     entries = getattr(result, "entries", None) or []
-    rows = [file_info_to_dict(f) for f in entries]
+    rows = _drop_admin_only_rows([file_info_to_dict(f) for f in entries], ws, user)
     if not is_host_absolute_path(io_path):
         for row in rows:
             row["path"] = reanchor_entry_path(str(row.get("path") or ""), parent=io_path)
@@ -168,7 +199,8 @@ async def read_file(
 ) -> dict[str, Any]:
     """Read a UTF-8 text file."""
     ws = await require_agent_workspace(agent_id, user=user, as_user=as_user, server=server)
-    content = await ws.aread_text(_workspace_io_path(path, from_workspace=from_workspace))
+    io_path = _guard_host_path(_workspace_io_path(path, from_workspace=from_workspace), ws, user)
+    content = await ws.aread_text(io_path)
     if content is None:
         raise OctopError(ErrorCode.NOT_FOUND, f"cannot read {path!r}")
     return {"path": path, "content": coerce_read_content(content)}
@@ -203,8 +235,9 @@ async def write_file(
             ) from exc
     else:
         data = body.content.encode("utf-8")
+    io_path = _guard_host_path(_workspace_io_path(path, from_workspace=from_workspace), ws, user)
     try:
-        await ws.aupload_bytes(_workspace_io_path(path, from_workspace=from_workspace), data)
+        await ws.aupload_bytes(io_path, data)
     except Exception as exc:
         raise OctopError(ErrorCode.NOT_FOUND, f"cannot write {path!r}: {exc}") from exc
     return {"path": path, "size": len(data)}
@@ -237,6 +270,7 @@ async def mkdir_workspace_dir(
     ws = await require_running_workspace(
         agent_id, user=user, as_user=as_user, server=server, owner_only=True
     )
+    _guard_host_path(rel, ws, user)
     try:
         await ws.amkdir(rel)
     except Exception as exc:
@@ -267,6 +301,7 @@ async def delete_workspace_file(
     ws = await require_running_workspace(
         agent_id, user=user, as_user=as_user, server=server, owner_only=True
     )
+    _guard_host_path(rel, ws, user)
     try:
         await ws.adelete(rel)
     except Exception as exc:
@@ -297,6 +332,8 @@ async def move_workspace_file(
     ws = await require_running_workspace(
         agent_id, user=user, as_user=as_user, server=server, owner_only=True
     )
+    _guard_host_path(src, ws, user)
+    _guard_host_path(dest, ws, user)
     try:
         await ws.amove(src, dest)
     except Exception as exc:
@@ -321,11 +358,9 @@ async def upload_file(
     )
     target = path or f"/{file.filename or 'upload.bin'}"
     data = await file.read()
+    io_path = _guard_host_path(_workspace_io_path(target, from_workspace=from_workspace), ws, user)
     try:
-        await ws.aupload_bytes(
-            _workspace_io_path(target, from_workspace=from_workspace),
-            data,
-        )
+        await ws.aupload_bytes(io_path, data)
     except Exception as exc:
         raise OctopError(ErrorCode.NOT_FOUND, f"cannot upload to {target!r}: {exc}") from exc
     return {"path": target, "size": len(data)}
@@ -356,7 +391,7 @@ async def download_file(
     sensitive system roots (``/etc``, ``.harness-browser``, ``.octop-browser``, Windows system dirs).
     """
     ws = await require_agent_workspace(agent_id, user=user, as_user=as_user, server=server)
-    io_path = _workspace_io_path(path, from_workspace=from_workspace)
+    io_path = _guard_host_path(_workspace_io_path(path, from_workspace=from_workspace), ws, user)
     if is_host_absolute_path(io_path) and not is_allowed_host_download_abs_path(
         io_path,
         workspace=ws.workspace_dir,
@@ -370,6 +405,7 @@ async def download_file(
     if local is not None:
         if not is_allowed_host_download_abs_path(str(local), workspace=ws.workspace_dir):
             raise OctopError(ErrorCode.FORBIDDEN, "download path not allowed")
+        _guard_host_path(str(local), ws, user)
         return FileResponse(
             local,
             media_type="application/octet-stream",
@@ -402,7 +438,7 @@ async def read_doc(
     """Read an editable document (e.g. ``.docx``) as Markdown for online editing."""
     converter = _ensure_editable_doc(path)
     ws = await require_agent_workspace(agent_id, user=user, as_user=as_user, server=server)
-    io_path = _workspace_io_path(path, from_workspace=from_workspace)
+    io_path = _guard_host_path(_workspace_io_path(path, from_workspace=from_workspace), ws, user)
     try:
         blob = await ws.adownload_bytes(io_path)
     except PermissionError as exc:
@@ -443,6 +479,7 @@ async def write_doc(
             ErrorCode.SLASH_BAD_ARGS,
             f"cannot build document for {path!r}: {exc}",
         ) from exc
+    _guard_host_path(rel, ws, user)
     try:
         await ws.aupload_bytes(rel, data)
     except Exception as exc:
@@ -472,9 +509,11 @@ async def preview_media(
     path_agent = _agent_id_from_media_source(source)
     effective_agent = path_agent or agent_id
     ws = await require_running_workspace(effective_agent, user=user, as_user=as_user, server=server)
+    _guard_host_path(source, ws, user)
     local = await resolve_preview_file(source=source, workspace=ws, mime_hint=mime_type or "")
     if local is not None:
         path, mime = local
+        _guard_host_path(str(path), ws, user)
         return FileResponse(
             path,
             media_type=mime,
@@ -598,7 +637,8 @@ async def glob_files(
     ws = await require_running_workspace(
         agent_id, user=user, as_user=as_user, server=server, owner_only=True
     )
-    root = _workspace_io_path(path, from_workspace=from_workspace)
+    root = _guard_host_path(_workspace_io_path(path, from_workspace=from_workspace), ws, user)
+    _guard_host_path(pattern, ws, user)
     if pattern in ("**/*.md", "*.md") and root == ".":
         ls_result = await ws.als(".")
         if ls_result is None:
@@ -617,7 +657,7 @@ async def glob_files(
     if glob_result is None:
         raise OctopError(ErrorCode.NOT_FOUND, "glob failed")
     matches = getattr(glob_result, "matches", None) or []
-    return [file_info_to_dict(item) for item in matches]
+    return _drop_admin_only_rows([file_info_to_dict(item) for item in matches], ws, user)
 
 
 @router.get("/agents/{agent_id}/workspace/grep")
@@ -633,11 +673,12 @@ async def grep_files(
     ws = await require_running_workspace(
         agent_id, user=user, as_user=as_user, server=server, owner_only=True
     )
-    result = await ws.agrep(pattern, _workspace_io_path(path, from_workspace=from_workspace))
+    root = _guard_host_path(_workspace_io_path(path, from_workspace=from_workspace), ws, user)
+    result = await ws.agrep(pattern, root)
     if result is None:
         raise OctopError(ErrorCode.NOT_FOUND, "grep failed")
     matches = getattr(result, "matches", None) or []
-    return [dict(m) for m in matches]
+    return _drop_admin_only_rows([dict(m) for m in matches], ws, user)
 
 
 _MAX_WORKSPACE_ARCHIVE_BYTES = 200 * 1024 * 1024
