@@ -20,7 +20,7 @@ from fastapi.responses import JSONResponse
 from octop.api.deps import (
     ACCESS_TOKEN_RESPONSE_HEADER,
     extract_raw_token,
-    is_jwt_exempt_request,
+    is_jwt_exempt_path,
     maybe_sliding_renew_token,
     resolve_user_from_token_async,
 )
@@ -42,8 +42,10 @@ def install(app: Any, server: Any) -> None:
         request: Request,
         call_next: Callable[[Request], Awaitable[Any]],
     ) -> Any:
-        path = request.url.path
-        if not path.startswith("/api/") or is_jwt_exempt_request(request):
+        # The path the router matches. ``request.url.path`` re-parses it, so an
+        # encoded ``?`` or ``#`` would cut it short of what is routed.
+        path = request.scope["path"]
+        if not path.startswith("/api/") or is_jwt_exempt_path(path):
             return await call_next(request)
 
         raw = extract_raw_token(
@@ -61,6 +63,7 @@ def install(app: Any, server: Any) -> None:
             )
             if scope is not None and not scope_allows(scope, request.method, path):
                 raise forbidden()
+            request.state.octop_api_scope = scope
         except OctopError as exc:
             # Middleware returns directly (skips FastAPI exception handlers).
             if exc.status >= 500:

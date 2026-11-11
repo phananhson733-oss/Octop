@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from typing import Any
 
@@ -13,7 +14,9 @@ from tests.support.auth import bearer, login
 _PASSWORD = "TestPass12"
 
 
-async def _workbench_account(c: Any, auth: dict[str, str]) -> dict[str, str]:
+async def _workbench_account(
+    c: Any, auth: dict[str, str], *, plugins: tuple[str, ...] = ("sab-tools",)
+) -> dict[str, str]:
     role = await c.post(
         "/api/users/roles",
         headers=auth,
@@ -22,7 +25,7 @@ async def _workbench_account(c: Any, auth: dict[str, str]) -> dict[str, str]:
             "permissions": [],
             "policies": [
                 {"name": "visible_nav", "value": "workbench"},
-                {"name": "allowed_plugin_ui", "value": '["sab-tools"]'},
+                {"name": "allowed_plugin_ui", "value": json.dumps(list(plugins))},
                 {"name": "allowed_expert_templates", "value": "[]"},
                 {"name": "api_scope", "value": "workbench"},
             ],
@@ -114,6 +117,59 @@ async def test_role_saves_keep_api_scope_and_reject_unknown_values(env):
     assert bad.status_code == 400, bad.text
 
 
+async def test_the_checked_path_is_the_routed_path(env):
+    c, _srv, auth = env
+    cust = await _workbench_account(c, auth)
+    # An encoded "?" must not cut the checked path down to an allowed route.
+    sneaky = await c.get("/api/settings/capabilities%3F/x", headers=cust)
+    assert sneaky.status_code == 403, sneaky.text
+
+
+async def test_scoped_accounts_get_plugin_page_files_only(env):
+    from octop.api.routers.plugins import _plugin_manager
+
+    c, srv, auth = env
+    catalog = (await c.get("/api/plugins/market", headers=auth)).json()
+    plugin = next(p["id"] for p in catalog if not p.get("error"))
+    installed = await c.post(f"/api/plugins/market/{plugin}/install", headers=auth)
+    assert installed.status_code == 200, installed.text
+    page = _plugin_manager(srv).plugin_dir(plugin) / "ui" / "scope-page.js"
+    page.parent.mkdir(parents=True, exist_ok=True)
+    page.write_text("export {}", encoding="utf-8")
+    cust = await _workbench_account(c, auth, plugins=(plugin,))
+
+    for path in ("scope-page.js", "ui/scope-page.js"):
+        ok = await c.get(f"/api/plugins/{plugin}/ui/{path}", headers=cust)
+        assert ok.status_code == 200, (path, ok.text)
+    # The manifest (and any source) sits outside ui/: admins only.
+    source = f"/api/plugins/{plugin}/ui/plugin.yaml"
+    assert (await c.get(source, headers=cust)).status_code == 404
+    assert (await c.get(source, headers=auth)).status_code == 200
+
+
+async def test_a_role_that_is_gone_or_unreadable_fails_closed(env):
+    from octop.infra.db.repos.user_roles import UserRoleRepo
+    from octop.infra.users.api_scope import role_api_scope
+
+    c, srv, auth = env
+    cust = await _workbench_account(c, auth)
+    db = srv.services.db
+    assert role_api_scope(db, SimpleNamespace(is_admin=False, role="gone")) == "none"
+    assert role_api_scope(db, SimpleNamespace(is_admin=False, role="user")) is None
+
+    role = UserRoleRepo(db).get_by_name("客户·选剧台")
+    assert role is not None
+    UserRoleRepo(db).update(
+        role.user_role_id,
+        user_role_name=role.user_role_name,
+        description=role.description,
+        permissions=role.permissions,
+        policies=[(n, v) for n, v in role.policies if n != "api_scope"] + [("api_scope", "x")],
+    )
+    assert (await c.get("/api/auth/me", headers=cust)).status_code == 403
+    assert (await c.post("/api/auth/logout", headers=cust)).status_code < 400
+
+
 def test_an_unreadable_scope_only_signs_out():
     assert api_scope.scope_allows("none", "POST", "/api/auth/logout")
     assert not api_scope.scope_allows("none", "GET", "/api/auth/me")
@@ -166,13 +222,148 @@ async def test_websockets_of_other_accounts_reach_the_route(monkeypatch):
     assert reached == ["/api/notifications/ws"] * 3 and sent == []
 
 
+async def test_a_handshake_with_many_tokens_is_refused_unread(monkeypatch):
+    guard, reached, sent = _guard(monkeypatch, scoped=set())
+    resolved: list[str] = []
+    real = api_scope.resolve_user_from_token_async
+
+    async def counting(server: Any, token: str) -> Any:
+        resolved.append(token)
+        return await real(server, token)
+
+    monkeypatch.setattr(api_scope, "resolve_user_from_token_async", counting)
+    query = "&".join(f"token=t{i}" for i in range(50)).encode()
+    ws = {"type": "websocket", "path": "/api/notifications/ws", "query_string": query}
+    await guard(ws, None, _sink(sent))
+    assert reached == [] and resolved == [] and sent[0]["code"] == 4003
+
+
+async def test_an_open_socket_closes_once_its_account_is_scoped(monkeypatch):
+    scoped: set[str] = set()
+    guard, _reached, sent = _guard(monkeypatch, scoped=scoped)
+    monkeypatch.setattr(api_scope, "_RECHECK_SECONDS", 0.0)
+    seen: list[dict[str, Any]] = []
+
+    async def app(_scope: dict[str, Any], receive: Any, send: Any) -> None:
+        seen.append(await receive())  # still allowed
+        scoped.add("good")  # an admin moves the account into a scoped role
+        seen.append(await receive())
+        await send({"type": "websocket.send", "text": "late"})  # dropped after the close
+
+    guard.app = app
+    inbox = [{"type": "websocket.receive", "text": "a"}, {"type": "websocket.receive", "text": "b"}]
+
+    async def receive() -> dict[str, Any]:
+        return inbox.pop(0)
+
+    ws = {"type": "websocket", "path": "/api/agents/a/terminal/ws", "query_string": b"token=good"}
+    await guard(ws, receive, _sink(sent))
+    assert seen == [
+        {"type": "websocket.receive", "text": "a"},
+        {"type": "websocket.disconnect", "code": 4003},
+    ]
+    assert sent == [{"type": "websocket.close", "code": 4003, "reason": "forbidden"}]
+
+
+async def test_a_push_only_socket_closes_once_its_account_is_scoped(monkeypatch):
+    """The dashboard never writes on the notification socket, so pushes trigger the check too."""
+    scoped: set[str] = set()
+    guard, _reached, sent = _guard(monkeypatch, scoped=scoped)
+    monkeypatch.setattr(api_scope, "_RECHECK_SECONDS", 0.0)
+    seen: list[dict[str, Any]] = []
+
+    async def app(_scope: dict[str, Any], receive: Any, send: Any) -> None:
+        await send({"type": "websocket.send", "text": "first"})
+        scoped.add("good")
+        await send({"type": "websocket.send", "text": "second"})  # not delivered
+        seen.append(await receive())
+
+    guard.app = app
+
+    async def receive() -> dict[str, Any]:
+        raise AssertionError("the client sends nothing")
+
+    ws = {"type": "websocket", "path": "/api/notifications/ws", "query_string": b"token=good"}
+    await guard(ws, receive, _sink(sent))
+    assert sent == [
+        {"type": "websocket.send", "text": "first"},
+        {"type": "websocket.close", "code": 4003, "reason": "forbidden"},
+    ]
+    assert seen == [{"type": "websocket.disconnect", "code": 4003}]
+
+
+async def test_an_open_socket_is_rechecked_after_its_token_expires(monkeypatch):
+    """The recheck reloads the account verified at the handshake, not the token."""
+    from octop.infra.errors import ErrorCode, OctopError
+
+    scoped: set[str] = set()
+    guard, _reached, sent = _guard(monkeypatch, scoped=scoped)
+    monkeypatch.setattr(api_scope, "_RECHECK_SECONDS", 0.0)
+
+    async def expired(_server: Any, _token: str) -> Any:
+        raise OctopError(ErrorCode.AUTH_FAILED, "token expired")
+
+    async def app(_scope: dict[str, Any], _receive: Any, send: Any) -> None:
+        monkeypatch.setattr(api_scope, "resolve_user_from_token_async", expired)
+        scoped.add("good")
+        await send({"type": "websocket.send", "text": "not delivered"})
+
+    guard.app = app
+    ws = {"type": "websocket", "path": "/api/notifications/ws", "query_string": b"token=good"}
+    await guard(ws, None, _sink(sent))
+    assert sent == [{"type": "websocket.close", "code": 4003, "reason": "forbidden"}]
+
+
+async def test_traffic_waits_for_a_recheck_in_progress(monkeypatch):
+    """A receive that arrives while a send is re-checking is not let through."""
+    import asyncio
+
+    scoped: set[str] = set()
+    guard, _reached, sent = _guard(monkeypatch, scoped=scoped)
+    monkeypatch.setattr(api_scope, "_RECHECK_SECONDS", 0.05)
+    checking, release = asyncio.Event(), asyncio.Event()
+    seen: list[dict[str, Any]] = []
+
+    async def app(_scope: dict[str, Any], receive: Any, send: Any) -> None:
+        real = guard._any_scoped
+
+        async def slow(users: list[Any]) -> bool:
+            checking.set()
+            await release.wait()
+            scoped.add("good")  # the account was moved while the check ran
+            return await real(users)
+
+        monkeypatch.setattr(guard, "_any_scoped", slow)
+        await asyncio.sleep(0.06)
+        writer = asyncio.create_task(send({"type": "websocket.send", "text": "out"}))
+        await checking.wait()
+        reader = asyncio.create_task(receive())  # inside the interval the check just started
+        await asyncio.sleep(0)
+        release.set()
+        await writer
+        seen.append(await reader)
+
+    async def receive() -> dict[str, Any]:
+        return {"type": "websocket.receive", "text": "ls"}
+
+    guard.app = app
+    ws = {"type": "websocket", "path": "/api/agents/a/terminal/ws", "query_string": b"token=good"}
+    await guard(ws, receive, _sink(sent))
+    assert sent == [{"type": "websocket.close", "code": 4003, "reason": "forbidden"}]
+    assert seen == [{"type": "websocket.disconnect", "code": 4003}]
+
+
 def _guard(monkeypatch: Any, *, scoped: set[str]) -> tuple[Any, list[str], list[dict[str, Any]]]:
     from octop.infra.errors import ErrorCode, OctopError
+
+    accounts: dict[int, Any] = {}
 
     async def resolve(_server: Any, token: str) -> Any:
         if token == "bad":
             raise OctopError(ErrorCode.AUTH_FAILED, "invalid token")
-        return SimpleNamespace(is_admin=False, role="r", token=token)
+        user = SimpleNamespace(id=len(accounts) + 1, is_admin=False, role="r", token=token)
+        accounts[user.id] = user
+        return user
 
     monkeypatch.setattr(api_scope, "resolve_user_from_token_async", resolve)
     monkeypatch.setattr(
@@ -183,7 +374,8 @@ def _guard(monkeypatch: Any, *, scoped: set[str]) -> tuple[Any, list[str], list[
     async def app(asgi_scope: dict[str, Any], _receive: Any, _send: Any) -> None:
         reached.append(asgi_scope["path"])
 
-    return api_scope.WebSocketScopeGuard(app, server=object()), reached, []
+    server = SimpleNamespace(user_manager=SimpleNamespace(get_by_id=accounts.get))
+    return api_scope.WebSocketScopeGuard(app, server=server), reached, []
 
 
 def _sink(sent: list[dict[str, Any]]) -> Any:

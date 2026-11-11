@@ -601,12 +601,13 @@ class PluginManager:
             return dest
         return None
 
-    def resolve_ui_file(self, plugin_id: str, rel_path: str) -> Path:
+    def resolve_ui_file(self, plugin_id: str, rel_path: str, *, ui_only: bool = False) -> Path:
         """Resolve a UI asset under the plugin tree with path-traversal checks.
 
         ``rel_path`` is typically relative to ``<plugin>/ui/`` (e.g. ``dist/index.js``)
         as served by ``GET /api/plugins/{id}/ui/{path}``. Full paths from the
-        plugin root (``ui/dist/index.js``) are also accepted.
+        plugin root (``ui/dist/index.js``) are also accepted. ``ui_only`` serves
+        nothing outside ``<plugin>/ui/`` (no plugin source or manifest).
         """
         plugin_dir = self.plugin_dir(plugin_id)
         if plugin_dir is None:
@@ -614,10 +615,10 @@ class PluginManager:
                 ErrorCode.NOT_FOUND,
                 f"plugin {plugin_id!r} not found",
             )
-        return self._resolve_plugin_asset(plugin_dir, rel_path)
+        return self._resolve_plugin_asset(plugin_dir, rel_path, ui_only=ui_only)
 
     @staticmethod
-    def _resolve_plugin_asset(plugin_dir: Path, rel_path: str) -> Path:
+    def _resolve_plugin_asset(plugin_dir: Path, rel_path: str, *, ui_only: bool = False) -> Path:
         cleaned = rel_path.strip().lstrip("/").replace("\\", "/")
         if not cleaned or any(part == ".." for part in cleaned.split("/")):
             raise OctopError(ErrorCode.NOT_FOUND, "invalid plugin UI path")
@@ -627,13 +628,14 @@ class PluginManager:
         ]
         if not cleaned.startswith("ui/") and not cleaned.startswith("dist/"):
             candidates.append(plugin_dir / "ui" / "dist" / cleaned)
+        served_root = (plugin_dir / "ui").resolve() if ui_only else plugin_dir.resolve()
         for target in candidates:
             resolved = target.resolve()
             try:
                 resolved.relative_to(plugin_dir.resolve())
             except ValueError as exc:
                 raise OctopError(ErrorCode.NOT_FOUND, "invalid plugin UI path") from exc
-            if resolved.is_file():
+            if resolved.is_file() and resolved.is_relative_to(served_root):
                 return resolved
         raise OctopError(
             ErrorCode.NOT_FOUND,

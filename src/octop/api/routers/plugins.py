@@ -356,7 +356,9 @@ async def get_plugin_ui_asset(
     await asyncio.get_running_loop().run_in_executor(
         None, assert_plugin_ui_allowed, server.services.db, _user, plugin_id
     )
-    target = _plugin_manager(server).resolve_ui_file(plugin_id, file_path)
+    # Accounts confined by ``api_scope`` (set in ``jwt_auth``) get the page files only.
+    ui_only = getattr(request.state, "octop_api_scope", None) is not None
+    target = _plugin_manager(server).resolve_ui_file(plugin_id, file_path, ui_only=ui_only)
     suffix = target.suffix.lower()
     media_type = _UI_CONTENT_TYPES.get(suffix) or mimetypes.guess_type(target.name)[0]
     response = FileResponse(

@@ -287,7 +287,11 @@ async def desktop_stream_ws(
             await websocket.close(code=4001, reason=f"auth failed: {exc}")
             return
         # The start message carries the token, so the handshake guard never saw it.
-        if not user_has_permission(user, "desktop") or scope_of(server, user) is not None:
+        if (
+            not user_has_permission(user, "desktop")
+            or (await asyncio.get_running_loop().run_in_executor(None, scope_of, server, user))
+            is not None
+        ):
             await websocket.close(code=4003, reason="permission required")
             return
 
