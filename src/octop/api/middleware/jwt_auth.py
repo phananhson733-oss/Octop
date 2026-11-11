@@ -24,6 +24,7 @@ from octop.api.deps import (
     maybe_sliding_renew_token,
     resolve_user_from_token_async,
 )
+from octop.api.middleware.api_scope import WebSocketScopeGuard, forbidden, scope_allows, scope_of
 from octop.infra.errors import OctopError
 
 _INSTALL_ATTR = "_octop_jwt_auth_installed"
@@ -34,6 +35,7 @@ def install(app: Any, server: Any) -> None:
     if getattr(app, _INSTALL_ATTR, False):
         return
     setattr(app, _INSTALL_ATTR, True)
+    app.add_middleware(WebSocketScopeGuard, server=server)
 
     @app.middleware("http")  # type: ignore[untyped-decorator]
     async def _jwt_auth(
@@ -54,6 +56,11 @@ def install(app: Any, server: Any) -> None:
 
                 raise OctopError(ErrorCode.AUTH_FAILED, "missing credentials")
             request.state.octop_user = await resolve_user_from_token_async(server, raw)
+            scope = await asyncio.get_running_loop().run_in_executor(
+                None, scope_of, server, request.state.octop_user
+            )
+            if scope is not None and not scope_allows(scope, request.method, path):
+                raise forbidden()
         except OctopError as exc:
             # Middleware returns directly (skips FastAPI exception handlers).
             if exc.status >= 500:

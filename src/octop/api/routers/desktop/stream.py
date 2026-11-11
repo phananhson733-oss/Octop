@@ -14,6 +14,7 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
 from octop.api.deps import resolve_user_from_token
+from octop.api.middleware.api_scope import scope_of
 from octop.infra.desktop.input import canvas_to_screen, run_desktop_action
 from octop.infra.desktop.session import (
     DesktopSession,
@@ -285,7 +286,8 @@ async def desktop_stream_ws(
             )
             await websocket.close(code=4001, reason=f"auth failed: {exc}")
             return
-        if not user_has_permission(user, "desktop"):
+        # The start message carries the token, so the handshake guard never saw it.
+        if not user_has_permission(user, "desktop") or scope_of(server, user) is not None:
             await websocket.close(code=4003, reason="permission required")
             return
 

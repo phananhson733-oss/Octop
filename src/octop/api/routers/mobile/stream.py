@@ -14,6 +14,7 @@ from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
 from octop.api.deps import resolve_user_from_token
+from octop.api.middleware.api_scope import scope_of
 from octop.infra.mobile.adb import (
     KEYCODE_APP_SWITCH,
     KEYCODE_BACK,
@@ -537,7 +538,8 @@ async def mobile_stream_ws(
             )
             await websocket.close(code=4001, reason=f"auth failed: {exc}")
             return
-        if not user_has_permission(user, "mobile"):
+        # The start message carries the token, so the handshake guard never saw it.
+        if not user_has_permission(user, "mobile") or scope_of(server, user) is not None:
             await websocket.close(code=4003, reason="permission required")
             return
 

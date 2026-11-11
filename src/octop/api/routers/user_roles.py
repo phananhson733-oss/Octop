@@ -21,6 +21,7 @@ from octop.infra.db.repos.user_roles import (
     UserRoleRow,
 )
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.users.api_scope import POLICY_API_SCOPE, normalize_api_scope
 from octop.infra.users.expert_access import POLICY_ALLOWED_EXPERT_TEMPLATES
 from octop.infra.users.identity import User
 from octop.infra.users.permissions import ALL_PERMISSION_KEYS, validate_permission_keys
@@ -53,6 +54,7 @@ from octop.infra.users.resource_policy import (
 router = APIRouter()
 
 _KNOWN_POLICIES = {
+    POLICY_API_SCOPE,
     POLICY_ALLOWED_EXPERT_TEMPLATES,
     POLICY_ALLOWED_PLUGIN_UI,
     POLICY_WORKSPACE_ROOT_DIR,
@@ -208,6 +210,9 @@ def _policies_from_items(items: list[PolicyItem]) -> list[tuple[str, str]]:
                 normalize_plugin_ui_grants(by_name[POLICY_ALLOWED_PLUGIN_UI]),
             )
         )
+    scope = normalize_api_scope(by_name.get(POLICY_API_SCOPE))
+    if scope:
+        normalized.append((POLICY_API_SCOPE, scope))
     if POLICY_ALLOWED_EXPERT_TEMPLATES in by_name:
         normalized.append(
             (
@@ -389,7 +394,7 @@ async def patch_user_role(
     # Older dashboards rebuild the policy array without this security boundary.
     # Omission must not silently restore unrestricted UI access.
     if policies is not None:
-        for key in (POLICY_ALLOWED_PLUGIN_UI, POLICY_ALLOWED_EXPERT_TEMPLATES):
+        for key in (POLICY_ALLOWED_PLUGIN_UI, POLICY_ALLOWED_EXPERT_TEMPLATES, POLICY_API_SCOPE):
             previous = current.policy_value(key)
             if previous is not None and not any(name == key for name, _ in policies):
                 policies.append((key, previous))
