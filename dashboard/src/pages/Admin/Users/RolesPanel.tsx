@@ -74,7 +74,7 @@ interface RoleFormValues extends PolicyFormValues {
   description?: string;
   permissions?: string[];
   limit_visible_nav?: boolean;
-  /** Pages shown besides chat, which is always visible. */
+  /** Pages the role's accounts see; chat may be left out. Empty means chat only. */
   visible_nav?: string[];
   default_knowledge_bases?: string[];
   hidden_expert_tabs?: string[];
@@ -91,12 +91,10 @@ const EXPERT_TAB_CHOICES = [
   { value: "market", labelKey: "experts.expertMarket" },
 ];
 
-/** Every sidebar page except chat, as the admin catalog lists them. */
+/** Every sidebar page, chat included, as the admin catalog lists them. */
 const VISIBLE_NAV_CHOICES = buildNavSections({ role: "admin" } as OctopUser, {
   mobileEnabled: true,
-})
-  .flatMap((section) => section.items)
-  .filter((item) => item.key !== HOME_NAV_KEY);
+}).flatMap((section) => section.items);
 
 function rolePolicies(
   values: RoleFormValues,
@@ -106,7 +104,10 @@ function rolePolicies(
   if (values.limit_visible_nav) {
     policies.push({
       name: "visible_nav",
-      value: [HOME_NAV_KEY, ...(values.visible_nav ?? [])].join(","),
+      value: (values.visible_nav?.length
+        ? values.visible_nav
+        : [HOME_NAV_KEY]
+      ).join(","),
     });
   }
   if (values.default_knowledge_bases?.length) {
@@ -287,7 +288,7 @@ export default function RolesPanel() {
           limit_token_quota: false,
           limit_max_agents: false,
           limit_visible_nav: false,
-          visible_nav: [],
+          visible_nav: [HOME_NAV_KEY],
           default_knowledge_bases: [],
           hidden_expert_tabs: [],
           default_published_experts: [],
@@ -313,9 +314,7 @@ export default function RolesPanel() {
           limit_max_agents: editor.max_agents != null,
           max_agents: editor.max_agents ?? undefined,
           limit_visible_nav: editor.visible_nav != null,
-          visible_nav: (editor.visible_nav ?? []).filter(
-            (key) => key !== HOME_NAV_KEY,
-          ),
+          visible_nav: editor.visible_nav ?? [HOME_NAV_KEY],
           default_knowledge_bases: editor.default_knowledge_bases ?? [],
           hidden_expert_tabs: editor.hidden_expert_tabs ?? [],
           default_published_experts: editor.default_published_experts ?? [],

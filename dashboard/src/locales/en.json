@@ -6007,7 +6007,7 @@
       "set_max_agents": "Set expert limit"
     },
     "roleVisibleNav": "Limit visible pages",
-    "roleVisibleNavHint": "When on, accounts in this role see only Chat and the pages selected below in the sidebar, and other pages cannot be opened by URL. Experts, skills and knowledge bases still work inside Chat. Changes apply at once to every account in the role. Administrators are never limited.",
+    "roleVisibleNavHint": "When on, accounts in this role see only the pages selected below in the sidebar, and other pages cannot be opened by URL. Without Chat, accounts land on the first selected page. Experts, skills and knowledge bases still work inside Chat. Changes apply at once to every account in the role. Administrators are never limited.",
     "roleVisibleNavPlaceholder": "Leave empty to show Chat only",
     "roleAllowedExperts": "Allowed expert templates",
     "roleAllowedExpertsHint": "Allow use of experts created from these templates. An empty list denies use. Default installation does not grant access; existing history and files are retained. Legacy roles without this policy keep their previous behavior.",

@@ -265,7 +265,7 @@ def normalize_visible_nav(raw: str | None) -> str | None:
     """Return comma-joined nav keys, or ``None`` when unrestricted.
 
     A role may leave ``chat`` out: its accounts then land on the first page it
-    keeps (the dashboard's Roles panel still always adds it).
+    keeps.
     """
     if raw is None or not raw.strip():
         return None

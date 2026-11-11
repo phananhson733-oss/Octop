@@ -169,4 +169,44 @@ describe("<RolesPanel /> expert policies", () => {
       value: "[]",
     });
   });
+
+  it("keeps a workbench-only role without chat when it is saved", async () => {
+    const workbenchRole: UserRole = {
+      ...pickRole,
+      permissions: [],
+      policies: [
+        { name: "allowed_plugin_ui", value: '["sab-tools"]' },
+        { name: "visible_nav", value: "workbench" },
+      ],
+      visible_nav: ["workbench"],
+      hidden_expert_tabs: [],
+      default_published_experts: [],
+    };
+    const fallback = stable.request.getMockImplementation();
+    stable.request.mockImplementation(async (path: string, init?: unknown) =>
+      path === "/users/roles" ? [workbenchRole] : fallback?.(path, init),
+    );
+    const user = userEvent.setup();
+    render(<RolesPanel />);
+    const row = (await screen.findByText("选剧角色")).closest("tr");
+    await user.click(
+      within(row as HTMLElement).getByRole("button", { name: "common.edit" }),
+    );
+    await user.click(
+      await screen.findByRole("button", { name: "common.save" }),
+    );
+    await waitFor(() =>
+      expect(stable.request).toHaveBeenCalledWith(
+        "/users/roles/01ROLE",
+        expect.objectContaining({ method: "PATCH" }),
+      ),
+    );
+    const patch = stable.request.mock.calls.find(
+      ([path]) => path === "/users/roles/01ROLE",
+    );
+    expect(JSON.parse(patch?.[1].body).policies).toContainEqual({
+      name: "visible_nav",
+      value: "workbench",
+    });
+  });
 });
