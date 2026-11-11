@@ -42,6 +42,7 @@ import {
   type AgentRuntimeFormValues,
 } from "../../../utils/agentRuntimeConfig";
 import { useAgentFormResources } from "../../../hooks/useAgentFormResources";
+import { useCurrentUser } from "../../../hooks/useCurrentUser";
 import { pickLocale } from "../../../utils/localizedText";
 import {
   buildModelSelectOptions,
@@ -218,6 +219,8 @@ export default function CreateFromExpertDrawer({
   onCreated,
 }: CreateFromExpertDrawerProps) {
   const { t } = useTranslation();
+  // Probing host directories is admin-only; other accounts create without the preflight.
+  const probeHost = useCurrentUser()?.role === "admin";
   const [form] = Form.useForm<
     {
       name: string;
@@ -403,7 +406,10 @@ export default function CreateFromExpertDrawer({
         return;
       }
     }
-    if (shouldProbeRootDir(values.backend_choice, values.root_dir)) {
+    if (
+      probeHost &&
+      shouldProbeRootDir(values.backend_choice, values.root_dir)
+    ) {
       const probe = await probeRootDir(values.root_dir ?? "/");
       if (!probe.ok) {
         message.error(
@@ -417,7 +423,10 @@ export default function CreateFromExpertDrawer({
     setSubmitting(true);
     let bwrapToast: { kind: "success" | "warning"; text: string } | null = null;
     try {
-      if (shouldProbeRootDir(values.backend_choice, values.root_dir)) {
+      if (
+        probeHost &&
+        shouldProbeRootDir(values.backend_choice, values.root_dir)
+      ) {
         const bwrap = await ensureBubblewrapAfterProbe();
         const kind = ensureBwrapToastKind(bwrap.status);
         if (kind !== "none") {

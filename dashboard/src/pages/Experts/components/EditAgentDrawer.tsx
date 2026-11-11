@@ -28,6 +28,7 @@ import { isAgentChatReady } from "../../../utils/agentError";
 import { useAgentFormResources } from "../../../hooks/useAgentFormResources";
 import { octopAgentsApi } from "../../../api/modules/octopAgents";
 import { useAgent, type OctopAgent } from "../../../context/AgentContext";
+import { useCurrentUser } from "../../../hooks/useCurrentUser";
 import {
   CONVERSATION_MODES,
   parseConversationMode,
@@ -231,6 +232,8 @@ function EditAgentDrawerBody({
   const { t } = useTranslation();
   const { modal, message } = App.useApp();
   const { refresh } = useAgent();
+  // Probing host directories is admin-only; other accounts save without the preflight.
+  const probeHost = useCurrentUser()?.role === "admin";
   const skillDisplayName = useSkillDisplayName();
   const [workspaceDrawerOpen, setWorkspaceDrawerOpen] = useState(false);
   const [form] = Form.useForm<EditFormValues>();
@@ -400,7 +403,11 @@ function EditAgentDrawerBody({
         return;
       }
     }
-    if (!remote && shouldProbeRootDir(values.backend_choice, values.root_dir)) {
+    if (
+      !remote &&
+      probeHost &&
+      shouldProbeRootDir(values.backend_choice, values.root_dir)
+    ) {
       const probe = await probeRootDir(values.root_dir ?? "/");
       if (!probe.ok) {
         message.error(
@@ -416,6 +423,7 @@ function EditAgentDrawerBody({
     try {
       if (
         !remote &&
+        probeHost &&
         shouldProbeRootDir(values.backend_choice, values.root_dir)
       ) {
         const bwrap = await ensureBubblewrapAfterProbe();
@@ -536,6 +544,7 @@ function EditAgentDrawerBody({
     onClose,
     onSaved,
     pathMappings,
+    probeHost,
     skillPackagesSupported,
     t,
   ]);
