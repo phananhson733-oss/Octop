@@ -6,7 +6,7 @@ import asyncio
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -391,6 +391,97 @@ async def test_ws_cancel_frame_cancels_active_turn(env: Any) -> None:
     cancel_spy.assert_called()
     assert cancel_spy.call_args.args[0] == aid
     assert cancel_spy.call_args.args[1] == tid
+
+
+async def test_ws_cancel_stops_hitl_resume_and_frees_the_thread(env: Any) -> None:
+    """Stop during a dashboard HITL resume with a parked steer.
+
+    The resume job is cancelled, and the thread's steer state ends, so the
+    next message is not rejected as ``turn_already_cancelled``.
+    """
+    c, srv, _fake, alice_auth, _bob_auth, aid = env
+    create = await c.post(f"/api/agents/{aid}/threads", headers=alice_auth)
+    tid = create.json()["thread_id"]
+    gateway = srv.app_runtime.gateway
+    steer = gateway.steer
+    turn_id, _seq, _ = steer.begin_turn(tid)
+    steer.admit(
+        tid,
+        text="也看看第二部",
+        client_pending_id="cp-1",
+        expected_turn_id=turn_id,
+        delivery="steer",
+    )
+    assert steer.has_pending(tid)
+    steer.set_phase(tid, "hitl_paused")
+    hitl = gateway.processor.hitl_coordinator
+    job = MagicMock()
+    job.thread_id = tid
+    hitl.track_resume_job(job)
+    try:
+        async with _chat_ws(c, aid, alice_auth) as ws:
+            await ws.send_json({"type": "cancel", "thread_id": tid})
+        for _ in range(40):
+            if job.cancel.called:
+                break
+            await asyncio.sleep(0.01)
+        job.cancel.assert_called_once()
+        assert steer.is_active(tid) is False
+    finally:
+        hitl.forget_resume_job(job)
+
+
+async def test_hitl_resume_after_sse_disconnect_reaches_a_reloaded_page(env: Any) -> None:
+    """Real hub: the SSE client leaves mid-resume, a new page subscribes over WS."""
+    from octop.api.routers.chat.routes import iter_dashboard_hitl_resume_sse
+
+    c, srv, _fake, alice_auth, _bob_auth, aid = env
+    create = await c.post(f"/api/agents/{aid}/threads", headers=alice_auth)
+    tid = create.json()["thread_id"]
+    gate = asyncio.Event()
+
+    async def resume(**_kwargs: Any) -> AsyncIterator[dict[str, Any]]:
+        yield {"type": "token", "content": "开始评了"}
+        await gate.wait()
+        yield {"type": "token", "content": "评完了"}
+
+    processor = MagicMock()
+    processor.iter_hitl_resume_chunks = resume
+    first = asyncio.Event()
+
+    async def consume() -> None:
+        async for _frame in iter_dashboard_hitl_resume_sse(
+            server=srv,
+            processor=processor,
+            hitl_coordinator=srv.app_runtime.gateway.processor.hitl_coordinator,
+            agent_id=aid,
+            thread_id=tid,
+            user_id=1,
+            decisions=[{"type": "respond", "message": "先评"}],
+            pending=None,
+            session_key="sk",
+            channel_type="dashboard",
+            locale="zh",
+            is_disconnected=AsyncMock(return_value=False),
+        ):
+            first.set()
+
+    sse = asyncio.create_task(consume())
+    await asyncio.wait_for(first.wait(), 2)
+    sse.cancel()  # the page reloaded
+    with pytest.raises(asyncio.CancelledError):
+        await sse
+
+    async with _chat_ws(c, aid, alice_auth) as ws:
+        await ws.send_json({"type": "subscribe", "thread_id": tid})
+        assert await ws.receive_json() == {"type": "turn_status", "thread_id": tid, "active": True}
+        gate.set()
+        frames: list[dict[str, Any]] = []
+        while not frames or frames[-1].get("type") != "turn.ended":
+            frames.append(await asyncio.wait_for(ws.receive_json(), 5))
+    tokens = [f["content"] for f in frames if f.get("type") == "token"]
+    assert tokens == ["评完了"]
+    assert frames[-1] == {"type": "turn.ended", "thread_id": tid}
 
 
 async def test_ws_emits_error_frame_on_exception(env: Any) -> None:

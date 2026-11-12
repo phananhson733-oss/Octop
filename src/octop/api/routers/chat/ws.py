@@ -161,6 +161,8 @@ async def dashboard_chat_ws(
                         {"type": "error", "message": f"thread {thread_id!r} not found"},
                     )
                     continue
+                steer_state = gateway.steer.get_state(thread_id)
+                parked = steer_state is not None and steer_state.phase == "hitl_paused"
                 gateway.steer.mark_cancelling(thread_id)
                 discarded = gateway.steer.discard(thread_id, reason="turn_cancelled")
                 if discarded is not None:
@@ -177,6 +179,14 @@ async def dashboard_chat_ws(
                         },
                     )
                 server.app_runtime.agent_registry.cancel_stream(agent_id, thread_id)
+                # A resumed HITL turn runs as a server task (not under the
+                # harness cancel event), so Stop has to reach it here.
+                gateway.processor.hitl_coordinator.cancel_resume(thread_id)
+                if parked:
+                    # Steer state parked across an approval pause has no WS
+                    # turn to end it; left as "cancelling" with parked steers
+                    # it would reject every later message on the thread.
+                    gateway.steer.end_turn(thread_id, failed=True)
                 continue
 
             if msg_type == "steer_remove":

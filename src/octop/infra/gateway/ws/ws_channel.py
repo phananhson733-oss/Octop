@@ -501,13 +501,14 @@ async def resume_parked_steers(
     session_key: str,
     channel_type: str,
     user_id: int,
-) -> None:
+) -> bool:
     """After an HITL approval resumes, drain steers parked across the pause.
 
     The queue survives the interrupt and drains at the first
     boundary after resume — here that boundary is the end of the SSE resume
     stream, and the drain re-enters through the normal WS channel turn so all
     steer frames (user bubble, steer.drained, turn.started…) flow as usual.
+    Returns True when a continuation turn was enqueued.
     """
     runtime = getattr(server, "app_runtime", None)
     gateway = getattr(runtime, "gateway", None)
@@ -515,20 +516,20 @@ async def resume_parked_steers(
     hub = getattr(gateway, "ws_hub", None)
     channel_manager = getattr(gateway, "channel_manager", None)
     if steer is None or hub is None or channel_manager is None:
-        return
+        return False
     expired = steer.sweep_expired(thread_id)
     if expired is not None:
         await _push_discarded(hub, thread_id, expired)
-        return
+        return False
     staged = steer.stage_hitl_pending(thread_id)
     if staged is None:
-        return
+        return False
     bundle, seq = staged
     queues = getattr(channel_manager, "_queues", None)
     if not isinstance(queues, dict) or WS_CHANNEL_ID not in queues:
         steer.release_staged_hitl(thread_id)
         logger.error("steer resume has no dashboard queue thread=%s", thread_id)
-        return
+        return False
     meta = steer.continuation_metadata(thread_id)
     meta["thread_id"] = thread_id
     meta["session_key"] = session_key
@@ -561,7 +562,7 @@ async def resume_parked_steers(
     except Exception:
         steer.release_staged_hitl(thread_id)
         logger.exception("steer resume continuation enqueue failed thread=%s", thread_id)
-        return
+        return False
     steer.commit_staged_hitl(thread_id)
     try:
         await hub.push_to_thread(thread_id, _steer_user_frame(thread_id, bundle))
@@ -579,6 +580,7 @@ async def resume_parked_steers(
         )
     except Exception:
         logger.exception("steer resume drain frames failed thread=%s", thread_id)
+    return True
 
 
 __all__ = ["WS_CHANNEL_ID", "WebSocketChannel", "resume_parked_steers"]

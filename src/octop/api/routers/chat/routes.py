@@ -31,7 +31,7 @@ from octop.infra.gateway.hitl.coordinator import (
     HitlStreamContext,
     decision_rejection_reason,
 )
-from octop.infra.gateway.hitl.format import normalize_hitl_request
+from octop.infra.gateway.hitl.resume_job import HitlResumeJob
 from octop.infra.gateway.hitl.store import HitlPendingRecord
 from octop.infra.utils.llm_text import ainvoke_text
 from octop.infra.utils.locale import resolve_request_locale
@@ -151,6 +151,16 @@ async def iter_dashboard_hitl_resume_sse(
             {"type": "error", "message": slash_tr("hitl.expired", normalize_locale(locale))},
         )
         return
+    if hitl_coordinator.resume_running(thread_id):
+        # A second click or a retried POST: the first resume owns this pause.
+        from octop.i18n.domains.slash import tr as slash_tr  # noqa: PLC0415
+        from octop.infra.utils.locale import normalize_locale  # noqa: PLC0415
+
+        yield format_sse(
+            "chunk",
+            {"type": "error", "message": slash_tr("hitl.expired", normalize_locale(locale))},
+        )
+        return
     hitl_ctx = HitlStreamContext(
         thread_id=thread_id,
         agent_id=agent_id,
@@ -158,8 +168,6 @@ async def iter_dashboard_hitl_resume_sse(
         session_key=session_key,
         channel_type=channel_type,
     )
-    disconnected = False
-    followup_pause = False
     # Clear the in-memory pause before the (possibly long) resume stream so
     # history reload cannot reinject the same card while the turn continues.
     if pending is not None:
@@ -167,60 +175,56 @@ async def iter_dashboard_hitl_resume_sse(
             pending.pending_id,
             "rejected" if rejected else "approved",
         )
-    try:
-        async for chunk in processor.iter_hitl_resume_chunks(
-            agent_id=agent_id,
-            thread_id=thread_id,
-            user_id=user_id,
-            decisions=decisions,
-        ):
-            if not disconnected:
-                disconnected = await is_disconnected()
-            if isinstance(chunk, dict) and chunk.get("type") == "hitl_required":
-                followup_pause = True
-                request_payload = chunk.get("request")
-                if isinstance(request_payload, dict):
-                    request_payload = normalize_hitl_request(request_payload)
-                    record = hitl_coordinator.register_from_request(request_payload, ctx=hitl_ctx)
-                    request_payload["pending_id"] = record.pending_id
-                    chunk["request"] = request_payload
-            if not disconnected:
-                yield format_sse("chunk", chunk)
-        # A new approval card is still pending. Draining now would start a
-        # turn that expires that card. Keep the queue until a resume finishes
-        # without another pause. A plain ``done`` would also make the
-        # dashboard flush locally queued messages and reload history.
-        if followup_pause:
-            if not disconnected:
-                yield format_sse("chunk", {"type": "done", "hitl_paused": True})
-            return
-        if not disconnected:
-            yield format_sse("chunk", {"type": "done"})
-        # Steers parked across the HITL pause drain at this
-        # boundary and continue through a normal WS turn — also when the SSE
-        # client disconnected, because the resume itself completed here.
+
+    async def drain_parked_steers() -> bool:
+        # Steers parked across the HITL pause drain at this boundary and
+        # continue through a normal WS turn.
         from octop.infra.gateway.ws.ws_channel import resume_parked_steers  # noqa: PLC0415
 
-        try:
-            await resume_parked_steers(
-                server,
-                agent_id=agent_id,
-                thread_id=thread_id,
-                session_key=session_key,
-                channel_type=channel_type,
-                user_id=user_id,
-            )
-        except Exception:
-            logging.getLogger(__name__).exception("steer resume drain failed thread=%s", thread_id)
-    except Exception as exc:
-        # Resume failed after we cleared the pause for reinject safety — do not
-        # leave the record looking like a successful approve/reject.
-        if pending is not None:
-            hitl_coordinator.store.mark_resolved(pending.pending_id, "expired")
-        yield format_sse(
-            "chunk",
-            {"type": "error", "message": format_stream_error(exc, locale)},
+        return await resume_parked_steers(
+            server,
+            agent_id=agent_id,
+            thread_id=thread_id,
+            session_key=session_key,
+            channel_type=channel_type,
+            user_id=user_id,
         )
+
+    # The resumed turn runs as a server task: a reload or route change that
+    # drops this request must not cancel it (it used to, mid-tool).
+    job = HitlResumeJob(
+        processor=processor,
+        hitl_coordinator=hitl_coordinator,
+        hub=_ws_hub(server),
+        agent_id=agent_id,
+        thread_id=thread_id,
+        user_id=user_id,
+        decisions=decisions,
+        pending=pending,
+        hitl_ctx=hitl_ctx,
+        format_error=lambda exc: format_stream_error(exc, locale),
+        after_resume=drain_parked_steers,
+    )
+    job.start()
+    try:
+        async for chunk in job.chunks():
+            if await is_disconnected():
+                return
+            yield format_sse("chunk", chunk)
+        if job.ended_ok:
+            yield format_sse("chunk", {"type": "done"})
+            # ``done`` is out; parked steers continue over WS. A client that
+            # left before this point has the job finish it instead.
+            if job.take_finish():
+                await job.continue_steers()
+    finally:
+        job.detach()
+
+
+def _ws_hub(server: Any) -> Any:
+    runtime = getattr(server, "app_runtime", None)
+    gateway = getattr(runtime, "gateway", None) if runtime is not None else None
+    return getattr(gateway, "ws_hub", None) if gateway is not None else None
 
 
 def _dashboard_hitl_stream_context(

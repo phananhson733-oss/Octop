@@ -28,6 +28,7 @@ from octop.infra.utils.locale import Locale, normalize_locale
 
 if TYPE_CHECKING:
     from octop.infra.agents.manager import AgentManager
+    from octop.infra.gateway.hitl.resume_job import HitlResumeJob
     from octop.infra.gateway.slash.ctx import SlashCtx
 
 _log = logging.getLogger(__name__)
@@ -223,10 +224,32 @@ class HitlChannelCoordinator:
     ) -> None:
         self._store = store or HitlPendingStore()
         self.session_policies = session_policies or HitlSessionPolicyStore()
+        # Running dashboard resumes by thread. Holding them here keeps the task
+        # alive after its SSE request ends and lets Stop reach it.
+        self._resume_jobs: dict[str, HitlResumeJob] = {}
 
     @property
     def store(self) -> HitlPendingStore:
         return self._store
+
+    def track_resume_job(self, job: HitlResumeJob) -> None:
+        self._resume_jobs[job.thread_id] = job
+
+    def forget_resume_job(self, job: HitlResumeJob) -> None:
+        thread_id = job.thread_id
+        if self._resume_jobs.get(thread_id) is job:
+            del self._resume_jobs[thread_id]
+
+    def resume_running(self, thread_id: str) -> bool:
+        return thread_id.strip() in self._resume_jobs
+
+    def cancel_resume(self, thread_id: str) -> bool:
+        """Stop a running dashboard resume on *thread_id*; True when one was running."""
+        job = self._resume_jobs.get(thread_id.strip())
+        if job is None:
+            return False
+        job.cancel()
+        return True
 
     def register_from_request(
         self,
