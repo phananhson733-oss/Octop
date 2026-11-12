@@ -6019,6 +6019,8 @@
     "roleHiddenExpertTabsPlaceholder": "Leave empty to show every tab",
     "roleDefaultPublishedExpert": "Default expert template",
     "roleDefaultPublishedExpertHint": "Accounts in this role get an expert made from each of these templates (pick one or more): when the account is created, redeems an invite, or is moved into the role. Adding a template here and saving also gives it to accounts already in the role that lack it; removing one deletes no expert. An account that already has an expert from a template is skipped, and one that deleted its copy does not get it back when the role is saved again. The first template is the expert chat opens on. The choices are the experts published under Experts → Built-in Experts.",
+    "roleNoDefaultAssistant": "No general assistant",
+    "roleNoDefaultAssistantHint": "When on, accounts created in or invited to this role do not get the general assistant, only the expert templates above. Existing general assistants are not deleted.",
     "roleDefaultPublishedExpertPlaceholder": "Leave empty to create none",
     "roleDefaultExpertInstalled": "Role updated; the default expert was created for {{count}} existing accounts",
     "roleDefaultKnowledgeBases": "Knowledge bases on the default expert",

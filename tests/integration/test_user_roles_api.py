@@ -576,6 +576,86 @@ async def test_role_default_published_expert_reaches_its_accounts(env):
     assert fern_me.json()["default_published_expert"] == second_id
 
 
+async def test_role_can_turn_off_the_default_assistant(env):
+    c, _srv, auth = env
+    source = await c.post(
+        "/api/agents/from-expert/default", headers=auth, json={"name": "clip-source"}
+    )
+    assert source.status_code == 201, source.text
+    published = await c.post(
+        f"/api/agents/{source.json()['agent_id']}/publish-expert",
+        headers=auth,
+        json={"name": "剪辑专家", "description": "剪片"},
+    )
+    assert published.status_code == 201, published.text
+    expert_id = published.json()["id"]
+
+    bad = await c.post(
+        "/api/users/roles",
+        headers=auth,
+        json={
+            "user_role_name": "坏值",
+            "permissions": [],
+            "policies": [{"name": "default_assistant", "value": "on"}],
+        },
+    )
+    assert bad.status_code == 400, bad.text
+
+    policies = [
+        {"name": "default_published_expert", "value": expert_id},
+        {"name": "default_assistant", "value": "off"},
+    ]
+    role = await c.post(
+        "/api/users/roles",
+        headers=auth,
+        json={"user_role_name": "只剪辑", "permissions": [], "policies": policies},
+    )
+    assert role.status_code == 201, role.text
+    role_id = role.json()["user_role_id"]
+    assert {"name": "default_assistant", "value": "off"} in role.json()["policies"]
+
+    async def templates(headers: dict[str, str]) -> list[str | None]:
+        agents = await c.get("/api/agents", headers=headers)
+        assert agents.status_code == 200, agents.text
+        return [row["published_expert_id"] for row in agents.json()]
+
+    # An invited account gets only the role's expert, no general assistant.
+    invite = await c.post("/api/users/invites", headers=auth, json={"role": role_id})
+    assert invite.status_code == 201, invite.text
+    redeem = await c.post(
+        "/api/auth/invite/redeem",
+        json={"code": invite.json()["code"], "username": "otto", "password": TEST_PASSWORD},
+    )
+    assert redeem.status_code == 200, redeem.text
+    assert await templates(bearer(redeem.json()["access_token"])) == [expert_id]
+
+    # So does an account an admin creates in the role.
+    created = await c.post(
+        "/api/users",
+        headers=auth,
+        json={"username": "pia", "password": TEST_PASSWORD, "role": role_id},
+    )
+    assert created.status_code == 201, created.text
+    pia = bearer(await login(c, username="pia", password=TEST_PASSWORD))
+    assert await templates(pia) == [expert_id]
+
+    # Clearing the switch brings the assistant back for later accounts.
+    cleared = await c.patch(
+        f"/api/users/roles/{role_id}", headers=auth, json={"policies": policies[:1]}
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert all(p["name"] != "default_assistant" for p in cleared.json()["policies"])
+    invite = await c.post("/api/users/invites", headers=auth, json={"role": role_id})
+    redeem = await c.post(
+        "/api/auth/invite/redeem",
+        json={"code": invite.json()["code"], "username": "quill", "password": TEST_PASSWORD},
+    )
+    assert redeem.status_code == 200, redeem.text
+    assert sorted(map(str, await templates(bearer(redeem.json()["access_token"])))) == sorted(
+        ["None", expert_id]
+    )
+
+
 async def test_role_default_knowledge_bases_reach_the_first_expert(env):
     c, srv, auth = env
     admin_id = (await c.get("/api/auth/me", headers=auth)).json()["id"]

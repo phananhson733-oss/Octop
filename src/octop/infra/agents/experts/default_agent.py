@@ -23,6 +23,7 @@ from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.users.resource_policy import (
     POLICY_WORKSPACE_ROOT_DIR,
     effective_workspace_root_dir,
+    role_default_assistant_off,
     role_default_knowledge_bases,
     role_default_published_experts,
     role_visible_nav,
@@ -129,6 +130,9 @@ async def try_bootstrap_default_agent(
             logger.info(
                 "skip default agent bootstrap for user %s: no chat and no permissions", user_id
             )
+            return
+        if user is not None and role_default_assistant_off(server.services.db, user):
+            logger.info("skip default agent bootstrap for user %s: role turns it off", user_id)
             return
         await bootstrap_default_agent(
             server.app_runtime.agent_registry,

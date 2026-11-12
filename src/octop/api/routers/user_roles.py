@@ -28,6 +28,7 @@ from octop.infra.users.permissions import ALL_PERMISSION_KEYS, validate_permissi
 from octop.infra.users.plugin_access import POLICY_ALLOWED_PLUGIN_UI, normalize_plugin_ui_grants
 from octop.infra.users.resource_grants import normalize_resource_grants
 from octop.infra.users.resource_policy import (
+    POLICY_DEFAULT_ASSISTANT,
     POLICY_DEFAULT_KNOWLEDGE_BASES,
     POLICY_DEFAULT_PUBLISHED_EXPERT,
     POLICY_HIDDEN_EXPERT_TABS,
@@ -64,6 +65,7 @@ _KNOWN_POLICIES = {
     POLICY_DEFAULT_KNOWLEDGE_BASES,
     POLICY_HIDDEN_EXPERT_TABS,
     POLICY_DEFAULT_PUBLISHED_EXPERT,
+    POLICY_DEFAULT_ASSISTANT,
 }
 
 
@@ -210,6 +212,15 @@ def _policies_from_items(items: list[PolicyItem]) -> list[tuple[str, str]]:
                 normalize_plugin_ui_grants(by_name[POLICY_ALLOWED_PLUGIN_UI]),
             )
         )
+    assistant = (by_name.get(POLICY_DEFAULT_ASSISTANT) or "").strip()
+    if assistant and assistant != "off":
+        raise OctopError(
+            ErrorCode.FORBIDDEN,
+            f"{POLICY_DEFAULT_ASSISTANT} accepts only 'off'",
+            status=400,
+        )
+    if assistant:
+        normalized.append((POLICY_DEFAULT_ASSISTANT, assistant))
     scope = normalize_api_scope(by_name.get(POLICY_API_SCOPE))
     if scope:
         normalized.append((POLICY_API_SCOPE, scope))

@@ -80,6 +80,8 @@ interface RoleFormValues extends PolicyFormValues {
   hidden_expert_tabs?: string[];
   /** Templates installed for the role's accounts; the first opens chat. */
   default_published_experts?: string[];
+  /** New accounts skip the general assistant. */
+  no_default_assistant?: boolean;
 }
 
 const HOME_NAV_KEY = "chat";
@@ -127,6 +129,9 @@ function rolePolicies(
       name: "default_published_expert",
       value: values.default_published_experts.join(","),
     });
+  }
+  if (values.no_default_assistant) {
+    policies.push({ name: "default_assistant", value: "off" });
   }
   if (values.allowed_plugin_ui !== undefined) {
     policies.push({
@@ -292,6 +297,7 @@ export default function RolesPanel() {
           default_knowledge_bases: [],
           hidden_expert_tabs: [],
           default_published_experts: [],
+          no_default_assistant: false,
         }
       : {
           name: editor.user_role_name,
@@ -318,6 +324,9 @@ export default function RolesPanel() {
           default_knowledge_bases: editor.default_knowledge_bases ?? [],
           hidden_expert_tabs: editor.hidden_expert_tabs ?? [],
           default_published_experts: editor.default_published_experts ?? [],
+          no_default_assistant: editor.policies.some(
+            (p) => p.name === "default_assistant" && p.value === "off",
+          ),
         };
   const formKey =
     editor === "new" ? "new" : editor ? editor.user_role_id : "closed";
@@ -954,6 +963,14 @@ export default function RolesPanel() {
                       label: expert.name,
                     }))}
                   />
+                </Form.Item>
+                <Form.Item
+                  label={t("adminUsers.roleNoDefaultAssistant")}
+                  name="no_default_assistant"
+                  valuePropName="checked"
+                  extra={t("adminUsers.roleNoDefaultAssistantHint")}
+                >
+                  <Switch />
                 </Form.Item>
                 <Form.Item
                   label={t("adminUsers.roleDefaultKnowledgeBases")}

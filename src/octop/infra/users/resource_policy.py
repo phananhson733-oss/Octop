@@ -27,6 +27,8 @@ POLICY_DEFAULT_KNOWLEDGE_BASES = "default_knowledge_bases"
 POLICY_HIDDEN_EXPERT_TABS = "hidden_expert_tabs"
 # Read from the role template when an account joins the role.
 POLICY_DEFAULT_PUBLISHED_EXPERT = "default_published_expert"
+# Read from the role template when an account is created. "off" skips the general assistant.
+POLICY_DEFAULT_ASSISTANT = "default_assistant"
 # Tabs of the Experts page a role can hide. "My experts" always stays.
 EXPERT_TAB_KEYS = frozenset({"teams", "library", "market"})
 
@@ -123,6 +125,18 @@ def role_visible_nav(db: Any, user: Any) -> list[str] | None:
     if role is None:
         return None
     return visible_nav_of(role.policy_value(POLICY_VISIBLE_NAV))
+
+
+def role_default_assistant_off(db: Any, user: Any) -> bool:
+    """Whether the user's role template turns off the general assistant for new accounts."""
+    if user.is_admin:
+        return False
+    from octop.infra.db.repos.user_roles import UserRoleRepo
+
+    role = UserRoleRepo(db).get(str(user.role))
+    if role is None:
+        return False
+    return active_policy_value(role.policy_value(POLICY_DEFAULT_ASSISTANT)) == "off"
 
 
 def hidden_expert_tabs_of(raw: Any) -> list[str]:
