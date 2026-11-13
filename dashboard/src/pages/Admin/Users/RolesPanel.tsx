@@ -82,6 +82,8 @@ interface RoleFormValues extends PolicyFormValues {
   default_published_experts?: string[];
   /** New accounts skip the general assistant. */
   no_default_assistant?: boolean;
+  /** provider/model pinned on the experts the role installs. */
+  default_model?: string;
 }
 
 const HOME_NAV_KEY = "chat";
@@ -132,6 +134,12 @@ function rolePolicies(
   }
   if (values.no_default_assistant) {
     policies.push({ name: "default_assistant", value: "off" });
+  }
+  if (values.default_model?.trim()) {
+    policies.push({
+      name: "default_model",
+      value: values.default_model.trim(),
+    });
   }
   if (values.allowed_plugin_ui !== undefined) {
     policies.push({
@@ -298,6 +306,7 @@ export default function RolesPanel() {
           hidden_expert_tabs: [],
           default_published_experts: [],
           no_default_assistant: false,
+          default_model: "",
         }
       : {
           name: editor.user_role_name,
@@ -327,6 +336,9 @@ export default function RolesPanel() {
           no_default_assistant: editor.policies.some(
             (p) => p.name === "default_assistant" && p.value === "off",
           ),
+          default_model:
+            editor.policies.find((p) => p.name === "default_model")?.value ??
+            "",
         };
   const formKey =
     editor === "new" ? "new" : editor ? editor.user_role_id : "closed";
@@ -971,6 +983,19 @@ export default function RolesPanel() {
                   extra={t("adminUsers.roleNoDefaultAssistantHint")}
                 >
                   <Switch />
+                </Form.Item>
+                <Form.Item
+                  label={t("adminUsers.roleDefaultModel")}
+                  name="default_model"
+                  extra={t("adminUsers.roleDefaultModelHint")}
+                  rules={[
+                    {
+                      pattern: /^\s*$|^[^/\s]+\/\S+$/,
+                      message: t("adminUsers.roleDefaultModelInvalid"),
+                    },
+                  ]}
+                >
+                  <Input allowClear placeholder="provider/model" />
                 </Form.Item>
                 <Form.Item
                   label={t("adminUsers.roleDefaultKnowledgeBases")}

@@ -29,6 +29,8 @@ POLICY_HIDDEN_EXPERT_TABS = "hidden_expert_tabs"
 POLICY_DEFAULT_PUBLISHED_EXPERT = "default_published_expert"
 # Read from the role template when an account is created. "off" skips the general assistant.
 POLICY_DEFAULT_ASSISTANT = "default_assistant"
+# Read from the role template when an expert is installed for an account. A ``provider/model`` ref.
+POLICY_DEFAULT_MODEL = "default_model"
 # Tabs of the Experts page a role can hide. "My experts" always stays.
 EXPERT_TAB_KEYS = frozenset({"teams", "library", "market"})
 
@@ -205,6 +207,16 @@ def role_default_published_experts(db: Any, role_id: str) -> list[str]:
     if role is None or role.is_admin:
         return []
     return default_published_experts_of(role.policy_value(POLICY_DEFAULT_PUBLISHED_EXPERT))
+
+
+def role_default_model(db: Any, role_id: str) -> str | None:
+    """Model ref the role template *role_id* pins on the experts it installs, or ``None``."""
+    from octop.infra.db.repos.user_roles import UserRoleRepo
+
+    role = UserRoleRepo(db).get(role_id)
+    if role is None or role.is_admin:
+        return None
+    return active_policy_value(role.policy_value(POLICY_DEFAULT_MODEL))
 
 
 def public_policy_fields(rows: Sequence[Any] | Mapping[str, str] | None) -> dict[str, Any]:

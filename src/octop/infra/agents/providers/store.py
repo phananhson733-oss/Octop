@@ -126,6 +126,11 @@ def _model_dict_supports_image(model: dict[str, Any]) -> bool:
     return is_vision_model(model)
 
 
+def _auto_pick_allowed(model: dict[str, Any]) -> bool:
+    """False for a model marked ``"auto_route": false``: only chats that name it use it."""
+    return model.get("auto_route") is not False
+
+
 def enabled_model_refs(
     provider_name: str,
     models: list[dict[str, Any]],
@@ -274,7 +279,7 @@ class ProviderStore:
                     model, provider_name=row.name, provider_api_key=row.api_key
                 ):
                     continue
-                if _model_dict_supports_image(model):
+                if _model_dict_supports_image(model) and _auto_pick_allowed(model):
                     return f"{row.name}/{model['id']}"
         return None
 
@@ -299,7 +304,7 @@ class ProviderStore:
             for model in row.get_models():
                 if not is_chat_eligible_model(
                     model, provider_name=row.name, provider_api_key=row.api_key
-                ):
+                ) or not _auto_pick_allowed(model):
                     continue
                 model_id = str(model.get("id") or "").strip()
                 if model_id:
@@ -319,7 +324,7 @@ class ProviderStore:
                     model,
                     provider_name=row.name,
                     provider_api_key=row.api_key,
-                ):
+                ) or not _auto_pick_allowed(model):
                     continue
                 if needs_multimodal and not _model_dict_supports_image(model):
                     continue

@@ -656,6 +656,60 @@ async def test_role_can_turn_off_the_default_assistant(env):
     )
 
 
+async def test_role_default_model_reaches_installed_experts(env):
+    c, _srv, auth = env
+    source = await c.post(
+        "/api/agents/from-expert/default", headers=auth, json={"name": "clip-source"}
+    )
+    assert source.status_code == 201, source.text
+    published = await c.post(
+        f"/api/agents/{source.json()['agent_id']}/publish-expert",
+        headers=auth,
+        json={"name": "剪辑专家", "description": "剪片"},
+    )
+    assert published.status_code == 201, published.text
+    expert_id = published.json()["id"]
+
+    bad = await c.post(
+        "/api/users/roles",
+        headers=auth,
+        json={
+            "user_role_name": "坏模型",
+            "permissions": [],
+            "policies": [{"name": "default_model", "value": "luna"}],
+        },
+    )
+    assert bad.status_code == 400, bad.text
+
+    policies = [
+        {"name": "default_published_expert", "value": expert_id},
+        {"name": "default_assistant", "value": "off"},
+        {"name": "default_model", "value": "azure-luna/gpt-6-luna"},
+    ]
+    role = await c.post(
+        "/api/users/roles",
+        headers=auth,
+        json={"user_role_name": "内测剪辑", "permissions": [], "policies": policies},
+    )
+    assert role.status_code == 201, role.text
+    assert {"name": "default_model", "value": "azure-luna/gpt-6-luna"} in role.json()["policies"]
+
+    invite = await c.post(
+        "/api/users/invites", headers=auth, json={"role": role.json()["user_role_id"]}
+    )
+    assert invite.status_code == 201, invite.text
+    redeem = await c.post(
+        "/api/auth/invite/redeem",
+        json={"code": invite.json()["code"], "username": "rui", "password": TEST_PASSWORD},
+    )
+    assert redeem.status_code == 200, redeem.text
+    agents = await c.get("/api/agents", headers=bearer(redeem.json()["access_token"]))
+    assert agents.status_code == 200, agents.text
+    assert [(row["published_expert_id"], row["default_model"]) for row in agents.json()] == [
+        (expert_id, "azure-luna/gpt-6-luna")
+    ]
+
+
 async def test_role_default_knowledge_bases_reach_the_first_expert(env):
     c, srv, auth = env
     admin_id = (await c.get("/api/auth/me", headers=auth)).json()["id"]

@@ -39,7 +39,6 @@ const MAX_TOKENS_PRESETS = [
 ] as const;
 
 const DEFAULT_CONTEXT_WINDOW = 128_000;
-
 export interface LocalModelDownloadControl {
   /** Model ids already present on disk / in the local runtime. */
   downloadedIds: ReadonlySet<string> | readonly string[];
@@ -318,6 +317,10 @@ export function ModelListEditor({
       const existing = models.find((m) => m.id === editingModelId);
       if (existing) {
         entry.enabled = existing.enabled;
+        // Keep settings the form does not show.
+        if (existing.api_mode !== undefined) entry.api_mode = existing.api_mode;
+        if (existing.auto_route !== undefined)
+          entry.auto_route = existing.auto_route;
       }
       onModelsChange(models.map((m) => (m.id === editingModelId ? entry : m)));
       message.success(t("models.modelUpdated", { name: entry.name }));
