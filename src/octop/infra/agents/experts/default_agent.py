@@ -25,6 +25,7 @@ from octop.infra.users.resource_policy import (
     effective_workspace_root_dir,
     role_default_assistant_off,
     role_default_knowledge_bases,
+    role_default_model,
     role_default_published_experts,
     role_visible_nav,
 )
@@ -199,6 +200,7 @@ async def install_role_published_expert(
             ),
             knowledge_base_ids=role_knowledge_base_ids(server, user_id),
             welcome_message=welcome or None,
+            default_model=role_default_model(server.services.db, str(user.role)),
         ),
     )
 

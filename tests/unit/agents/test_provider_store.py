@@ -433,3 +433,29 @@ def test_list_auto_route_candidates_filters_and_preserves_capacity(
     assert [(item.ref, item.max_input_tokens) for item in vision_candidates] == [
         ("p/vision", 32_000)
     ]
+
+
+def test_model_marked_auto_route_false_is_only_used_by_name(store: ProviderStore) -> None:
+    store._provider_repo.create(
+        name="paid",
+        kind="openai",
+        base_url="https://api.example.com/v1",
+        api_key="sk-test",
+        models_json=json.dumps(
+            [{"id": "luna", "enabled": True, "input": ["text", "image"], "auto_route": False}]
+        ),
+    )
+    store._provider_repo.create(
+        name="p",
+        kind="openai",
+        base_url="https://api.example.com/v1",
+        api_key="sk-test",
+        models_json=json.dumps([{"id": "text", "enabled": True, "input": ["text"]}]),
+    )
+
+    assert [c.ref for c in store.list_auto_route_candidates(needs_multimodal=False)] == ["p/text"]
+    assert store.list_auto_route_candidates(needs_multimodal=True) == []
+    assert store.resolve_first_model_ref() == "p/text"
+    assert store.resolve_multimodal_model_ref() is None
+    assert store.is_model_ref_usable("paid/luna")
+    assert {m.id for c in store.build_harness_configs() for m in c.models} == {"luna", "text"}

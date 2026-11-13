@@ -30,6 +30,7 @@ from octop.infra.users.resource_grants import normalize_resource_grants
 from octop.infra.users.resource_policy import (
     POLICY_DEFAULT_ASSISTANT,
     POLICY_DEFAULT_KNOWLEDGE_BASES,
+    POLICY_DEFAULT_MODEL,
     POLICY_DEFAULT_PUBLISHED_EXPERT,
     POLICY_HIDDEN_EXPERT_TABS,
     POLICY_MAX_AGENTS,
@@ -66,6 +67,7 @@ _KNOWN_POLICIES = {
     POLICY_HIDDEN_EXPERT_TABS,
     POLICY_DEFAULT_PUBLISHED_EXPERT,
     POLICY_DEFAULT_ASSISTANT,
+    POLICY_DEFAULT_MODEL,
 }
 
 
@@ -221,6 +223,16 @@ def _policies_from_items(items: list[PolicyItem]) -> list[tuple[str, str]]:
         )
     if assistant:
         normalized.append((POLICY_DEFAULT_ASSISTANT, assistant))
+    model = (by_name.get(POLICY_DEFAULT_MODEL) or "").strip()
+    provider, _, model_id = model.partition("/")
+    if model and (not provider.strip() or not model_id.strip()):
+        raise OctopError(
+            ErrorCode.FORBIDDEN,
+            f"{POLICY_DEFAULT_MODEL} must be provider/model",
+            status=400,
+        )
+    if model:
+        normalized.append((POLICY_DEFAULT_MODEL, model))
     scope = normalize_api_scope(by_name.get(POLICY_API_SCOPE))
     if scope:
         normalized.append((POLICY_API_SCOPE, scope))
