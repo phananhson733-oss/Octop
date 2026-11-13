@@ -491,6 +491,21 @@ class UsageRepo:
             return 0
         return int(row["input_tokens"] or 0)
 
+    def token_totals_by_model_for_user(
+        self, user_id: int, *, since: int = 0
+    ) -> list[tuple[str, int, int]]:
+        """``(model, input_tokens, output_tokens)`` per model for one user since *since*."""
+        with self._db.connect() as conn:
+            rows = conn.execute(
+                "SELECT model, COALESCE(SUM(input_tokens), 0) AS input_tokens,"
+                " COALESCE(SUM(output_tokens), 0) AS output_tokens FROM usage_log"
+                " WHERE user_id = ? AND ts >= ? GROUP BY model",
+                (user_id, since),
+            ).fetchall()
+        return [
+            (str(r["model"] or ""), int(r["input_tokens"]), int(r["output_tokens"])) for r in rows
+        ]
+
     def total_tokens_for_user(self, user_id: int, *, since: int = 0) -> int:
         """``total_tokens`` for one user (all agents and sources) logged at or after *since*."""
         with self._db.connect() as conn:

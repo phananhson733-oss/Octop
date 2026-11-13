@@ -123,6 +123,7 @@ interface UserRow {
   workspace_root_dir?: string | null;
   token_quota?: number | null;
   max_agents?: number | null;
+  monthly_budget_usd?: number | null;
 }
 
 export interface PermissionCatalogItem {
@@ -145,6 +146,8 @@ export interface PolicyFormValues {
   token_quota?: number | null;
   limit_max_agents?: boolean;
   max_agents?: number | null;
+  limit_monthly_budget?: boolean;
+  monthly_budget_usd?: number | null;
 }
 
 interface CreateValues extends PolicyFormValues {
@@ -183,6 +186,8 @@ function policyFieldsFromRole(
     token_quota: role.token_quota ?? undefined,
     limit_max_agents: role.max_agents != null,
     max_agents: role.max_agents ?? undefined,
+    limit_monthly_budget: role.monthly_budget_usd != null,
+    monthly_budget_usd: role.monthly_budget_usd ?? undefined,
   };
 }
 
@@ -461,6 +466,7 @@ export function policyPayload(
   workspace_root_dir: string | null;
   token_quota: number | null;
   max_agents: number | null;
+  monthly_budget_usd: number | null;
 } {
   return {
     workspace_root_dir:
@@ -469,6 +475,9 @@ export function policyPayload(
         : null,
     token_quota: values.limit_token_quota ? values.token_quota ?? null : null,
     max_agents: values.limit_max_agents ? values.max_agents ?? null : null,
+    monthly_budget_usd: values.limit_monthly_budget
+      ? values.monthly_budget_usd ?? null
+      : null,
   };
 }
 
@@ -489,6 +498,12 @@ export function rolePoliciesFromForm(
   }
   if (flat.max_agents != null) {
     policies.push({ name: "max_agents", value: String(flat.max_agents) });
+  }
+  if (flat.monthly_budget_usd != null) {
+    policies.push({
+      name: "monthly_budget_usd",
+      value: String(flat.monthly_budget_usd),
+    });
   }
   return policies;
 }
@@ -694,6 +709,42 @@ export function ResourcePolicyFields({
               ]}
             >
               <TokenQuotaInput />
+            </Form.Item>
+          ) : null
+        }
+      </Form.Item>
+      <Form.Item
+        label={t("adminUsers.policyMonthlyBudget")}
+        extra={t("adminUsers.policyMonthlyBudgetHint")}
+      >
+        <Form.Item name="limit_monthly_budget" valuePropName="checked" noStyle>
+          <Switch />
+        </Form.Item>
+      </Form.Item>
+      <Form.Item
+        noStyle
+        shouldUpdate={(prev, cur) =>
+          prev.limit_monthly_budget !== cur.limit_monthly_budget
+        }
+      >
+        {({ getFieldValue }) =>
+          getFieldValue("limit_monthly_budget") ? (
+            <Form.Item
+              name="monthly_budget_usd"
+              rules={[
+                {
+                  required: true,
+                  message: t("adminUsers.policyMonthlyBudgetRequired"),
+                },
+              ]}
+            >
+              <InputNumber
+                min={0}
+                step={1}
+                prefix="$"
+                style={{ width: "100%" }}
+                placeholder={t("adminUsers.policyMonthlyBudgetPlaceholder")}
+              />
             </Form.Item>
           ) : null
         }
@@ -1719,6 +1770,8 @@ export default function UsersListPanel() {
       token_quota: undefined,
       limit_max_agents: false,
       max_agents: undefined,
+      limit_monthly_budget: false,
+      monthly_budget_usd: undefined,
       ...(userRole ? policyFieldsFromRole(userRole, workspaceRootAllowed) : {}),
     });
     setPendingUserAvatar(null);
@@ -1749,6 +1802,8 @@ export default function UsersListPanel() {
       token_quota: row.token_quota ?? undefined,
       limit_max_agents: row.max_agents != null,
       max_agents: row.max_agents ?? undefined,
+      limit_monthly_budget: row.monthly_budget_usd != null,
+      monthly_budget_usd: row.monthly_budget_usd ?? undefined,
     });
   };
 
@@ -2322,6 +2377,7 @@ export default function UsersListPanel() {
             limit_workspace_root: false,
             limit_token_quota: false,
             limit_max_agents: false,
+            limit_monthly_budget: false,
           }}
           className={styles.createUserForm}
         >

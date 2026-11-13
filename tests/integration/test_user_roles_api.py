@@ -942,3 +942,60 @@ async def test_delegated_manager_batch_protects_admin_and_does_not_grant_templat
     assert result.status_code == 200, result.text
     assert not srv.user_manager.get_row(admin.id).disabled
     assert srv.user_manager.get_row(target.id).disabled
+
+
+async def test_role_monthly_budget_reaches_invited_accounts(env):
+    c, _srv, auth = env
+    bad = await c.post(
+        "/api/users/roles",
+        headers=auth,
+        json={
+            "user_role_name": "负预算",
+            "permissions": [],
+            "policies": [{"name": "monthly_budget_usd", "value": "-1"}],
+        },
+    )
+    assert bad.status_code == 400, bad.text
+    for junk in ("abc", "Infinity"):
+        bad = await c.post(
+            "/api/users/roles",
+            headers=auth,
+            json={
+                "user_role_name": f"坏预算{junk}",
+                "permissions": [],
+                "policies": [{"name": "monthly_budget_usd", "value": junk}],
+            },
+        )
+        assert bad.status_code == 400, bad.text
+
+    role = await c.post(
+        "/api/users/roles",
+        headers=auth,
+        json={
+            "user_role_name": "月预算",
+            "permissions": [],
+            "policies": [{"name": "monthly_budget_usd", "value": "20"}],
+        },
+    )
+    assert role.status_code == 201, role.text
+    assert role.json()["monthly_budget_usd"] == 20.0
+
+    invite = await c.post(
+        "/api/users/invites", headers=auth, json={"role": role.json()["user_role_id"]}
+    )
+    assert invite.status_code == 201, invite.text
+    redeem = await c.post(
+        "/api/auth/invite/redeem",
+        json={"code": invite.json()["code"], "username": "budget", "password": TEST_PASSWORD},
+    )
+    assert redeem.status_code == 200, redeem.text
+    users = (await c.get("/api/users", headers=auth)).json()
+    rows = users["items"] if isinstance(users, dict) else users
+    row = next(u for u in rows if u["username"] == "budget")
+    assert row["monthly_budget_usd"] == 20.0
+
+    patched = await c.patch(f"/api/users/{row['id']}", headers=auth, json={"monthly_budget_usd": 5})
+    assert patched.status_code == 200, patched.text
+    users = (await c.get("/api/users", headers=auth)).json()
+    rows = users["items"] if isinstance(users, dict) else users
+    assert next(u for u in rows if u["username"] == "budget")["monthly_budget_usd"] == 5.0

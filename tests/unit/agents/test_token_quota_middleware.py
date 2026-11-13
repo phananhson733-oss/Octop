@@ -69,3 +69,27 @@ async def test_token_quota_middleware_async_hook_rejects(
         await middleware.abefore_agent({}, None)
 
     assert exc.value.code is ErrorCode.TOKEN_QUOTA_EXCEEDED
+
+
+def test_token_quota_middleware_rejects_user_over_monthly_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    policies = Mock()
+    policies.get.side_effect = lambda _uid, name: (
+        SimpleNamespace(enabled=True, value="1") if name == "monthly_budget_usd" else None
+    )
+    usage = Mock()
+    usage.token_totals_by_model_for_user.return_value = [("luna", 10_000_000, 0)]
+    monkeypatch.setattr(
+        "octop.infra.agents.middleware.token_quota.get_config",
+        lambda: {"configurable": {"user": 4}},
+    )
+
+    middleware = TokenQuotaMiddleware(
+        policy_repo=policies, usage_repo=usage, prices=lambda: {"luna": (0.12, 0.6)}
+    )
+    with pytest.raises(OctopError) as exc:
+        middleware.before_agent({}, None)
+
+    assert exc.value.code is ErrorCode.MONTHLY_BUDGET_EXCEEDED
+    usage.total_tokens_for_user.assert_not_called()

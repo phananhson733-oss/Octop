@@ -589,12 +589,15 @@ class UserManager:
         workspace_root_dir: Any = UNSET,
         token_quota: Any = UNSET,
         max_agents: Any = UNSET,
+        monthly_budget_usd: Any = UNSET,
     ) -> None:
         from octop.infra.users.resource_policy import (
             POLICY_MAX_AGENTS,
+            POLICY_MONTHLY_BUDGET_USD,
             POLICY_TOKEN_QUOTA,
             POLICY_WORKSPACE_ROOT_DIR,
             normalize_max_agents,
+            normalize_monthly_budget_usd,
             normalize_token_quota,
             normalize_workspace_root_dir,
         )
@@ -606,6 +609,7 @@ class UserManager:
         root_arg: Any = UNSET
         quota_arg: Any = UNSET
         max_agents_arg: Any = UNSET
+        budget_arg: Any = UNSET
         if workspace_root_dir is not UNSET:
             root_arg = normalize_workspace_root_dir(workspace_root_dir)
             updates[POLICY_WORKSPACE_ROOT_DIR] = root_arg
@@ -615,6 +619,9 @@ class UserManager:
         if max_agents is not UNSET:
             max_agents_arg = normalize_max_agents(max_agents)
             updates[POLICY_MAX_AGENTS] = None if max_agents_arg is None else str(max_agents_arg)
+        if monthly_budget_usd is not UNSET:
+            budget_arg = normalize_monthly_budget_usd(monthly_budget_usd)
+            updates[POLICY_MONTHLY_BUDGET_USD] = None if budget_arg is None else str(budget_arg)
         if not updates:
             return
         with self._services.db.transaction() as conn:
@@ -642,6 +649,13 @@ class UserManager:
                 action="user.set_max_agents",
                 target=username,
                 payload=str(max_agents_arg) if max_agents_arg is not None else "",
+            )
+        if monthly_budget_usd is not UNSET:
+            self._services.audit_repo.write(
+                actor=ACTOR_ADMIN,
+                action="user.set_monthly_budget_usd",
+                target=username,
+                payload=str(budget_arg) if budget_arg is not None else "",
             )
 
     async def set_workspace_root_dir(self, username: str, workspace_root_dir: str | None) -> None:

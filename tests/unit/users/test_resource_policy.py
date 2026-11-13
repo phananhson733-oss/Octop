@@ -17,10 +17,12 @@ from octop.infra.db.repos.users import UserRepo
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.users.resource_policy import (
     POLICY_MAX_AGENTS,
+    POLICY_MONTHLY_BUDGET_USD,
     POLICY_TOKEN_QUOTA,
     POLICY_WORKSPACE_ROOT_DIR,
     assert_agent_quota_available,
     assert_backend_within_user_root,
+    assert_monthly_budget_available,
     assert_token_quota_available,
     create_expert_within_quota,
     month_start_ts,
@@ -217,6 +219,7 @@ def test_user_policy_repo_named_rows(db: SqlitePool, tmp_path: Path) -> None:
     assert public_policy_fields(policies.list_for_user(uid)) == {
         "workspace_root_dir": str(jail),
         "token_quota": 42,
+        "monthly_budget_usd": None,
         "max_agents": None,
     }
     root = policies.get(uid, POLICY_WORKSPACE_ROOT_DIR)
@@ -357,3 +360,57 @@ def test_migration_rebuilds_legacy_kv_table(tmp_path: Path) -> None:
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(user_policies)")}
     assert "key" not in cols
     assert "policy_id" in cols
+
+
+def test_monthly_budget_prices_this_months_usage(db: SqlitePool) -> None:
+    users = UserRepo(db)
+    policies = UserPolicyRepo(db)
+    usage = UsageRepo(db)
+    uid = users.create(username="carol", password_hash="h", role="user")
+    AgentRepo(db).create(agent_id="c1", user_id=uid, name="c")
+    prices = {"luna": (0.12, 0.60)}
+
+    def check() -> None:
+        assert_monthly_budget_available(
+            policies, usage, uid, prices=lambda: prices, timezone="Asia/Shanghai"
+        )
+
+    check()  # no budget set
+    policies.set(uid, POLICY_MONTHLY_BUDGET_USD, "1")
+    start = month_start_ts("Asia/Shanghai")
+    # Last month and an unpriced model do not count.
+    usage.record(
+        agent_id="c1",
+        user_id=uid,
+        input_tokens=50_000_000,
+        output_tokens=0,
+        model="luna",
+        ts=start - 1,
+    )
+    usage.record(
+        agent_id="c1",
+        user_id=uid,
+        input_tokens=50_000_000,
+        output_tokens=0,
+        model="codex",
+        ts=start,
+    )
+    # 0.12 * 5 + 0.60 * 0.5 = 0.90 USD
+    usage.record(
+        agent_id="c1",
+        user_id=uid,
+        input_tokens=5_000_000,
+        output_tokens=500_000,
+        model="luna",
+        ts=start,
+    )
+    check()
+    # +0.12 = 1.02 USD
+    usage.record(
+        agent_id="c1", user_id=uid, input_tokens=1_000_000, output_tokens=0, model="luna", ts=start
+    )
+    with pytest.raises(OctopError) as exc:
+        check()
+    assert exc.value.code is ErrorCode.MONTHLY_BUDGET_EXCEEDED
+    assert exc.value.details == {"used": "1.02", "quota": "1.00"}
+    assert public_policy_fields({POLICY_MONTHLY_BUDGET_USD: "20"})["monthly_budget_usd"] == 20.0

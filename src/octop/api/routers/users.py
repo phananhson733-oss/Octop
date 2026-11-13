@@ -25,6 +25,7 @@ from octop.infra.users.permissions import (
 )
 from octop.infra.users.resource_policy import (
     normalize_max_agents,
+    normalize_monthly_budget_usd,
     normalize_token_quota,
     normalize_workspace_root_dir,
     public_policy_fields,
@@ -51,6 +52,12 @@ class UserCreateBody(BaseModel):
     workspace_root_dir: str | None = None
     token_quota: int | None = Field(default=None, ge=0)
     max_agents: int | None = Field(default=None, ge=0)
+    monthly_budget_usd: float | None = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+        description="USD the account may spend per calendar month (server timezone). null = no limit.",
+    )
 
 
 class UserPatchBody(BaseModel):
@@ -67,6 +74,12 @@ class UserPatchBody(BaseModel):
     workspace_root_dir: str | None = None
     token_quota: int | None = Field(default=None, ge=0)
     max_agents: int | None = Field(default=None, ge=0)
+    monthly_budget_usd: float | None = Field(
+        default=None,
+        ge=0,
+        allow_inf_nan=False,
+        description="USD the account may spend per calendar month (server timezone). null = no limit.",
+    )
 
 
 class ResetPasswordBody(BaseModel):
@@ -183,6 +196,8 @@ def _policy_kwargs_from_body(body: UserCreateBody | UserPatchBody) -> dict[str, 
         policy_kwargs["token_quota"] = body.token_quota
     if "max_agents" in body.model_fields_set:
         policy_kwargs["max_agents"] = body.max_agents
+    if "monthly_budget_usd" in body.model_fields_set:
+        policy_kwargs["monthly_budget_usd"] = body.monthly_budget_usd
     return policy_kwargs
 
 
@@ -288,6 +303,8 @@ async def create_user(
         normalize_token_quota(policy_kwargs["token_quota"])
     if "max_agents" in policy_kwargs:
         normalize_max_agents(policy_kwargs["max_agents"])
+    if "monthly_budget_usd" in policy_kwargs:
+        normalize_monthly_budget_usd(policy_kwargs["monthly_budget_usd"])
     role_name = (
         _clean_role_name(body.role_name) if "role_name" in body.model_fields_set else template_name
     )

@@ -34,9 +34,11 @@ def policy_kwargs_replace_from_pairs(pairs: list[tuple[str, str]]) -> dict[str, 
     """
     from octop.infra.users.resource_policy import (
         POLICY_MAX_AGENTS,
+        POLICY_MONTHLY_BUDGET_USD,
         POLICY_TOKEN_QUOTA,
         POLICY_WORKSPACE_ROOT_DIR,
         max_agents_of,
+        monthly_budget_usd_of,
         token_quota_of,
     )
 
@@ -45,4 +47,5 @@ def policy_kwargs_replace_from_pairs(pairs: list[tuple[str, str]]) -> dict[str, 
         "workspace_root_dir": by_name.get(POLICY_WORKSPACE_ROOT_DIR),
         "token_quota": token_quota_of(by_name.get(POLICY_TOKEN_QUOTA)),
         "max_agents": max_agents_of(by_name.get(POLICY_MAX_AGENTS)),
+        "monthly_budget_usd": monthly_budget_usd_of(by_name.get(POLICY_MONTHLY_BUDGET_USD)),
     }

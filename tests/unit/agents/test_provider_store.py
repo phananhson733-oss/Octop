@@ -459,3 +459,27 @@ def test_model_marked_auto_route_false_is_only_used_by_name(store: ProviderStore
     assert store.resolve_multimodal_model_ref() is None
     assert store.is_model_ref_usable("paid/luna")
     assert {m.id for c in store.build_harness_configs() for m in c.models} == {"luna", "text"}
+
+
+def test_model_prices_read_from_provider_models(store: ProviderStore) -> None:
+    store._provider_repo.create(
+        name="gateway",
+        kind="openai",
+        base_url="https://api.example.com/v1",
+        api_key="sk-test",
+        models_json=json.dumps(
+            [
+                {
+                    "id": "luna",
+                    "enabled": True,
+                    "input_cost_per_mtok": 0.12,
+                    "output_cost_per_mtok": 0.6,
+                },
+                {"id": "free", "enabled": True},
+                {"id": "bad", "enabled": True, "input_cost_per_mtok": "x"},
+                {"id": "nan", "enabled": True, "input_cost_per_mtok": "NaN"},
+                {"id": "neg", "enabled": True, "output_cost_per_mtok": -1},
+            ]
+        ),
+    )
+    assert store.model_prices() == {"luna": (0.12, 0.6)}
