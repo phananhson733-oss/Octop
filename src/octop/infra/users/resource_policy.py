@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -97,16 +98,17 @@ def token_quota_of(raw: Any) -> int | None:
 
 def monthly_budget_usd_of(raw: Any) -> float | None:
     if isinstance(raw, (int, float)) and not isinstance(raw, bool):
-        return float(raw)
+        return float(raw) if math.isfinite(raw) else None
     if isinstance(raw, Mapping) and "value" not in raw:
         raw = raw.get(POLICY_MONTHLY_BUDGET_USD)
     text = active_policy_value(raw)
     if text is None:
         return None
     try:
-        return float(text)
+        budget = float(text)
     except (TypeError, ValueError):
         return None
+    return budget if math.isfinite(budget) else None
 
 
 def max_agents_of(raw: Any) -> int | None:
@@ -302,7 +304,7 @@ def normalize_monthly_budget_usd(raw: float | None) -> float | None:
     if raw is None:
         return None
     budget = float(raw)
-    if not budget >= 0:
+    if not (math.isfinite(budget) and budget >= 0):
         raise OctopError(ErrorCode.FORBIDDEN, "monthly budget must be >= 0", status=400)
     return budget
 

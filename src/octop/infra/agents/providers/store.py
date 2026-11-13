@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -220,9 +221,11 @@ class ProviderStore:
                 if raw_in is None and raw_out is None:
                     continue
                 try:
-                    prices[model_id] = (float(raw_in or 0), float(raw_out or 0))
+                    price = (float(raw_in or 0), float(raw_out or 0))
                 except (TypeError, ValueError):
                     continue
+                if all(math.isfinite(v) and v >= 0 for v in price):
+                    prices[model_id] = price
         return prices
 
     def has_usable_providers(self) -> bool:

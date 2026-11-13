@@ -55,6 +55,7 @@ class UserCreateBody(BaseModel):
     monthly_budget_usd: float | None = Field(
         default=None,
         ge=0,
+        allow_inf_nan=False,
         description="USD the account may spend per calendar month (server timezone). null = no limit.",
     )
 
@@ -76,6 +77,7 @@ class UserPatchBody(BaseModel):
     monthly_budget_usd: float | None = Field(
         default=None,
         ge=0,
+        allow_inf_nan=False,
         description="USD the account may spend per calendar month (server timezone). null = no limit.",
     )
 

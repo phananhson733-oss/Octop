@@ -956,6 +956,17 @@ async def test_role_monthly_budget_reaches_invited_accounts(env):
         },
     )
     assert bad.status_code == 400, bad.text
+    for junk in ("abc", "Infinity"):
+        bad = await c.post(
+            "/api/users/roles",
+            headers=auth,
+            json={
+                "user_role_name": f"坏预算{junk}",
+                "permissions": [],
+                "policies": [{"name": "monthly_budget_usd", "value": junk}],
+            },
+        )
+        assert bad.status_code == 400, bad.text
 
     role = await c.post(
         "/api/users/roles",

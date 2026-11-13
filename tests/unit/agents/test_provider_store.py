@@ -477,6 +477,8 @@ def test_model_prices_read_from_provider_models(store: ProviderStore) -> None:
                 },
                 {"id": "free", "enabled": True},
                 {"id": "bad", "enabled": True, "input_cost_per_mtok": "x"},
+                {"id": "nan", "enabled": True, "input_cost_per_mtok": "NaN"},
+                {"id": "neg", "enabled": True, "output_cost_per_mtok": -1},
             ]
         ),
     )
