@@ -47,7 +47,7 @@ import {
 } from "../utils/chatNavScope";
 import ChatNavScopeTabs, { ChatNavScopeEmpty } from "./ChatNavScopeTabs";
 import ExpertNameLabel from "./ExpertNameLabel";
-import ExpertNavActions from "./ExpertNavActions";
+import ExpertNavActions, { ExpertNewChatRow } from "./ExpertNavActions";
 import {
   resolveSessionWorkStatus,
   type SessionWorkStatus,
@@ -380,6 +380,12 @@ function ActiveAgentCard({
       </div>
 
       <div className={styles.agentCardSessions}>
+        {sessionsEnabled && !searchQuery.trim() ? (
+          <ExpertNewChatRow
+            active={activeId === null}
+            onNewChat={() => onNewChat(agent.agent_id)}
+          />
+        ) : null}
         {!sessionsEnabled ? (
           <div className={styles.agentCardSessionsEmpty}>
             {t("chat.agentNotRunningHint")}

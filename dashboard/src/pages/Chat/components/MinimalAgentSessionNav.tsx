@@ -49,7 +49,7 @@ import RemoteExpertHint from "./RemoteExpertHint";
 import SessionWorkStatusIcon from "./SessionWorkStatusIcon";
 import TeamChatBadge from "./TeamChatBadge";
 import ExpertNameLabel from "./ExpertNameLabel";
-import ExpertNavActions from "./ExpertNavActions";
+import ExpertNavActions, { ExpertNewChatRow } from "./ExpertNavActions";
 import styles from "../index.module.less";
 
 /** Default preview size per expert in minimal nav (matches session page size). */
@@ -674,6 +674,15 @@ export default function MinimalAgentSessionNav({
 
             {expanded ? (
               <div className={styles.minimalAgentSessions}>
+                {ready && !searching ? (
+                  <ExpertNewChatRow
+                    compact
+                    active={
+                      activeId === null && agent.agent_id === activeAgentId
+                    }
+                    onNewChat={() => onNewChat(agent.agent_id)}
+                  />
+                ) : null}
                 {!ready ? (
                   <div className={styles.minimalAgentEmpty}>
                     {t("chat.agentNotRunningHint")}
