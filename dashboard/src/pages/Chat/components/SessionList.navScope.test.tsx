@@ -161,6 +161,37 @@ function LocationProbe() {
   );
 }
 
+describe("SessionList new-chat row", () => {
+  it("shows a 新建对话 row under the active expert that starts a chat", async () => {
+    const user = userEvent.setup();
+    const onNewChat = vi.fn();
+    render(
+      <MemoryRouter>
+        <SessionList
+          agents={[agents[0]]}
+          sessions={[]}
+          activeId={null}
+          activeAgentId="local-expert"
+          hasMore={false}
+          loadingMore={false}
+          onLoadMore={() => undefined}
+          onFetchAllSessions={() => undefined}
+          onSelect={() => undefined}
+          onAgentSelect={() => undefined}
+          onNewChat={onNewChat}
+          onDelete={() => undefined}
+          onRename={() => undefined}
+          onPin={() => undefined}
+          onFork={() => undefined}
+        />
+      </MemoryRouter>,
+    );
+
+    await user.click(screen.getByText(/^(新建对话|chatWelcome\.newChat)$/));
+    expect(onNewChat).toHaveBeenCalledWith("local-expert");
+  });
+});
+
 describe("SessionList nav scopes", () => {
   it("filters experts, teams, and cloud under the search box", async () => {
     const user = userEvent.setup();

@@ -74,3 +74,30 @@ export default function ExpertNavActions({
     </span>
   );
 }
+
+/** Always-visible "new chat" row at the top of an expert's session list. */
+export function ExpertNewChatRow({
+  active,
+  compact,
+  onNewChat,
+}: {
+  active: boolean;
+  compact?: boolean;
+  onNewChat: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <button
+      type="button"
+      className={`${styles.sessionRow} ${
+        compact ? styles.sessionRowCompact : ""
+      } ${styles.expertNewChatRow} ${active ? styles.sessionRowActive : ""}`}
+      onClick={onNewChat}
+    >
+      <span className={styles.sessionRowLead}>
+        <MessageSquarePlus size={14} strokeWidth={2} aria-hidden />
+      </span>
+      <span className={styles.sessionRowTitle}>{t("chatWelcome.newChat")}</span>
+    </button>
+  );
+}
