@@ -5,7 +5,10 @@ import { describe, expect, it, vi } from "vitest";
 import { ModelListEditor } from "./ModelListEditor";
 import type { ProviderModel, ProviderRow } from "../../useProviders";
 
-function renderEditor(models: ProviderModel[]) {
+function renderEditor(
+  models: ProviderModel[],
+  onModelsChange: (models: ProviderModel[]) => void = vi.fn(),
+) {
   const provider: ProviderRow = {
     id: 1,
     name: "mindie",
@@ -21,7 +24,7 @@ function renderEditor(models: ProviderModel[]) {
       <ModelListEditor
         provider={provider}
         models={models}
-        onModelsChange={vi.fn()}
+        onModelsChange={onModelsChange}
         canTest={false}
       />
     </App>,
@@ -51,5 +54,36 @@ describe("ModelListEditor", () => {
       screen.getByRole("button", { name: "models.showAdvanced" }),
     );
     expect(screen.getByText("models.reasoning")).toBeInTheDocument();
+  });
+
+  it("keeps settings the form does not show when a model is edited", async () => {
+    const user = userEvent.setup();
+    HTMLElement.prototype.scrollIntoView = vi.fn();
+    const onModelsChange = vi.fn();
+    renderEditor(
+      [
+        {
+          id: "luna",
+          name: "Luna",
+          enabled: true,
+          input: ["text", "image"],
+          api_mode: "responses",
+          auto_route: false,
+        },
+      ],
+      onModelsChange,
+    );
+
+    await user.click(screen.getByRole("button", { name: "models.editModel" }));
+    await screen.findByDisplayValue("luna");
+    await user.click(screen.getByRole("button", { name: "models.saveEdit" }));
+
+    expect(onModelsChange).toHaveBeenCalledWith([
+      expect.objectContaining({
+        id: "luna",
+        api_mode: "responses",
+        auto_route: false,
+      }),
+    ]);
   });
 });

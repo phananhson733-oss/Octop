@@ -25,6 +25,10 @@ export interface ProviderModel {
   /** Embedding-only: excluded from chat picker and auto-route. */
   embedding?: boolean;
   task?: string;
+  /** "responses" calls the model through the Responses API. Not in the form. */
+  api_mode?: string;
+  /** false: only chats and experts that name this model use it. Not in the form. */
+  auto_route?: boolean;
 }
 
 export function isEmbeddingModel(
