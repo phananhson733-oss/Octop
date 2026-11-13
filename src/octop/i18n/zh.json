@@ -515,7 +515,7 @@
     "INVITE_RATE_LIMITED": "邀请尝试次数过多，请稍后再试。",
     "WORKSPACE_ROOT_RESTRICTED": "所选存储根目录超出了该账号允许的范围。",
     "WORKSPACE_ROOT_CONTAINER_UNSUPPORTED": "容器环境下不能设置「允许的存储根目录」。",
-    "TOKEN_QUOTA_EXCEEDED": "该账号已达到 token 配额上限，请联系管理员提升额度（{used}/{quota}）。",
+    "TOKEN_QUOTA_EXCEEDED": "该账号本月的 token 配额已用完，下月 1 号清零，或请联系管理员提升额度（{used}/{quota}）。",
     "EXPERT_ASSIGNMENT_CONFLICT": "请刷新专家分配预检，查看当前需要处理的项目。",
     "AGENT_QUOTA_EXCEEDED": "该账号已达到专家数量上限，请联系管理员提升额度（{used}/{quota}）。",
     "CAPTCHA_REQUIRED": "此服务器登录需要验证码令牌。",
