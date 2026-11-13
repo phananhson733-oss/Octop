@@ -23,6 +23,7 @@ from octop.infra.users.resource_policy import (
     assert_backend_within_user_root,
     assert_token_quota_available,
     create_expert_within_quota,
+    month_start_ts,
     normalize_workspace_root_dir,
     public_policy_fields,
 )
@@ -116,6 +117,30 @@ def test_assert_token_quota_available(db: SqlitePool) -> None:
     assert exc.value.details["quota"] == 10
     policies.set(uid, POLICY_TOKEN_QUOTA, "11")
     assert_token_quota_available(policies, usage, uid)
+
+
+def test_token_quota_counts_only_this_month(db: SqlitePool) -> None:
+    users = UserRepo(db)
+    policies = UserPolicyRepo(db)
+    usage = UsageRepo(db)
+    uid = users.create(username="bob", password_hash="h", role="user")
+    AgentRepo(db).create(agent_id="b1", user_id=uid, name="b")
+    policies.set(uid, POLICY_TOKEN_QUOTA, "10")
+    start = month_start_ts("Asia/Shanghai")
+    usage.record(agent_id="b1", user_id=uid, input_tokens=50, output_tokens=0, ts=start - 1)
+    assert_token_quota_available(policies, usage, uid, timezone="Asia/Shanghai")
+    usage.record(agent_id="b1", user_id=uid, input_tokens=10, output_tokens=0, ts=start)
+    with pytest.raises(OctopError) as exc:
+        assert_token_quota_available(policies, usage, uid, timezone="Asia/Shanghai")
+    assert exc.value.details["used"] == 10
+
+
+def test_month_start_ts_uses_the_timezone() -> None:
+    # 2026-11-30 20:00 UTC is already 2026-12-01 04:00 in Shanghai.
+    now = 1_796_068_800
+    assert month_start_ts("UTC", now) == 1_793_491_200  # 2026-11-01 00:00 UTC
+    assert month_start_ts("Asia/Shanghai", now) == 1_796_054_400  # 2026-12-01 00:00 +08
+    assert month_start_ts("Not/AZone", now) == month_start_ts("UTC", now)
 
 
 def test_assert_agent_quota_available(db: SqlitePool) -> None:

@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Callable, Mapping, Sequence
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from octop.infra.errors import ErrorCode, OctopError
 from octop.infra.users.preferences import SIDEBAR_NAV_KEYS
@@ -343,12 +346,24 @@ def raise_if_backend_outside_user_root(policy_repo: Any, user_id: int, backend: 
         raise OctopError(code, str(exc)) from exc
 
 
-def assert_token_quota_available(policy_repo: Any, usage_repo: Any, user_id: int) -> None:
-    """Raise when the user's lifetime ``total_tokens`` is at or above quota."""
+def month_start_ts(timezone: str, now: float | None = None) -> int:
+    """Unix time of 00:00 on the 1st of the current month in *timezone* (UTC if unknown)."""
+    try:
+        tz = ZoneInfo(timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        tz = ZoneInfo("UTC")
+    now_dt = datetime.fromtimestamp(time.time() if now is None else now, tz=tz)
+    return int(now_dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0).timestamp())
+
+
+def assert_token_quota_available(
+    policy_repo: Any, usage_repo: Any, user_id: int, *, timezone: str = "UTC"
+) -> None:
+    """Raise when the user's ``total_tokens`` this calendar month (in *timezone*) reach quota."""
     quota = token_quota_of(policy_repo.get(user_id, POLICY_TOKEN_QUOTA))
     if quota is None:
         return
-    used = int(usage_repo.total_tokens_for_user(user_id))
+    used = int(usage_repo.total_tokens_for_user(user_id, since=month_start_ts(timezone)))
     if used >= quota:
         raise OctopError(
             ErrorCode.TOKEN_QUOTA_EXCEEDED,

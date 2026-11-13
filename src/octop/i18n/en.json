@@ -515,7 +515,7 @@
     "INVITE_RATE_LIMITED": "Too many invite attempts. Try again later.",
     "WORKSPACE_ROOT_RESTRICTED": "The selected storage root is outside the allowed directory for this account.",
     "WORKSPACE_ROOT_CONTAINER_UNSUPPORTED": "Allowed storage root cannot be set while GGwork is running in a container.",
-    "TOKEN_QUOTA_EXCEEDED": "This account has reached its token quota. Please contact an administrator to raise the limit ({used}/{quota}).",
+    "TOKEN_QUOTA_EXCEEDED": "This account has used up this month's token quota. It resets on the 1st, or contact an administrator to raise the limit ({used}/{quota}).",
     "EXPERT_ASSIGNMENT_CONFLICT": "Refresh the expert assignment preview to review the current conflicts.",
     "AGENT_QUOTA_EXCEEDED": "This account has reached its expert limit. Please contact an administrator to raise the limit ({used}/{quota}).",
     "CAPTCHA_REQUIRED": "This server requires a captcha token to sign in.",

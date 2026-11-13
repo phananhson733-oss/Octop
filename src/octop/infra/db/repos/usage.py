@@ -491,11 +491,12 @@ class UsageRepo:
             return 0
         return int(row["input_tokens"] or 0)
 
-    def total_tokens_for_user(self, user_id: int) -> int:
-        """Lifetime ``total_tokens`` for one user (all agents and sources)."""
+    def total_tokens_for_user(self, user_id: int, *, since: int = 0) -> int:
+        """``total_tokens`` for one user (all agents and sources) logged at or after *since*."""
         with self._db.connect() as conn:
             row = conn.execute(
-                "SELECT COALESCE(SUM(total_tokens), 0) AS total FROM usage_log WHERE user_id = ?",
-                (user_id,),
+                "SELECT COALESCE(SUM(total_tokens), 0) AS total FROM usage_log"
+                " WHERE user_id = ? AND ts >= ?",
+                (user_id, since),
             ).fetchone()
         return int(row["total"] if row is not None else 0)

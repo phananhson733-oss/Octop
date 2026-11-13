@@ -9,6 +9,7 @@ import pytest
 
 from octop.infra.agents.middleware.token_quota import TokenQuotaMiddleware
 from octop.infra.errors import ErrorCode, OctopError
+from octop.infra.users.resource_policy import month_start_ts
 
 
 def test_token_quota_middleware_rejects_exhausted_user(
@@ -23,14 +24,14 @@ def test_token_quota_middleware_rejects_exhausted_user(
         lambda: {"configurable": {"user": "7"}},
     )
 
-    middleware = TokenQuotaMiddleware(policy_repo=policies, usage_repo=usage)
+    middleware = TokenQuotaMiddleware(policy_repo=policies, usage_repo=usage, timezone="UTC")
     with pytest.raises(OctopError) as exc:
         middleware.before_agent({}, None)
 
     assert exc.value.code is ErrorCode.TOKEN_QUOTA_EXCEEDED
     assert exc.value.details == {"used": 10, "quota": 10}
     policies.get.assert_called_once_with(7, "token_quota")
-    usage.total_tokens_for_user.assert_called_once_with(7)
+    usage.total_tokens_for_user.assert_called_once_with(7, since=month_start_ts("UTC"))
 
 
 def test_token_quota_middleware_allows_unlimited_user(
