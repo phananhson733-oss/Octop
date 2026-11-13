@@ -29,6 +29,9 @@ export interface ProviderModel {
   api_mode?: string;
   /** false: only chats and experts that name this model use it. Not in the form. */
   auto_route?: boolean;
+  /** USD per million input / output tokens, used by monthly spending limits. Not in the form. */
+  input_cost_per_mtok?: number;
+  output_cost_per_mtok?: number;
 }
 
 export function isEmbeddingModel(

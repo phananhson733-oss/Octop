@@ -34,6 +34,7 @@ from octop.infra.users.resource_policy import (
     POLICY_DEFAULT_PUBLISHED_EXPERT,
     POLICY_HIDDEN_EXPERT_TABS,
     POLICY_MAX_AGENTS,
+    POLICY_MONTHLY_BUDGET_USD,
     POLICY_TOKEN_QUOTA,
     POLICY_VISIBLE_NAV,
     POLICY_WORKSPACE_ROOT_DIR,
@@ -45,9 +46,11 @@ from octop.infra.users.resource_policy import (
     normalize_default_published_experts,
     normalize_hidden_expert_tabs,
     normalize_max_agents,
+    normalize_monthly_budget_usd,
     normalize_token_quota,
     normalize_visible_nav,
     normalize_workspace_root_dir,
+    monthly_budget_usd_of,
     token_quota_of,
     visible_nav_of,
     workspace_root_dir_of,
@@ -61,6 +64,7 @@ _KNOWN_POLICIES = {
     POLICY_ALLOWED_PLUGIN_UI,
     POLICY_WORKSPACE_ROOT_DIR,
     POLICY_TOKEN_QUOTA,
+    POLICY_MONTHLY_BUDGET_USD,
     POLICY_MAX_AGENTS,
     POLICY_VISIBLE_NAV,
     POLICY_DEFAULT_KNOWLEDGE_BASES,
@@ -158,6 +162,7 @@ def _policies_from_fields(
     workspace_root_dir: str | None,
     token_quota: int | None,
     max_agents: int | None,
+    monthly_budget_usd: float | None,
     visible_nav: str | None,
     default_knowledge_bases: str | None,
     hidden_expert_tabs: str | None,
@@ -173,6 +178,9 @@ def _policies_from_fields(
     agents = normalize_max_agents(max_agents)
     if agents is not None:
         items.append((POLICY_MAX_AGENTS, str(agents)))
+    budget = normalize_monthly_budget_usd(monthly_budget_usd)
+    if budget is not None:
+        items.append((POLICY_MONTHLY_BUDGET_USD, str(budget)))
     nav = normalize_visible_nav(visible_nav)
     if nav:
         items.append((POLICY_VISIBLE_NAV, nav))
@@ -201,6 +209,7 @@ def _policies_from_items(items: list[PolicyItem]) -> list[tuple[str, str]]:
         workspace_root_dir=by_name.get(POLICY_WORKSPACE_ROOT_DIR),
         token_quota=token_quota_of(by_name.get(POLICY_TOKEN_QUOTA)),
         max_agents=max_agents_of(by_name.get(POLICY_MAX_AGENTS)),
+        monthly_budget_usd=monthly_budget_usd_of(by_name.get(POLICY_MONTHLY_BUDGET_USD)),
         visible_nav=by_name.get(POLICY_VISIBLE_NAV),
         default_knowledge_bases=by_name.get(POLICY_DEFAULT_KNOWLEDGE_BASES),
         hidden_expert_tabs=by_name.get(POLICY_HIDDEN_EXPERT_TABS),
@@ -266,6 +275,7 @@ def public_role(row: UserRoleRow, *, avatar_url: str | None = None) -> dict[str,
         workspace_root_dir = None
         token_quota = None
         max_agents = None
+        monthly_budget_usd = None
         visible_nav = None
         default_knowledge_bases: list[str] = []
         hidden_expert_tabs: list[str] = []
@@ -277,6 +287,7 @@ def public_role(row: UserRoleRow, *, avatar_url: str | None = None) -> dict[str,
         workspace_root_dir = workspace_root_dir_of(row.policy_value(POLICY_WORKSPACE_ROOT_DIR))
         token_quota = token_quota_of(row.policy_value(POLICY_TOKEN_QUOTA))
         max_agents = max_agents_of(row.policy_value(POLICY_MAX_AGENTS))
+        monthly_budget_usd = monthly_budget_usd_of(row.policy_value(POLICY_MONTHLY_BUDGET_USD))
         visible_nav = visible_nav_of(row.policy_value(POLICY_VISIBLE_NAV))
         default_knowledge_bases = default_knowledge_bases_of(
             row.policy_value(POLICY_DEFAULT_KNOWLEDGE_BASES)
@@ -297,6 +308,7 @@ def public_role(row: UserRoleRow, *, avatar_url: str | None = None) -> dict[str,
         "workspace_root_dir": workspace_root_dir,
         "token_quota": token_quota,
         "max_agents": max_agents,
+        "monthly_budget_usd": monthly_budget_usd,
         "visible_nav": visible_nav,
         "default_knowledge_bases": default_knowledge_bases,
         "hidden_expert_tabs": hidden_expert_tabs,

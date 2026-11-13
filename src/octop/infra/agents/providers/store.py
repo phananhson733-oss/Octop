@@ -203,6 +203,28 @@ class ProviderStore:
             ):
                 yield row
 
+    def model_prices(self) -> dict[str, tuple[float, float]]:
+        """USD per million ``(input, output)`` tokens by model id, for models that set a price.
+
+        Read from ``input_cost_per_mtok`` / ``output_cost_per_mtok`` on each provider model,
+        disabled providers included so earlier usage keeps its price.
+        """
+        prices: dict[str, tuple[float, float]] = {}
+        for row in self._provider_repo.list_all():
+            for model in row.get_models():
+                model_id = str(model.get("id") or "")
+                if not model_id or model_id in prices:
+                    continue
+                raw_in: Any = model.get("input_cost_per_mtok")
+                raw_out: Any = model.get("output_cost_per_mtok")
+                if raw_in is None and raw_out is None:
+                    continue
+                try:
+                    prices[model_id] = (float(raw_in or 0), float(raw_out or 0))
+                except (TypeError, ValueError):
+                    continue
+        return prices
+
     def has_usable_providers(self) -> bool:
         """True when at least one enabled provider has credentials and a model."""
         return next(self.iter_usable_rows(), None) is not None

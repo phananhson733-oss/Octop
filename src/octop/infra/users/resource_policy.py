@@ -21,6 +21,8 @@ from octop.infra.utils.host_dirs import (
 
 POLICY_WORKSPACE_ROOT_DIR = "workspace_root_dir"
 POLICY_TOKEN_QUOTA = "token_quota"
+# USD per calendar month, priced from each model's input/output cost per million tokens.
+POLICY_MONTHLY_BUDGET_USD = "monthly_budget_usd"
 POLICY_MAX_AGENTS = "max_agents"
 # Read from the role template on each request. A per-user copy is not consulted.
 POLICY_VISIBLE_NAV = "visible_nav"
@@ -89,6 +91,20 @@ def token_quota_of(raw: Any) -> int | None:
         return None
     try:
         return int(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def monthly_budget_usd_of(raw: Any) -> float | None:
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        return float(raw)
+    if isinstance(raw, Mapping) and "value" not in raw:
+        raw = raw.get(POLICY_MONTHLY_BUDGET_USD)
+    text = active_policy_value(raw)
+    if text is None:
+        return None
+    try:
+        return float(text)
     except (TypeError, ValueError):
         return None
 
@@ -236,6 +252,7 @@ def public_policy_fields(rows: Sequence[Any] | Mapping[str, str] | None) -> dict
     return {
         "workspace_root_dir": workspace_root_dir_of(by_name),
         "token_quota": token_quota_of(by_name.get(POLICY_TOKEN_QUOTA)),
+        "monthly_budget_usd": monthly_budget_usd_of(by_name.get(POLICY_MONTHLY_BUDGET_USD)),
         "max_agents": max_agents_of(by_name.get(POLICY_MAX_AGENTS)),
     }
 
@@ -279,6 +296,15 @@ def normalize_token_quota(raw: int | None) -> int | None:
     if quota < 0:
         raise OctopError(ErrorCode.FORBIDDEN, "token quota must be >= 0", status=400)
     return quota
+
+
+def normalize_monthly_budget_usd(raw: float | None) -> float | None:
+    if raw is None:
+        return None
+    budget = float(raw)
+    if not budget >= 0:
+        raise OctopError(ErrorCode.FORBIDDEN, "monthly budget must be >= 0", status=400)
+    return budget
 
 
 def normalize_max_agents(raw: int | None) -> int | None:
@@ -369,6 +395,36 @@ def assert_token_quota_available(
             ErrorCode.TOKEN_QUOTA_EXCEEDED,
             "token quota exceeded",
             details={"used": used, "quota": quota},
+        )
+
+
+def assert_monthly_budget_available(
+    policy_repo: Any,
+    usage_repo: Any,
+    user_id: int,
+    *,
+    prices: Callable[[], Mapping[str, tuple[float, float]]],
+    timezone: str = "UTC",
+) -> None:
+    """Raise when the user's spend this calendar month (in *timezone*) reaches the budget.
+
+    Spend is input/output tokens times each model's price per million tokens;
+    models without a price count as free.
+    """
+    budget = monthly_budget_usd_of(policy_repo.get(user_id, POLICY_MONTHLY_BUDGET_USD))
+    if budget is None:
+        return
+    price_by_model = prices()
+    spent = 0.0
+    totals = usage_repo.token_totals_by_model_for_user(user_id, since=month_start_ts(timezone))
+    for model, input_tokens, output_tokens in totals:
+        input_price, output_price = price_by_model.get(model, (0.0, 0.0))
+        spent += (input_tokens * input_price + output_tokens * output_price) / 1_000_000
+    if spent >= budget:
+        raise OctopError(
+            ErrorCode.MONTHLY_BUDGET_EXCEEDED,
+            "monthly budget exceeded",
+            details={"used": f"{spent:.2f}", "quota": f"{budget:.2f}"},
         )
 
 

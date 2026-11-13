@@ -69,6 +69,8 @@ describe("ModelListEditor", () => {
           input: ["text", "image"],
           api_mode: "responses",
           auto_route: false,
+          input_cost_per_mtok: 0.12,
+          output_cost_per_mtok: 0.6,
         },
       ],
       onModelsChange,
@@ -83,6 +85,8 @@ describe("ModelListEditor", () => {
         id: "luna",
         api_mode: "responses",
         auto_route: false,
+        input_cost_per_mtok: 0.12,
+        output_cost_per_mtok: 0.6,
       }),
     ]);
   });

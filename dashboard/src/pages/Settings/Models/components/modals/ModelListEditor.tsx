@@ -321,6 +321,10 @@ export function ModelListEditor({
         if (existing.api_mode !== undefined) entry.api_mode = existing.api_mode;
         if (existing.auto_route !== undefined)
           entry.auto_route = existing.auto_route;
+        if (existing.input_cost_per_mtok !== undefined)
+          entry.input_cost_per_mtok = existing.input_cost_per_mtok;
+        if (existing.output_cost_per_mtok !== undefined)
+          entry.output_cost_per_mtok = existing.output_cost_per_mtok;
       }
       onModelsChange(models.map((m) => (m.id === editingModelId ? entry : m)));
       message.success(t("models.modelUpdated", { name: entry.name }));

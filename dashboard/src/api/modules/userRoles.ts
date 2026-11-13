@@ -18,6 +18,8 @@ export interface UserRole {
   workspace_root_dir: string | null;
   token_quota: number | null;
   max_agents: number | null;
+  /** USD each account may spend per calendar month. Null means no limit. */
+  monthly_budget_usd?: number | null;
   /** Sidebar nav keys the role is limited to. Null means no limit. */
   visible_nav: string[] | null;
   /** Shared knowledge bases put on a new account's first expert. */
@@ -138,6 +140,7 @@ export function userRoleDrift(
     workspace_root_dir?: string | null;
     token_quota?: number | null;
     max_agents?: number | null;
+    monthly_budget_usd?: number | null;
   },
   roles: UserRole[],
 ): UserRoleDrift | null {
@@ -166,5 +169,7 @@ export function userRoleDrift(
   if ((row.token_quota ?? null) !== (role.token_quota ?? null))
     return "changed";
   if ((row.max_agents ?? null) !== (role.max_agents ?? null)) return "changed";
+  if ((row.monthly_budget_usd ?? null) !== (role.monthly_budget_usd ?? null))
+    return "changed";
   return null;
 }
