@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import httpx
@@ -12,11 +13,18 @@ from langchain_core.tools import tool
 from octop_harness.config import ModelConfig, ProviderConfig
 from octop_harness.llm import factory
 
+from octop.infra.agents.providers import codex_chat, codex_oauth
 from octop.infra.agents.providers.codex_chat import (
     CodexChatOpenAI,
     build_codex_chat_model,
     install_codex_chat_builder,
 )
+from octop.infra.agents.providers.codex_oauth import (
+    CodexOAuthCredentials,
+    CodexOAuthRefreshError,
+    save_codex_token,
+)
+from octop.infra.utils.paths import PathLayout
 
 CODEX_URL = "https://chatgpt.com/backend-api/codex"
 _PNG_URI = "data:image/png;base64,iVBORw0KGgo="
@@ -288,3 +296,152 @@ def test_installed_builder_preserves_harness_retry_override(monkeypatch, base_ur
         max_retries=0,
     )
     assert model.max_retries == 0
+
+
+def _bearer_backend(seen: list[str]) -> Any:
+    def handle(request: httpx.Request) -> httpx.Response:
+        seen.append(request.headers["authorization"])
+        return httpx.Response(
+            200, content=_text_turn("ok"), headers={"content-type": "text/event-stream"}
+        )
+
+    return handle
+
+
+def _login_model(
+    monkeypatch: pytest.MonkeyPatch,
+    provider_id: str,
+    row_key: str,
+    seen: list[str],
+    *,
+    base_url: str = CODEX_URL,
+) -> CodexChatOpenAI:
+    transport = httpx.MockTransport(_bearer_backend(seen))
+
+    def on_mock_transport(*, model_id: str, base_url: str, api_key: Any, **_: Any) -> Any:
+        return CodexChatOpenAI(
+            model=model_id,
+            base_url=base_url,
+            api_key=api_key,
+            http_client=httpx.Client(transport=transport),
+            http_async_client=httpx.AsyncClient(transport=transport),
+        )
+
+    monkeypatch.setattr(codex_chat, "build_codex_chat_model", on_mock_transport)
+    model = factory.build_chat_model(
+        ProviderConfig(id=provider_id, base_url=base_url, api_key=row_key),
+        ModelConfig(id="gpt-6-astra"),
+    )
+    assert isinstance(model, CodexChatOpenAI)
+    return model
+
+
+@pytest.fixture
+def login_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Any) -> PathLayout:
+    monkeypatch.setattr(factory, "_build_openai", factory._build_openai)
+    monkeypatch.setattr(codex_chat, "_login_paths", None)
+    monkeypatch.setattr(codex_oauth, "_refresh_failed_at", None)
+    paths = PathLayout(tmp_path / ".octop")
+    install_codex_chat_builder(paths)
+    return paths
+
+
+async def test_expired_login_is_refreshed_before_the_request(
+    login_paths: PathLayout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    save_codex_token(
+        login_paths,
+        CodexOAuthCredentials(access="old", refresh="r1", expires=1_000, account_id="acct"),
+    )
+    refreshed: list[str] = []
+
+    def fake_refresh(paths: PathLayout, cred: CodexOAuthCredentials) -> CodexOAuthCredentials:
+        refreshed.append(cred["refresh"])
+        new = CodexOAuthCredentials(
+            access="fresh",
+            refresh="r2",
+            expires=(int(time.time()) + 3600) * 1000,
+            account_id="acct",
+        )
+        save_codex_token(paths, new)
+        return new
+
+    monkeypatch.setattr(codex_oauth, "refresh_codex_token", fake_refresh)
+    seen: list[str] = []
+    model = _login_model(monkeypatch, "openai-codex", "old", seen)
+
+    assert (await model.ainvoke("hi")).text == "ok"
+    assert model.invoke("hi").text == "ok"
+    assert seen == ["Bearer fresh", "Bearer fresh"]
+    assert refreshed == ["r1"]
+
+
+async def test_without_a_usable_login_the_row_key_is_sent(
+    login_paths: PathLayout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[str] = []
+    assert (
+        await _login_model(monkeypatch, "openai-codex", "row-key", seen).ainvoke("hi")
+    ).text == "ok"
+    assert seen == ["Bearer row-key"]
+
+
+async def test_other_codex_providers_keep_their_own_key(
+    login_paths: PathLayout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    save_codex_token(
+        login_paths,
+        CodexOAuthCredentials(
+            access="login", refresh="r", expires=(int(time.time()) + 3600) * 1000, account_id="a"
+        ),
+    )
+    seen: list[str] = []
+    assert (await _login_model(monkeypatch, "my-codex", "own-key", seen).ainvoke("hi")).text == "ok"
+    assert seen == ["Bearer own-key"]
+
+
+async def test_a_relay_named_openai_codex_never_gets_the_login_token(
+    login_paths: PathLayout, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    save_codex_token(
+        login_paths,
+        CodexOAuthCredentials(
+            access="login", refresh="r", expires=(int(time.time()) + 3600) * 1000, account_id="a"
+        ),
+    )
+    seen: list[str] = []
+    relay = "https://relay.example/chatgpt.com/backend-api/codex"
+    model = _login_model(monkeypatch, "openai-codex", "relay-key", seen, base_url=relay)
+    assert (await model.ainvoke("hi")).text == "ok"
+    assert seen == ["Bearer relay-key"]
+
+
+@pytest.mark.parametrize("error", [OSError("dns"), CodexOAuthRefreshError("HTTP 503")])
+def test_failed_early_refresh_keeps_the_unexpired_token(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    monkeypatch.setattr(codex_oauth, "_refresh_failed_at", None)
+    paths = PathLayout(tmp_path / ".octop")
+    soon = (int(time.time()) + 60) * 1000  # inside the refresh window, not yet expired
+    save_codex_token(
+        paths, CodexOAuthCredentials(access="still-good", refresh="r", expires=soon, account_id="a")
+    )
+    attempts: list[str] = []
+
+    def failing(_paths: PathLayout, cred: CodexOAuthCredentials) -> CodexOAuthCredentials:
+        attempts.append(cred["access"])
+        raise error
+
+    monkeypatch.setattr(codex_oauth, "refresh_codex_token", failing)
+    assert codex_oauth.get_valid_access_token(paths) == "still-good"
+    # Within the retry pause nobody waits on another refresh
+    assert codex_oauth.get_valid_access_token(paths) == "still-good"
+    assert attempts == ["still-good"]
+
+    save_codex_token(
+        paths, CodexOAuthCredentials(access="dead", refresh="r", expires=1_000, account_id="a")
+    )
+    assert codex_oauth.get_valid_access_token(paths) is None
+    monkeypatch.setattr(codex_oauth, "_refresh_failed_at", None)
+    assert codex_oauth.get_valid_access_token(paths) is None
+    assert attempts == ["still-good", "dead"]

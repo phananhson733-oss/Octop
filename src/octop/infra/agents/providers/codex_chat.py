@@ -10,12 +10,20 @@ model. Requests here take the shape the backend accepts from the image tool
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 from langchain_openai import ChatOpenAI
 from pydantic import Field
 
+from octop.infra.agents.providers.codex_apply import CODEX_PROVIDER_NAME
+from octop.infra.agents.providers.codex_oauth import CODEX_BASE_URL, get_valid_access_token
+from octop.infra.utils.paths import PathLayout
+
 CODEX_BASE_URL_MARK = "chatgpt.com/backend-api/codex"
+
+# Where the stored ChatGPT login lives; set by ``install_codex_chat_builder``
+_login_paths: PathLayout | None = None
 
 # Codex clients always send instructions; this one stands in when a call has no system prompt
 _FALLBACK_INSTRUCTIONS = "You are a helpful assistant."
@@ -71,11 +79,34 @@ class CodexChatOpenAI(ChatOpenAI):
         return payload
 
 
+def _login_api_key(provider: Any) -> str | Callable[[], str]:
+    """The ``openai-codex`` key as a callable that refreshes the stored login when it expires.
+
+    The access token in the provider row lasts about ten days and nothing else refreshes it,
+    so a fixed key made every ChatGPT-login agent fail with 401 once it ran out. The openai
+    client calls this before each request (off the event loop for async calls).
+    """
+    paths = _login_paths
+    if (
+        paths is None
+        or CODEX_PROVIDER_NAME not in (provider.id, provider.name)
+        # Only ever send the login's token to ChatGPT itself, never to a relay
+        or str(provider.base_url).rstrip("/") != CODEX_BASE_URL
+    ):
+        return str(provider.api_key)
+    stored = str(provider.api_key)
+
+    def current() -> str:
+        return get_valid_access_token(paths) or stored
+
+    return current
+
+
 def build_codex_chat_model(
     *,
     model_id: str,
     base_url: str,
-    api_key: str,
+    api_key: str | Callable[[], str],
     headers: dict[str, str] | None = None,
     max_retries: int | None = None,
 ) -> CodexChatOpenAI:
@@ -87,10 +118,16 @@ def build_codex_chat_model(
     return CodexChatOpenAI(**kwargs)
 
 
-def install_codex_chat_builder() -> None:
-    """Have octop-harness build ChatGPT-login providers with :class:`CodexChatOpenAI`."""
+def install_codex_chat_builder(paths: PathLayout | None = None) -> None:
+    """Have octop-harness build ChatGPT-login providers with :class:`CodexChatOpenAI`.
+
+    With *paths*, the ``openai-codex`` provider reads its token from the stored login there.
+    """
     from octop_harness.llm import factory
 
+    global _login_paths
+    if paths is not None:
+        _login_paths = paths
     original = factory._build_openai
     if getattr(original, "_octop_codex", False):
         return
@@ -101,7 +138,7 @@ def install_codex_chat_builder() -> None:
         instance = build_codex_chat_model(
             model_id=model.id,
             base_url=provider.base_url,
-            api_key=provider.api_key,
+            api_key=_login_api_key(provider),
             headers=provider.headers,
             max_retries=max_retries,
         )
