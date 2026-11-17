@@ -185,17 +185,30 @@ def refresh_codex_token(paths: PathLayout, cred: CodexOAuthCredentials) -> Codex
 _REFRESH_LOCK = threading.Lock()
 
 
+# After a failed refresh, wait this long before trying again; chat calls this per request
+REFRESH_RETRY_AFTER_S = 60
+_refresh_failed_at: float | None = None
+
+
 def get_valid_access_token(paths: PathLayout) -> str | None:
+    global _refresh_failed_at
     with _REFRESH_LOCK:
         cred = load_codex_token(paths)
         if cred is None:
             return None
         if not is_token_valid(cred):
+            # The old token works until it really expires; refreshing starts a few minutes early
+            unexpired = cred["access"] if time.time() * 1000 < cred["expires"] else None
+            failed_at = _refresh_failed_at
+            if failed_at is not None and time.monotonic() - failed_at < REFRESH_RETRY_AFTER_S:
+                return unexpired
             try:
                 cred = refresh_codex_token(paths, cred)
-            except CodexOAuthRefreshError as exc:
+            except (CodexOAuthRefreshError, OSError, KeyError, ValueError) as exc:
                 logger.warning("Codex OAuth refresh failed: %s", exc)
-                return None
+                _refresh_failed_at = time.monotonic()
+                return unexpired
+            _refresh_failed_at = None
         return cred["access"]
 
 

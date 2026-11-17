@@ -614,7 +614,7 @@ class AgentManager:
 
         self._tool_guard_rules.ensure_seeded()
         # Before any model is built: ChatGPT-login models need the Responses API
-        install_codex_chat_builder()
+        install_codex_chat_builder(self._paths)
         providers = self._providers.build_harness_configs()
         self._harness_manager = HarnessAgentManager(
             providers=providers,
